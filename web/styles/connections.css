@@ -1,0 +1,82 @@
+/* Connections: health summary, what needs attention, then tiles by kind. */
+.k-ok { --c: var(--green); }
+.k-update { --c: var(--update); }
+.k-warn { --c: var(--amber); }
+.k-missing { --c: var(--red); }
+.k-off { --c: var(--gray); }
+
+/* Brand marks: a colored tile with the logo in white */
+.brand { position: relative; width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 11px; color: #fff;
+  background: linear-gradient(145deg, rgba(255,255,255,.24), rgba(255,255,255,0) 55%), var(--brand);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 8px 22px color-mix(in srgb, var(--brand) 28%, transparent); }
+.brand.sm { width: 32px; height: 32px; border-radius: 9px; }
+.brand.lg { width: 52px; height: 52px; border-radius: 14px; }
+.brand img, .brand svg { width: 52%; height: 52%; }
+.brand img { filter: brightness(0) invert(1); }
+
+/* Health summary */
+.health { position: relative; display: flex; align-items: center; gap: 16px; padding: 18px 20px; border-radius: var(--r-lg); overflow: hidden;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--c) 12%, transparent), transparent 60%), var(--glass);
+  border: 1px solid color-mix(in srgb, var(--c) 22%, var(--stroke)); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+.health-mark { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--c);
+  background: color-mix(in srgb, var(--c) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 35%, transparent), 0 0 28px color-mix(in srgb, var(--c) 30%, transparent); }
+.health-mark svg { width: 20px; height: 20px; }
+.health-text { flex: 1; min-width: 0; }
+.health-title { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.health-sub { margin-top: 2px; font-size: 12.5px; color: var(--text-3); }
+.health-pills { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@container (max-width: 640px) { .health { flex-wrap: wrap; } .health-pills { justify-content: flex-start; } }
+
+/* Needs attention */
+.attn { display: grid; gap: 8px; }
+.attn-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: var(--r); cursor: pointer;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 8%, transparent), transparent 40%), var(--glass);
+  border: 1px solid color-mix(in srgb, var(--c) 20%, var(--stroke)); transition: background .15s, border-color .15s; }
+.attn-row:hover { border-color: color-mix(in srgb, var(--c) 40%, var(--stroke)); }
+.attn-main { flex: 1; min-width: 0; }
+.attn-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 500; }
+.attn-ver { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.attn-fix { margin-top: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.attn-fix code { padding: 3px 7px; border-radius: 6px; font-size: 12px; color: var(--text); background: rgba(0,0,0,.35); border: 1px solid var(--stroke); }
+.state-pill { flex: none; margin-top: 4px; padding: 2px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 500; color: var(--c);
+  background: color-mix(in srgb, var(--c) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 28%, transparent); white-space: nowrap; }
+.copy { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; color: var(--text-2);
+  background: var(--glass); border: 1px solid var(--stroke-2); }
+.copy:hover { color: var(--text); background: var(--glass-2); }
+.ver { padding: 2px 7px; border-radius: 6px; font-size: 12px; color: var(--text-2); background: rgba(255,255,255,.04); border: 1px solid var(--stroke); font-variant-numeric: tabular-nums; }
+.ver.new { color: var(--accent-text); background: rgba(124,108,255,.1); border-color: rgba(124,108,255,.35); }
+.arrow { color: var(--text-3); }
+
+/* Tiles */
+.sec-name { margin-left: 2px; color: var(--text-2); font-weight: 500; }
+.sec-name:empty { display: none; }
+.sec-name::before { content: '·'; margin: 0 7px 0 0; color: var(--text-3); }
+.kind + .kind { margin-top: 16px; }
+.kind-head { margin: 0 2px 8px; font-size: 12px; font-weight: 500; color: var(--text-2); }
+.tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; padding: 14px; border-radius: var(--r-lg);
+  text-align: left; color: var(--text); background: var(--glass); border: 1px solid var(--stroke); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04); transition: background .15s, border-color .15s, box-shadow .2s, transform .15s; }
+.tile:hover { background: var(--glass-2); border-color: var(--stroke-2); transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgba(0,0,0,.35), 0 0 0 1px color-mix(in srgb, var(--c) 14%, transparent); }
+.tile-top { display: flex; align-items: flex-start; justify-content: space-between; align-self: stretch; margin-bottom: 9px; }
+.tile-dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+.tile-name { font-weight: 600; }
+.tile-detail { align-self: stretch; font-size: 12px; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tile-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 10px; }
+.tile-state { font-size: 11.5px; font-weight: 500; color: var(--c); }
+.k-ok .tile-state { color: var(--text-3); }
+
+/* A connection in the sheet */
+.cd-head { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.cd-title { min-width: 0; }
+.cd-title .s-title { margin: 0 0 2px; }
+.cd-rows { margin-top: 18px; border-radius: var(--r); border: 1px solid var(--stroke); overflow: hidden; }
+.kv-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; font-size: 13px; }
+.kv-row + .kv-row { border-top: 1px solid var(--stroke); }
+.kv-row span:first-child { color: var(--text-3); }
+.cd-fix { margin-top: 16px; padding: 12px 13px; border-radius: var(--r); background: color-mix(in srgb, var(--c, var(--accent)) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
+.cd-fix small { display: block; font-size: 11px; font-weight: 600; color: var(--c); letter-spacing: .02em; }
+.cd-fix .attn-fix { margin-top: 6px; }

@@ -1,0 +1,36 @@
+// Every call to the Rocco server (rocco/server/http.ps1). With ?demo in the address, src/demo.js answers instead.
+import { state } from './state.js';
+import * as demo from './demo.js';
+
+export const DEMO = new URLSearchParams(location.search).has('demo');
+
+const withProject = (path, extra = '') => `${path}?p=${encodeURIComponent(state.project)}${extra}`;
+
+async function request(path, options) {
+  const res = await fetch(path, { cache: 'no-store', ...options });
+  if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  return res;
+}
+const getJson = async path => (await request(path)).json();
+// Writes carry X-Rocco: a page on another site can't add it without a preflight the server never answers.
+const post = async (path, body, type = 'application/json') => (await request(path, {
+  method: 'POST',
+  headers: { 'Content-Type': type, 'X-Rocco': '1' },
+  body: type === 'application/json' ? JSON.stringify(body || {}) : body,
+})).json();
+
+export const api = {
+  projects: () => DEMO ? demo.projects() : getJson('/api/projects'),
+  // The raw text, so the caller can skip work when nothing changed.
+  state: async () => DEMO ? demo.snapshot() : (await request(withProject('/api/state'))).text(),
+  me: () => DEMO ? demo.me() : getJson('/api/me'),
+  connections: force => DEMO ? demo.connections() : getJson(withProject('/api/connections', force ? '&refresh=1' : '')),
+  history: () => DEMO ? demo.history() : getJson(withProject('/api/history')),
+  note: text => DEMO ? demo.note(text) : post(withProject('/api/note'), { text }),
+  shot: (id, file) => DEMO ? demo.shot(id, file) : post(withProject(`/api/tasks/${id}/shot`), file, file.type),
+  act: (id, action, text) => DEMO ? demo.act(id, action, text) : post(withProject(`/api/tasks/${id}/${action}`), { text }),
+  send: () => DEMO ? demo.send() : post(withProject('/api/send')),
+  newProject: details => DEMO ? demo.newProject() : post('/api/projects/new', details),
+  job: id => getJson(`/api/jobs/${id}`),
+  file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
+};
