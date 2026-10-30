@@ -36,6 +36,16 @@
 a.hash:hover { color: var(--accent-text); }
 .unpushed { padding: 0 6px; border-radius: 5px; font-size: 11px; color: var(--amber); background: rgba(251,191,36,.1); border: 1px solid rgba(251,191,36,.25); }
 .cm-time { flex: none; margin-top: 2px; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.cm.is-live .cm-node { border-color: var(--green); background: var(--green); box-shadow: 0 0 12px color-mix(in srgb, var(--green) 60%, transparent); }
+.cm.marked { background: rgba(251,191,36,.04); }
+.rel-chip { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 500; line-height: 19px; vertical-align: 1px;
+  color: var(--cyan); background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.25); }
+.rel-chip.is-live { color: var(--green); background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.35); box-shadow: 0 0 12px rgba(52,211,153,.18); }
+.mark { flex: none; width: 24px; height: 24px; margin-top: -2px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--text-3); opacity: 0; transition: opacity .15s; }
+.cm:hover .mark, .mark:focus-visible, .mark.on { opacity: 1; }
+.mark:hover { color: var(--text); background: var(--glass-2); }
+.mark.on { color: var(--amber); }
+.mark.on svg { fill: currentColor; }
 .br-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: 6px; font-family: var(--mono); font-size: 12px;
   color: var(--violet); background: rgba(167,139,250,.1); border: 1px solid rgba(167,139,250,.25); vertical-align: 1px; }
 

@@ -16,6 +16,7 @@ $Mime = @{
 	'.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
 	'.json' = 'application/json; charset=utf-8'; '.svg' = 'image/svg+xml'; '.ico' = 'image/x-icon'; '.woff2' = 'font/woff2'
 	'.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.gif' = 'image/gif'; '.webp' = 'image/webp'
+	'.mp3' = 'audio/mpeg'; '.ogg' = 'audio/ogg'; '.wav' = 'audio/wav'; '.m4a' = 'audio/mp4'
 }
 $ImageExt = @{ 'image/png' = '.png'; 'image/jpeg' = '.jpg'; 'image/gif' = '.gif'; 'image/webp' = '.webp' }
 
@@ -54,7 +55,9 @@ function Invoke-Request($ctx) {
 		if ($path -eq '/api/state') { Send-Json $ctx (Get-State $req.QueryString['p']); return }
 		if ($path -eq '/api/connections') { Send-Json $ctx (Get-Connections ($req.QueryString['refresh'] -eq '1')); return }
 		if ($path -eq '/api/history') { Send-Json $ctx (Get-History); return }
-		if ($path -match '^/files/(T-\d+)/([\w-]+\.(png|jpe?g|gif|webp))$') {
+		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Read-Task $Matches[1])); return }
+		# A task's screenshot or audio option.
+		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a))$' -and $Matches[2] -notmatch '\.\.') {
 			$file = Join-Path (Join-Path $TasksDir $Matches[1]) $Matches[2]
 			if (Test-Path -LiteralPath $file -PathType Leaf) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
 		}
@@ -67,13 +70,27 @@ function Invoke-Request($ctx) {
 		$body = Read-Json $req
 		Send-Json $ctx @{ job = (Start-NewProject ([string]$body.name) ([string]$body.code) ([string]$body.repo)) }; return
 	}
+	# The user's note goes straight to the queue, for the conductor to plan.
 	if ($path -eq '/api/note') {
-		$text = [string](Read-Json $req).text
+		$body = Read-Json $req
+		$text = [string]$body.text
+		$type = if ([string]$body.type -in $Types) { [string]$body.type } else { '' }
 		$title = if ($text) { ($text -split "`r?`n")[0] } else { 'Screenshot' }
 		if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
-		Send-Json $ctx @{ id = (New-Task $title $text 'inbox' 'note').id }; return
+		$t = New-Task $title $text 'queued' 'note' $type
+		Send-ToConductor $t 'plan'
+		Save-Task $t
+		Send-Json $ctx @{ id = $t.id }; return
 	}
 	if ($path -eq '/api/send') { Send-Json $ctx @{ sent = (Send-Inbox) }; return }
+	if ($path -eq '/api/order') {
+		$ids = @((Read-Json $req).ids | Where-Object { "$_" -match '^T-\d+$' })
+		Set-QueueOrder $ids
+		Send-Json $ctx @{ ok = $true }; return
+	}
+	if ($path -eq '/api/history/bookmark') {
+		Send-Json $ctx @{ bookmarked = (Switch-Bookmark ([string](Read-Json $req).hash)) }; return
+	}
 	if ($path -match '^/api/tasks/(T-\d+)/shot$') {
 		$id = $Matches[1]
 		$ext = $ImageExt[($req.ContentType -split ';')[0].Trim().ToLower()]
@@ -86,7 +103,7 @@ function Invoke-Request($ctx) {
 		Save-Task $t
 		Send-Json $ctx @{ name = $name }; return
 	}
-	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|remove)$') {
+	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise)$') {
 		$id, $action = $Matches[1], $Matches[2]
 		Invoke-TaskAction $id $action ([string](Read-Json $req).text)
 		Send-Json $ctx @{ ok = $true }; return

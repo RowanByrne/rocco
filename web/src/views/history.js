@@ -5,6 +5,7 @@ import { $, esc } from '../lib/dom.js';
 import { agoText, hhmm, isToday } from '../lib/format.js';
 import { icon } from '../lib/icons.js';
 import { api } from '../api.js';
+import { toast } from '../ui/toast.js';
 import { openTask } from './workboard.js';
 
 const EVENT_ICON = { commit: icon.commit, merge: icon.merge, switch: icon.branch, refresh: icon.sync, pull: icon.down, reset: icon.alert, other: icon.commit };
@@ -37,9 +38,12 @@ const dayLabel = iso => {
 function commitHTML(c, repo) {
   const subject = c.merge && c.branch ? `Merged <span class="br-chip">${icon.branch}${esc(c.branch)}</span>` : esc(c.subject);
   const hash = repo ? `<a class="hash" href="${esc(repo)}/commit/${esc(c.full)}" target="_blank" rel="noreferrer">${esc(c.hash)}</a>` : `<span class="hash">${esc(c.hash)}</span>`;
-  return `<div class="cm${c.merge ? ' merge' : ''}"><span class="cm-node"></span><div class="cm-main"><div class="cm-subject">${subject}</div>`
+  // A published build gets its tag; the newest one is what players have now.
+  const release = c.release ? `<span class="rel-chip${c.live ? ' is-live' : ''}" title="${c.live ? 'The build players have now' : 'Published to players'}">${icon.rocket}${c.live ? 'Live' : esc(c.release.replace(/^release\//, ''))}</span>` : '';
+  const mark = `<button class="mark${c.bookmarked ? ' on' : ''}" data-mark="${esc(c.full)}" title="${c.bookmarked ? 'Remove bookmark' : 'Bookmark'}" aria-pressed="${!!c.bookmarked}">${icon.bookmark}</button>`;
+  return `<div class="cm${c.merge ? ' merge' : ''}${c.live ? ' is-live' : ''}${c.bookmarked ? ' marked' : ''}"><span class="cm-node"></span><div class="cm-main"><div class="cm-subject">${subject}${release}</div>`
     + `<div class="cm-meta"><span class="who${c.claude ? ' claude' : ''}">${c.claude ? 'Claude' : esc(c.author)}</span>${hash}`
-    + `${c.pushed ? '' : '<span class="unpushed">Not pushed</span>'}</div></div><span class="cm-time">${hhmm(c.at)}</span></div>`;
+    + `${c.pushed ? '' : '<span class="unpushed">Not pushed</span>'}</div></div>${mark}<span class="cm-time">${hhmm(c.at)}</span></div>`;
 }
 
 function mainHTML(h) {
@@ -120,7 +124,9 @@ export function renderHistory() {
   }
   const today = h.main.commits.filter(c => isToday(c.at));
   const busy = h.lanes.filter(l => laneState(l).active).length;
-  $('#histSub').textContent = h.main.unpushed ? `${h.main.unpushed} commit${h.main.unpushed === 1 ? '' : 's'} on main not pushed` : (h.main.remote ? 'Main is pushed to GitHub' : 'Main has no GitHub copy yet');
+  const live = h.main.live ? `Live on Roblox: ${h.main.live.tag.replace(/^release\//, '')}` : 'Not published yet';
+  const pushed = h.main.unpushed ? `${h.main.unpushed} commit${h.main.unpushed === 1 ? '' : 's'} on main not pushed` : (h.main.remote ? 'Main is pushed to GitHub' : 'Main has no GitHub copy yet');
+  $('#histSub').textContent = `${live} · ${pushed}`;
   const stat = (value, label, color = 'var(--text)') => `<div class="stat-tile" style="--c:${color}"><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>`;
   $('#histBody').innerHTML = `<div class="stat-row">${stat(today.length, 'Commits today')}${stat(today.filter(c => c.merge).length, 'Merged today', 'var(--violet)')}`
     + `${stat(h.branches.filter(b => b.ahead > 0).length, 'Open branches', 'var(--cyan)')}${stat(`${busy}<span>/${h.lanes.length}</span>`, 'Lanes busy', 'var(--blue)')}</div>`
@@ -129,7 +135,16 @@ export function renderHistory() {
 }
 
 export function initHistory() {
-  $('#histBody').addEventListener('click', e => {
+  $('#histBody').addEventListener('click', async e => {
+    const mark = e.target.closest('[data-mark]');
+    if (mark) {
+      const on = !mark.classList.contains('on');
+      mark.classList.toggle('on', on);
+      mark.closest('.cm').classList.toggle('marked', on);
+      try { await api.bookmark(mark.dataset.mark); } catch { toast('Couldn\'t save the bookmark', 'var(--red)'); }
+      loadHistory();
+      return;
+    }
     const task = e.target.closest('[data-task]');
     if (task) openTask(task.dataset.task);
   });

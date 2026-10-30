@@ -84,11 +84,12 @@
 .kv span:last-child { color: var(--text-2); max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Main area */
-.main { min-width: 0; overflow: auto; container-type: inline-size; }
+.main { min-width: 0; overflow-x: hidden; overflow-y: auto; container-type: inline-size; }
 .view { max-width: 1240px; margin: 0 auto; padding: 22px 28px 48px; }
 .head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; min-height: 32px; }
-.head h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.015em; }
-.head .sub { color: var(--text-3); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; }
+.head h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.015em; white-space: nowrap; }
+.head .sub { min-width: 0; color: var(--text-3); font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.head .ghost { flex: none; }
 .head .sp { flex: 1; }
 .section { display: flex; align-items: center; gap: 10px; margin: 24px 2px 10px; font-size: 12px; font-weight: 500; color: var(--text-3); }
 .section::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--stroke-2), transparent); }

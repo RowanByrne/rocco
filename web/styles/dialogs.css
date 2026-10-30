@@ -1,0 +1,25 @@
+/* Drawing on a screenshot, and the command palette. */
+.markup-card { width: auto; max-width: calc(100vw - 32px); padding: 14px; }
+.markup-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+.markup-tools .tool.on { color: var(--text); background: var(--glass-3); box-shadow: inset 0 0 0 1px var(--stroke-2); }
+.tool-sep { width: 1px; height: 20px; margin: 0 6px; background: var(--stroke-2); }
+.swatch { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; background: var(--sw); box-shadow: 0 0 0 1px rgba(255,255,255,.2); }
+.swatch.on { border-color: #0b0c12; box-shadow: 0 0 0 2px var(--sw); }
+.markup-stage { display: grid; place-items: center; border-radius: 10px; overflow: hidden; background: #000; }
+.markup-stage canvas { display: block; max-width: 100%; cursor: crosshair; touch-action: none; }
+
+.palette-modal { align-items: start; padding-top: 14vh; }
+.palette { width: min(600px, 100%); border-radius: 16px; overflow: hidden; background: rgba(18,19,27,.96);
+  -webkit-backdrop-filter: blur(26px) saturate(150%); backdrop-filter: blur(26px) saturate(150%); border: 1px solid var(--stroke-2);
+  box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06); transform: translateY(-6px); transition: transform .18s; }
+.modal.open .palette { transform: none; }
+.palette-search { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--stroke); color: var(--text-3); }
+.palette-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font-size: 15px; color: var(--text); }
+.palette-search input::placeholder { color: var(--text-3); }
+.palette-list { max-height: 52vh; overflow: auto; padding: 6px; }
+.pl-group { padding: 8px 10px 4px; font-size: 11px; font-weight: 500; color: var(--text-3); }
+.pl-item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--text-2); }
+.pl-item > span:first-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-item.on { background: var(--glass-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--stroke); }
+.pl-hint { flex: none; font-size: 12px; color: var(--text-3); }
+.pl-empty { padding: 18px; text-align: center; color: var(--text-3); }

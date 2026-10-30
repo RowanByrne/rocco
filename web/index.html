@@ -15,6 +15,8 @@
 <link rel="stylesheet" href="styles/workboard.css">
 <link rel="stylesheet" href="styles/connections.css">
 <link rel="stylesheet" href="styles/history.css">
+<link rel="stylesheet" href="styles/settings.css">
+<link rel="stylesheet" href="styles/dialogs.css">
 <script type="module" src="src/main.js"></script>
 </head>
 <body>
@@ -53,6 +55,10 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg>
         <span class="label">Connections</span><span class="badge warn" id="connBadge" hidden></span>
       </a>
+      <a href="#settings" data-view="settings" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+        <span class="label">Settings</span>
+      </a>
     </nav>
     <div class="side-foot">
       <div class="stat"><span>Main</span><b id="mainStat"><span class="live" id="liveDot"></span><span id="mainAgo"></span></b></div>
@@ -76,20 +82,30 @@
           <span id="approvedText"></span>
         </button>
       </div>
-      <form class="composer" id="composer" autocomplete="off">
-        <div class="composer-main">
-          <textarea id="noteText" rows="1" placeholder="Add a note, or paste a screenshot" aria-label="New note"></textarea>
+      <div class="ask">
+        <form class="composer" id="composer" autocomplete="off">
           <div class="drafts" id="drafts"></div>
-        </div>
-        <span class="kbd" title="Press N to write a note">N</span>
-        <button class="primary" type="submit">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add
-        </button>
-      </form>
-      <div class="section">Needs you</div>
-      <div class="cols top" id="needs"></div>
-      <div class="section">In progress</div>
-      <div class="cols low" id="pipe"></div>
+          <textarea id="noteText" rows="1" placeholder="What did you notice?" aria-label="New note"></textarea>
+          <div class="composer-row">
+            <button type="button" class="tool" id="attachBtn" title="Attach screenshots" aria-label="Attach screenshots">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.5l-8.4 8.4a5 5 0 0 1-7.1-7.1l8.8-8.8a3.3 3.3 0 0 1 4.7 4.7l-8.8 8.8a1.7 1.7 0 0 1-2.4-2.4l8.1-8.1"/></svg>
+            </button>
+            <span id="captureSlot"></span>
+            <span class="types" id="types" role="radiogroup" aria-label="Note type"></span>
+            <span class="sp"></span>
+            <span id="voiceSlot"></span>
+            <button class="send" type="submit" title="Add to Up next" aria-label="Add to Up next">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
+            </button>
+          </div>
+        </form>
+        <input type="file" id="attachInput" accept="image/*" multiple hidden>
+        <div class="plans" id="plans" hidden></div>
+        <div class="inbox" id="inbox" hidden></div>
+      </div>
+      <div class="features" id="features" hidden></div>
+      <div class="board" id="board"></div>
+      <div class="queue" id="queue"></div>
     </section>
 
     <section class="view" data-view="metrics" hidden>
@@ -110,6 +126,11 @@
         </a>
       </div>
       <div id="histBody"></div>
+    </section>
+
+    <section class="view" data-view="settings" hidden>
+      <div class="head"><h1>Settings</h1><span class="sub">Kept in this browser</span></div>
+      <div id="setBody"></div>
     </section>
 
     <section class="view" data-view="connections" hidden>
@@ -153,7 +174,23 @@
     <div class="m-actions"><button type="button" class="btn" id="npCancel">Cancel</button><button type="submit" class="btn accent" id="npCreate">Create project</button></div>
   </form>
 </div>
-<div class="toast" id="toast" role="status" aria-live="polite"><i></i><span></span></div>
+<div class="modal" id="markupModal" role="dialog" aria-label="Draw on the screenshot">
+  <div class="modal-card markup-card">
+    <div class="markup-tools" id="markupTools"></div>
+    <div class="markup-stage"><canvas id="markupCanvas"></canvas></div>
+    <div class="m-actions"><button type="button" class="btn" data-markup="cancel">Cancel</button><button type="button" class="btn accent" data-markup="save">Save</button></div>
+  </div>
+</div>
+<div class="modal palette-modal" id="paletteModal" role="dialog" aria-label="Command palette">
+  <div class="palette">
+    <div class="palette-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="paletteInput" placeholder="Search tasks, views, projects and actions" autocomplete="off" aria-label="Search">
+    </div>
+    <div class="palette-list" id="paletteList" role="listbox"></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"><i></i><span></span><button class="toast-action" hidden></button></div>
 
 <script>
   // Opened from disk, the modules can't load: say how to start Rocco instead.

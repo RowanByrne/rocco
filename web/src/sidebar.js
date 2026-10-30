@@ -66,7 +66,8 @@ function meMenuHTML() {
     + `<span class="ws-sub">${esc(m.login ? '@' + m.login : m.email || '')}</span></span></div><div class="menu-sep"></div>`
     + row('Claude', m.claude) + row('Git email', m.email) + row('This PC', m.pc)
     + row('Lanes here', state.meta.lanes.count ? `${state.meta.lanes.count} for this project` : '')
-    + `<div class="menu-sep"></div><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button>`;
+    + `<div class="menu-sep"></div><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button>`
+    + `<button class="menu-item" data-goto="settings" role="menuitem">${icon.sliders}<span class="mi-text">Settings</span></button>`;
 }
 
 // ---- Projects ----
@@ -80,13 +81,16 @@ function projectMenuHTML() {
 }
 
 export function initSidebar() {
+  // Narrow windows always get the icon rail; wide ones keep the user's choice.
   const app = $('#app');
-  const saved = storage.get('rocco.sidebar');
-  app.classList.toggle('collapsed', saved ? saved === 'collapsed' : innerWidth < 600);
+  const narrow = matchMedia('(max-width: 760px)');
+  const fit = () => app.classList.toggle('collapsed', narrow.matches || storage.get('rocco.sidebar') === 'collapsed');
+  fit();
+  narrow.addEventListener('change', fit);
   $('#collapse').addEventListener('click', () => {
     closeMenus();
     app.classList.toggle('collapsed');
-    storage.set('rocco.sidebar', app.classList.contains('collapsed') ? 'collapsed' : 'open');
+    if (!narrow.matches) storage.set('rocco.sidebar', app.classList.contains('collapsed') ? 'collapsed' : 'open');
   });
 
   $$('.nav a').forEach(a => a.addEventListener('click', e => { e.preventDefault(); go(a.dataset.view); }));

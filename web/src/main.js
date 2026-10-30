@@ -4,14 +4,18 @@ import { storage } from './lib/storage.js';
 import { DEMO } from './api.js';
 import * as demo from './demo.js';
 import * as sync from './sync.js';
+import { register } from './hotkeys.js';
 import { loadProjects } from './projects.js';
 import { showView, go, syncUrl } from './router.js';
 import { initSidebar, renderSidebar, renderMe, loadMe } from './sidebar.js';
-import { initWorkboard, renderWorkboard } from './views/workboard.js';
-import { initComposer, focusComposer } from './views/composer.js';
+import { initWorkboard, renderWorkboard, openTask } from './views/workboard.js';
+import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType } from './views/composer.js';
 import { initConnections, renderConnections, loadConnections } from './views/connections.js';
 import { initHistory, renderHistory, loadHistory } from './views/history.js';
+import { initSettings, renderSettings } from './views/settings.js';
 import { initNewProject, newProjectOpen, closeNewProject } from './dialogs/new-project.js';
+import { openPalette, paletteOpen, closePalette } from './dialogs/palette.js';
+import { markupOpen, closeMarkup } from './dialogs/markup.js';
 import { closeSheet, openSheetKey } from './ui/sheet.js';
 import { closeMenus, menuOpen } from './ui/menu.js';
 
@@ -29,11 +33,14 @@ on('sheet-closed', renderWorkboard);
 on('me', () => { renderMe(); renderConnections(); });
 on('connections', renderConnections);
 on('history', renderHistory);
+on('settings', () => { renderSettings(); renderWorkboard(); });
+on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
 on('view', () => {
   closeSheet();
   closeMenus();
   if (state.view === 'connections') loadConnections(false);
   if (state.view === 'history') { renderHistory(); loadHistory(); }
+  if (state.view === 'settings') renderSettings();
 });
 on('project', () => {
   closeSheet();
@@ -49,20 +56,22 @@ on('project', () => {
   loadHistory();
 });
 
-// Esc closes the top-most thing; N starts a note from anywhere.
+// What each hotkey does (the keys themselves are in hotkeys.js, and the user's own in Settings).
+register('note', focusComposer);
+register('voice', toggleVoiceNote);
+register('capture', captureStudio);
+register('type', cycleType);
+register('palette', openPalette);
+for (const view of ['workboard', 'history', 'connections', 'settings']) register(`go-${view}`, () => go(view));
+
+// Esc closes the top-most thing.
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    if (newProjectOpen()) closeNewProject();
-    else if (menuOpen()) closeMenus();
-    else closeSheet();
-    return;
-  }
-  const typing = e.target.matches?.('textarea, input');
-  if (!typing && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !newProjectOpen()) {
-    e.preventDefault();
-    if (state.view !== 'workboard') go('workboard');
-    focusComposer();
-  }
+  if (e.key !== 'Escape') return;
+  if (markupOpen()) closeMarkup();
+  else if (paletteOpen()) closePalette();
+  else if (newProjectOpen()) closeNewProject();
+  else if (menuOpen()) closeMenus();
+  else closeSheet();
 });
 
 (async () => {
@@ -72,6 +81,7 @@ document.addEventListener('keydown', e => {
   initComposer();
   initConnections();
   initHistory();
+  initSettings();
   initNewProject();
   showView(location.hash.slice(1));
   syncUrl();

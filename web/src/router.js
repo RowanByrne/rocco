@@ -3,7 +3,7 @@ import { state, emit } from './state.js';
 import { $$ } from './lib/dom.js';
 import { DEMO } from './api.js';
 
-const VIEWS = ['workboard', 'metrics', 'history', 'connections'];
+const VIEWS = ['workboard', 'metrics', 'history', 'connections', 'settings'];
 
 export function showView(name) {
   state.view = VIEWS.includes(name) ? name : 'workboard';

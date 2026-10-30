@@ -22,10 +22,63 @@ function Get-Worktrees {
 	}
 }
 
+# Builds published to players: each release/<date> tag (RELEASING.md), newest first. The newest is live.
+function Get-Releases {
+	$tags = @(Invoke-Git $RepoDir for-each-ref refs/tags/release --sort=-creatordate '--format=%(refname:short)%09%(*objectname)%09%(objectname)')
+	foreach ($line in $tags) {
+		$f = "$line" -split "`t"
+		if ($f.Count -lt 3) { continue }
+		# An annotated tag points at its commit through *objectname; a lightweight one points at it directly.
+		[pscustomobject]@{ tag = $f[0]; commit = $(if ($f[1]) { $f[1] } else { $f[2] }) }
+	}
+}
+
+# Commits the user bookmarked, kept with the project's Rocco data (outside git).
+function Get-MarksPath { Join-Path $Root 'rocco\history.json' }
+function Get-Bookmarks {
+	$path = Get-MarksPath
+	if (Test-Path $path) { @(([IO.File]::ReadAllText($path, $Utf8) | ConvertFrom-Json).bookmarks | Where-Object { $_ }) } else { @() }
+}
+function Switch-Bookmark([string]$hash) {
+	if ($hash -notmatch '^[0-9a-f]{7,40}$') { throw "Not a commit: '$hash'." }
+	$marks = @(Get-Bookmarks)
+	$on = $marks -notcontains $hash
+	$marks = if ($on) { @($marks) + $hash } else { @($marks | Where-Object { $_ -ne $hash }) }
+	New-Item -ItemType Directory -Force (Split-Path (Get-MarksPath)) | Out-Null
+	[IO.File]::WriteAllText((Get-MarksPath), (ConvertTo-Json -InputObject ([pscustomobject]@{ bookmarks = @($marks) }) -Depth 3), $Utf8)
+	$script:HistoryCache = @{}
+	$on
+}
+
+# What a task changed: its merge into main if it's merged, else its branch against main.
+function Get-TaskChanges($t) {
+	$branch = "$($t.branch)"
+	$repo = Get-RepoUrl
+	$none = [pscustomobject]@{ source = ''; url = ''; files = @() }
+	if (-not $branch) { return $none }
+	$merge = "$(Invoke-Git $RepoDir log main --merges -1 --format=%H --fixed-strings "--grep=Merge branch '$branch'")"
+	if ($merge) { $range = @("$merge^1", $merge); $source = 'merged'; $url = $(if ($repo) { "$repo/commit/$merge" } else { '' }) }
+	else {
+		$ref = if (Invoke-Git $RepoDir rev-parse --verify --quiet "refs/heads/$branch") { $branch } elseif (Invoke-Git $RepoDir rev-parse --verify --quiet "refs/remotes/origin/$branch") { "origin/$branch" } else { '' }
+		if (-not $ref) { return $none }
+		$range = @("main...$ref"); $source = 'branch'; $url = $(if ($repo) { "$repo/compare/main...$branch" } else { '' })
+	}
+	$files = foreach ($line in @(Invoke-Git $RepoDir diff --numstat @range)) {
+		$f = "$line" -split "`t"
+		if ($f.Count -ge 3) { [pscustomobject]@{ path = $f[2]; added = $(if ($f[0] -eq '-') { 0 } else { [int]$f[0] }); removed = $(if ($f[1] -eq '-') { 0 } else { [int]$f[1] }) } }
+	}
+	[pscustomobject]@{ source = $source; url = $url; files = @($files) }
+}
+
 function Get-MainHistory {
 	$hasRemote = [bool](Invoke-Git $RepoDir rev-parse --verify --quiet origin/main)
 	$unpushed = @{}
 	if ($hasRemote) { foreach ($hash in @(Invoke-Git $RepoDir rev-list origin/main..main)) { $unpushed[$hash] = $true } }
+	$releases = @(Get-Releases)
+	$releaseOf = @{}
+	foreach ($r in $releases) { if (-not $releaseOf[$r.commit]) { $releaseOf[$r.commit] = $r.tag } }
+	$live = if ($releases) { $releases[0].commit } else { '' }
+	$bookmarks = @(Get-Bookmarks)
 	$commits = foreach ($line in @(Invoke-Git $RepoDir log main -40 '--format=%H%x09%h%x09%P%x09%an%x09%cI%x09%s%x09%(trailers:key=Co-Authored-By,valueonly,separator=%x2C)')) {
 		$f = $line -split "`t"
 		if ($f.Count -lt 6) { continue }
@@ -36,9 +89,15 @@ function Get-MainHistory {
 			branch = $branch
 			claude = ($f.Count -gt 6 -and $f[6] -match 'Claude')
 			pushed = -not $unpushed[$f[0]]
+			release = "$($releaseOf[$f[0]])"
+			live = ($f[0] -eq $live)
+			bookmarked = ($bookmarks -contains $f[0])
 		}
 	}
-	[pscustomobject]@{ remote = $hasRemote; unpushed = $unpushed.Count; total = [int](Invoke-Git $RepoDir rev-list --count main); commits = @($commits) }
+	[pscustomobject]@{
+		remote = $hasRemote; unpushed = $unpushed.Count; total = [int](Invoke-Git $RepoDir rev-list --count main); commits = @($commits)
+		live = $(if ($releases) { [pscustomobject]@{ tag = $releases[0].tag; commit = $releases[0].commit } } else { $null })
+	}
 }
 
 # Branches other than main, local and on GitHub, each with how far it is from main and the lane it's checked out in.

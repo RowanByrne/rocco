@@ -16,3 +16,6 @@ export const initial = name => ((String(name || '').match(/[A-Za-z0-9]/) || ['?'
 // A project's logo gradient, the same every time for the same id.
 const hue = s => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 17);
 export const logoVars = id => `--l1:hsl(${hue(id)},78%,64%);--l2:hsl(${(hue(id) + 70) % 360},72%,54%)`;
+
+// A feature's own color, the same every time for the same plan.
+export const featureVars = id => `--fc:hsl(${(hue(id) * 7) % 360},82%,68%)`;

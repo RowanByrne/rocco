@@ -68,3 +68,4 @@ code { font-family: var(--mono); }
 @keyframes bump { 40% { transform: scale(1.06); box-shadow: 0 0 22px rgba(52,211,153,.35); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@keyframes blink { 50% { opacity: .45; } }
