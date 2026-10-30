@@ -2,11 +2,13 @@
 
 Rocco is the web app for making games from this template. One Rocco serves every project in the RoDev folder.
 
-- **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea); feature plans waiting for approval; the inbox, where things Claude spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options; Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
+- **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval; the inbox, where things Claude spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options; Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
-- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them.
-- **Settings:** desktop notifications, live steps on Working cards (or just a progress bar), voice notes, and hotkeys. Kept per browser.
+- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
+- **Settings:** desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, and hotkeys. Kept per browser.
 - **Metrics:** not built yet.
+
+Rocco himself lives on top of the note box: a little pixel guy who does odd jobs (in a hard hat while workers are busy), reacts to the board, watches you type, and carries your note off when you send it. Click him to say hi.
 
 Ctrl+K opens a palette to find any task, view, project or action. Hotkeys work while Rocco's window has focus.
 
@@ -50,6 +52,7 @@ rocco/
       capture.js         Studio window capture (the browser's screen share)
       voice.js           speech to text
       notify.js          desktop notifications
+      mascot.js          Rocco, the little guy on the note box
       demo.js            sample data
       lib/               dom, format, icons, brands (logos), storage
       ui/                menu, popover, sheet, toast
@@ -71,6 +74,7 @@ Claude keeps the Workboard current with `rocco\rocco.ps1`, run from the project'
 | `suggest -Title "..." [-Summary "why"]` | Put something Claude spotted in the inbox |
 | `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",...` | A feature plan for the user to approve or change |
 | `ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]` | Ask the user; more `ask`s while it's stuck add questions. `-Audio` files (one per option, in order) get play buttons |
+| `reply T-012 -Text "..."` | Answer a question the user asked from the note box (`list` marks them QUESTION). It shows under the note box until they click Got it, or Ask more, which sends it back |
 | `set T-012 -Status working -Lane 3 -Step "..." [-Progress 40]` | Where a task stands. A worker's `log` lines show live on its card |
 | `log T-012 -Text "..." [-Who worker]` | Add to a task's history |
 | `clear T-012` | What the user asked of it (a plan, answer, reopen, merge, follow-ups) is handled |
@@ -94,6 +98,8 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/tasks/<id>/<action>?p=` | What the user does to a task: approve, reopen, answer, queue (an inbox item), remove, followup, undo (the last approve, queue or remove), approve-plan, revise (a plan). `{ text }` for reopen, answer, followup and revise |
 | `POST /api/order?p=` | Up next in a new order (`{ ids }`); refused if a task would go before one it waits on |
 | `POST /api/history/bookmark?p=` | Bookmark a commit, or remove its bookmark (`{ hash }`) |
+| `POST /api/links/elevenlabs?p=` | Link ElevenLabs (`{ key }`): checked with ElevenLabs, then kept as `ELEVENLABS_API_KEY` in the user's environment. The key is never sent back |
+| `POST /api/links/elevenlabs/remove?p=` | Unlink it: removes the key from the user's environment |
 | `POST /api/send?p=` | Queue everything in the inbox |
 | `POST /api/projects/new` | Start a new project: `{ name, code, repo }` |
 

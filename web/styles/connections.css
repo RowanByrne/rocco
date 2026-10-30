@@ -52,7 +52,7 @@
 .sec-name { margin-left: 2px; color: var(--text-2); font-weight: 500; }
 .sec-name:empty { display: none; }
 .sec-name::before { content: '·'; margin: 0 7px 0 0; color: var(--text-3); }
-.kind + .kind { margin-top: 16px; }
+.kind + .kind, .tiles + .kind { margin-top: 16px; }
 .kind-head { margin: 0 2px 8px; font-size: 12px; font-weight: 500; color: var(--text-2); }
 .tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 .tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; padding: 14px; border-radius: var(--r-lg);
@@ -80,3 +80,20 @@
   border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .cd-fix small { display: block; font-size: 11px; font-weight: 600; color: var(--c); letter-spacing: .02em; }
 .cd-fix .attn-fix { margin-top: 6px; }
+
+/* Linking an account (ElevenLabs): the key goes in once and is never shown again */
+.cd-link { margin-top: 16px; padding: 13px 14px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--stroke); }
+.cd-link small { display: block; font-size: 11px; font-weight: 600; color: var(--accent-text); letter-spacing: .02em; }
+.cd-link p { margin: 6px 0 0; font-size: 13px; color: var(--text-2); }
+.link-state { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
+.link-state svg { color: var(--green); }
+.link-state .sp { flex: 1; }
+.link-state code { font-size: 12px; color: var(--text); }
+.link-form { display: flex; gap: 8px; margin-top: 12px; }
+.link-form .input { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+.link-form .btn { flex: none; }
+.link-help { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--text-3); }
+.link-help a { color: var(--accent-text); text-decoration: none; }
+.link-help a:hover { text-decoration: underline; }
+.btn-sm.danger { color: #fecaca; }
+.btn-sm.danger:hover, .btn-sm.danger.confirm { color: #fff; background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.45); }

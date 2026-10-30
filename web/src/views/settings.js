@@ -20,6 +20,7 @@ export function renderSettings() {
     + row('Desktop notifications', `A notification when something is ready to test, stuck, or waiting for your OK while Rocco is in the background.${blocked}`, toggle('notifications', s.notifications))
     + `</div><div class="set-group"><div class="set-head">Workboard</div>`
     + row('Live steps on Working cards', 'Show what the worker did last on each Working card. Off: a progress bar only.', toggle('liveSteps', s.liveSteps))
+    + row('Rocco on the note box', 'A little Rocco who walks along the note box, does odd jobs, and watches you type.', toggle('mascot', s.mascot))
     + `</div><div class="set-group"><div class="set-head">Voice notes</div>`
     + row('Voice notes', voiceSupported()
       ? 'Talk instead of typing. Your browser turns speech into text by sending the audio to Google (Chrome) or Microsoft (Edge). Nothing is sent until this is on and you press the mic.'

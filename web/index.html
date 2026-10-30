@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="styles/history.css">
 <link rel="stylesheet" href="styles/settings.css">
 <link rel="stylesheet" href="styles/dialogs.css">
+<link rel="stylesheet" href="styles/mascot.css">
 <script type="module" src="src/main.js"></script>
 </head>
 <body>
@@ -83,6 +84,7 @@
         </button>
       </div>
       <div class="ask">
+        <div class="mascot" id="mascot" aria-hidden="true" hidden></div>
         <form class="composer" id="composer" autocomplete="off">
           <div class="drafts" id="drafts"></div>
           <textarea id="noteText" rows="1" placeholder="What did you notice?" aria-label="New note"></textarea>
@@ -94,12 +96,13 @@
             <span class="types" id="types" role="radiogroup" aria-label="Note type"></span>
             <span class="sp"></span>
             <span id="voiceSlot"></span>
-            <button class="send" type="submit" title="Add to Up next" aria-label="Add to Up next">
+            <button class="send" id="sendBtn" type="submit" title="Add to Up next" aria-label="Add to Up next">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>
             </button>
           </div>
         </form>
         <input type="file" id="attachInput" accept="image/*" multiple hidden>
+        <div class="qas" id="questions" hidden></div>
         <div class="plans" id="plans" hidden></div>
         <div class="inbox" id="inbox" hidden></div>
       </div>

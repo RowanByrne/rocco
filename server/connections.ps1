@@ -40,6 +40,96 @@ function Get-ProjectConnections {
 	}
 }
 
+# ---- Libraries the game vendors (CODING.md "Third-party code") ----
+# The record is ARCHITECTURE.md "Vendored libraries". Libraries most games use are also found in src/ by their folder,
+# with the version their own files declare, so one that was never recorded, or recorded wrong, shows up.
+
+$KnownLibraries = @{
+	TopbarPlus = @{ repo = '1ForeverHD/TopbarPlus'; file = 'VERSION.lua'; pattern = 'appVersion\s*=\s*"([^"]+)"' }
+	Cmdr       = @{ repo = 'evaera/Cmdr'; file = 'BuiltInCommands\Debug\version.lua'; pattern = 'local version\s*=\s*"([^"]+)"' }
+}
+$script:LibLatest = @{}   # GitHub repo -> @{ tag; at }
+$script:LibJob = $null
+
+# Latest releases on GitHub, as a job: the API is slow next to everything else here.
+$CheckReleases = {
+	param([string[]]$repos)
+	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+	foreach ($repo in $repos) {
+		try { [pscustomobject]@{ repo = $repo; tag = "$((Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -TimeoutSec 5 -UseBasicParsing).tag_name)" } }
+		catch { [pscustomobject]@{ repo = $repo; tag = '' } }
+	}
+}
+
+function Get-VersionText([string]$text) { if ($text -match '\d+\.\d+(\.\d+)?') { $Matches[0] } else { '' } }
+function Test-Newer([string]$latest, [string]$installed) {
+	try { [version](Get-VersionText $latest) -gt [version](Get-VersionText $installed) } catch { $false }
+}
+
+function Get-RecordedLibraries {
+	$file = Join-Path $RepoDir 'docs\game\ARCHITECTURE.md'
+	if (-not (Test-Path $file)) { return }
+	$inTable = $false
+	foreach ($line in [IO.File]::ReadAllLines($file)) {
+		if ($line -match '^## ') { $inTable = $line -match '^## Vendored libraries'; continue }
+		if (-not $inTable -or $line -notmatch '^\|') { continue }
+		$cells = @(($line.Trim().Trim('|') -split '\|') | ForEach-Object { $_.Trim().Trim('`').Trim() })
+		if ($cells.Count -lt 4 -or -not $cells[0] -or $cells[0] -eq 'Library' -or $cells[0] -match '^-+$') { continue }
+		[pscustomobject]@{ name = $cells[0]; version = $cells[1]; source = $cells[2]; patches = $cells[3] }
+	}
+}
+
+function Find-Library([string]$name) {
+	$known = $KnownLibraries[$name]
+	$src = Join-Path $RepoDir 'src'
+	if (-not $known -or -not (Test-Path $src)) { return $null }
+	$dir = Get-ChildItem $src -Recurse -Directory -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
+	if (-not $dir) { return $null }
+	$file = Join-Path $dir.FullName $known.file
+	$version = if ((Test-Path $file) -and ([IO.File]::ReadAllText($file) -match $known.pattern)) { $Matches[1] } else { '' }
+	[pscustomobject]@{ path = ($dir.FullName.Substring($RepoDir.Length + 1) -replace '\\', '/'); version = $version }
+}
+
+function Get-LibraryConnections([bool]$refresh) {
+	if ($script:LibJob -and $script:LibJob.State -ne 'Running') {
+		foreach ($r in @(Receive-Job $script:LibJob -ErrorAction SilentlyContinue)) {
+			# A failed check is tried again in half an hour, not six.
+			if ($r.repo) { $script:LibLatest[$r.repo] = @{ tag = "$($r.tag)"; at = $(if ($r.tag) { Get-Date } else { (Get-Date).AddHours(-5.5) }) } }
+		}
+		Remove-Job $script:LibJob -Force
+		$script:LibJob = $null
+	}
+	$libs = [ordered]@{}
+	foreach ($r in @(Get-RecordedLibraries)) { $libs[$r.name] = @{ name = $r.name; version = $r.version; source = $r.source; patches = $r.patches; recorded = $true } }
+	foreach ($name in $KnownLibraries.Keys) {
+		$found = Find-Library $name
+		if (-not $found) { continue }
+		if (-not $libs.Contains($name)) { $libs[$name] = @{ name = $name; version = ''; source = "github.com/$($KnownLibraries[$name].repo)"; patches = ''; recorded = $false } }
+		$libs[$name].found = $found
+	}
+	$stale = @()
+	$items = foreach ($l in $libs.Values) {
+		$repo = if ("$($l.source)" -match 'github\.com/([\w.-]+/[\w.-]+)') { $Matches[1] -replace '\.git$', '' } elseif ($KnownLibraries[$l.name]) { $KnownLibraries[$l.name].repo } else { '' }
+		$cached = if ($repo) { $script:LibLatest[$repo] } else { $null }
+		if ($repo -and ($refresh -or -not $cached -or ((Get-Date) - $cached.at).TotalHours -gt 6)) { $stale += $repo }
+		$latest = if ($cached) { $cached.tag } else { '' }
+		$version = if ($l.version) { $l.version } elseif ($l.found) { $l.found.version } else { '' }
+		$patched = if ($l.patches -and $l.patches -notmatch '^(none|no|-)$') { "local patches: $($l.patches)" } else { 'no local patches' }
+		$detail = "$(if ($repo) { "github.com/$repo" } else { $l.source }) $Dot $patched"
+		if (-not $l.recorded) {
+			Conn 'Libraries' $l.name 'warn' $version $latest "In $($l.found.path), but not in ARCHITECTURE.md." 'Record its version, source and local patches in ARCHITECTURE.md "Vendored libraries" (CODING.md).' ''
+		} elseif ($l.found -and $l.found.version -and $l.version -and (Get-VersionText $l.found.version) -ne (Get-VersionText $l.version)) {
+			Conn 'Libraries' $l.name 'warn' $l.found.version $latest "ARCHITECTURE.md says $($l.version), but src has $($l.found.version)." 'Correct the version in ARCHITECTURE.md "Vendored libraries".' ''
+		} elseif ($latest -and (Test-Newer $latest $version)) {
+			Conn 'Libraries' $l.name 'update' $version $latest $detail 'Ask the conductor to update it: vendor the new release, re-apply any local patches, and update ARCHITECTURE.md (CODING.md "Third-party code").' ''
+		} else {
+			Conn 'Libraries' $l.name 'ok' $version $latest $detail '' ''
+		}
+	}
+	if ($stale -and -not $script:LibJob) { $script:LibJob = Start-Job -ScriptBlock $CheckReleases -ArgumentList (, [string[]]@($stale | Select-Object -Unique)) }
+	@($items)
+}
+
 # Everything installed on this PC, against the latest versions online. Runs as a job, so it can't
 # use anything defined outside this block.
 $CheckPc = {
@@ -138,6 +228,21 @@ $CheckPc = {
 		$items += Item 'Roblox' "$label plugin" $status $version $(if ($release) { $release.tag_name -replace '^v', '' }) $(if ($repo) { "github.com/$repo" } else { 'Studio plugin' }) $(if ($repo) { "Get the new version from github.com/$repo/releases." } else { '' }) ''
 	}
 
+	# ElevenLabs (AUDIO-PIPELINE.md): the linked key's plan and credits. Read from the user's environment, so a key
+	# linked after this server started still counts. Only raw facts here; Get-ElevenLabsItem words them.
+	$key = [Environment]::GetEnvironmentVariable('ELEVENLABS_API_KEY', 'User')
+	if (-not $key) { $key = $env:ELEVENLABS_API_KEY }
+	$eleven = @{ linked = [bool]$key; hint = $(if ($key) { $key.Substring([Math]::Max(0, $key.Length - 4)) } else { '' }) }
+	if ($key -and $net.up) {
+		try {
+			$s = Invoke-RestMethod 'https://api.elevenlabs.io/v1/user/subscription' -Headers @{ 'xi-api-key' = $key } -TimeoutSec 6 -UseBasicParsing
+			$eleven.tier = "$($s.tier)"; $eleven.used = $s.character_count; $eleven.limit = $s.character_limit
+		} catch {
+			$err = $_; $code = 0; try { $code = [int]$err.Exception.Response.StatusCode } catch { }
+			$eleven.error = if ($code -eq 401 -and "$($err.ErrorDetails.Message)" -match 'permission') { 'scope' } elseif ($code -eq 401) { 'rejected' } else { 'unreachable' }
+		}
+	}
+
 	# Git and the GitHub CLI.
 	$version = Ver (Run 'cmd.exe' '/d /c git --version')
 	$release = Latest 'https://api.github.com/repos/git-for-windows/git/releases/latest'
@@ -150,21 +255,95 @@ $CheckPc = {
 		$items += Item 'Tools' 'GitHub CLI' 'off' '' '' 'Optional, not installed.' 'Install it if you want Claude to handle GitHub for you:' 'winget install GitHub.cli'
 	}
 
-	ConvertTo-Json -InputObject ([pscustomobject]@{ online = $net.up; items = $items }) -Depth 4 -Compress
+	ConvertTo-Json -InputObject ([pscustomobject]@{ online = $net.up; items = $items; eleven = [pscustomobject]$eleven }) -Depth 4 -Compress
+}
+
+# ---- ElevenLabs: linked by the user in Connections, kept as ELEVENLABS_API_KEY in their environment ----
+
+$ElevenKeyName = 'ELEVENLABS_API_KEY'
+$script:Eleven = $null      # what the last check or link found: linked, hint (last 4), tier, used, limit, error
+$script:ElevenAt = [datetime]::MinValue
+
+function Get-ElevenLabsKey {
+	$key = [Environment]::GetEnvironmentVariable($ElevenKeyName, 'User')
+	if ($key) { $key } else { $env:ELEVENLABS_API_KEY }
+}
+
+function Get-ElevenLabsItem {
+	$e = $script:Eleven
+	if (-not $e) { $key = Get-ElevenLabsKey; $e = @{ linked = [bool]$key; error = 'checking' } }
+	$link = 'Link your ElevenLabs account in its details, to make sound effects and music (AUDIO-PIPELINE.md).'
+	$item = if (-not $e.linked) {
+		Conn 'AI' 'ElevenLabs' 'off' '' '' 'Not linked: sound effects and music can''t be generated on this PC.' $link ''
+	} elseif ($e.error -eq 'rejected') {
+		Conn 'AI' 'ElevenLabs' 'warn' '' '' 'ElevenLabs doesn''t accept the linked key any more.' 'Link a new key in its details.' ''
+	} elseif ($e.error -eq 'scope') {
+		Conn 'AI' 'ElevenLabs' 'ok' '' '' 'Linked. The key can''t read the plan: check it allows commercial use.' '' ''
+	} elseif ($e.error -or -not $e.tier) {
+		Conn 'AI' 'ElevenLabs' 'ok' '' '' $(if ($e.error -eq 'checking') { 'Linked. Checking the plan...' } else { 'Linked (couldn''t reach ElevenLabs to check the plan).' }) '' ''
+	} else {
+		$plan = (Get-Culture).TextInfo.ToTitleCase(("$($e.tier)" -replace '_', ' '))
+		$credits = if ($e.limit) { " $Dot {0:N0} of {1:N0} credits used" -f [double]$e.used, [double]$e.limit } else { '' }
+		if ($e.tier -eq 'free') { Conn 'AI' 'ElevenLabs' 'warn' '' '' "Linked $Dot Free plan$credits" 'The free plan doesn''t allow commercial use: upgrade to Starter or above before making game audio.' '' }
+		else { Conn 'AI' 'ElevenLabs' 'ok' '' '' "Linked $Dot $plan plan$credits" '' '' }
+	}
+	$item | Add-Member link 'elevenlabs'
+	$item | Add-Member linked ([bool]$e.linked)
+	$item | Add-Member hint "$($e.hint)"
+	$item
+}
+
+# Check the key with ElevenLabs first; only a key it accepts is kept.
+function Connect-ElevenLabs([string]$key) {
+	$key = "$key".Trim()
+	if (-not $key -or $key.Length -gt 200 -or $key -match '\s') { throw 'That doesn''t look like an ElevenLabs API key.' }
+	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+	$e = @{ linked = $true; hint = $key.Substring([Math]::Max(0, $key.Length - 4)) }
+	try {
+		$s = Invoke-RestMethod 'https://api.elevenlabs.io/v1/user/subscription' -Headers @{ 'xi-api-key' = $key } -TimeoutSec 8 -UseBasicParsing
+		$e.tier = "$($s.tier)"; $e.used = $s.character_count; $e.limit = $s.character_limit
+	} catch {
+		$err = $_; $code = 0; try { $code = [int]$err.Exception.Response.StatusCode } catch { }
+		if ($code -eq 401 -and "$($err.ErrorDetails.Message)" -match 'permission') { $e.error = 'scope' }
+		elseif ($code -eq 401) { throw 'ElevenLabs didn''t accept that key.' }
+		else { throw 'Couldn''t reach ElevenLabs to check the key. Try again when you''re online.' }
+	}
+	[Environment]::SetEnvironmentVariable($ElevenKeyName, $key, 'User')
+	$env:ELEVENLABS_API_KEY = $key
+	$script:Eleven = $e
+	$script:ElevenAt = Get-Date
+	[pscustomobject]@{ tier = "$($e.tier)" }
+}
+
+function Disconnect-ElevenLabs {
+	[Environment]::SetEnvironmentVariable($ElevenKeyName, $null, 'User')
+	Remove-Item Env:ELEVENLABS_API_KEY -ErrorAction SilentlyContinue
+	$script:Eleven = @{ linked = $false }
+	$script:ElevenAt = Get-Date
 }
 
 $script:PcJob = $null
+$script:PcStarted = $null
 $script:PcResult = $null
 function Get-Connections([bool]$refresh) {
 	if ($script:PcJob -and $script:PcJob.State -ne 'Running') {
 		$json = Receive-Job $script:PcJob -ErrorAction SilentlyContinue | Select-Object -Last 1
 		Remove-Job $script:PcJob -Force
 		$script:PcJob = $null
-		if ($json) { $script:PcResult = @{ At = (Now); Value = ($json | ConvertFrom-Json) } }
+		if ($json) {
+			$script:PcResult = @{ At = (Now); Value = ($json | ConvertFrom-Json) }
+			# A link or unlink after the check started is newer than what the check saw.
+			$found = $script:PcResult.Value.eleven
+			if ($found -and $script:PcStarted -gt $script:ElevenAt) {
+				$script:Eleven = @{}
+				foreach ($p in $found.PSObject.Properties) { $script:Eleven[$p.Name] = $p.Value }
+			}
+		}
 	}
 	$stale = -not $script:PcResult -or ((Get-Date) - [datetime]$script:PcResult.At).TotalMinutes -gt 30
-	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev }
+	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev }
 	$checkedAt = $null; $online = $true; $pcItems = @()
 	if ($script:PcResult) { $checkedAt = $script:PcResult.At; $online = $script:PcResult.Value.online; $pcItems = @($script:PcResult.Value.items) }
-	[pscustomobject]@{ checking = [bool]$script:PcJob; checkedAt = $checkedAt; online = $online; items = @(@(Get-ProjectConnections) + $pcItems) }
+	$items = @(@(Get-ProjectConnections) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-ElevenLabsItem))
+	[pscustomobject]@{ checking = [bool]$script:PcJob -or [bool]$script:LibJob; checkedAt = $checkedAt; online = $online; items = $items }
 }

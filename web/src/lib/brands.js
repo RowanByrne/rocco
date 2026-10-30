@@ -7,6 +7,7 @@ const SIMPLE_ICONS = 'https://cdn.jsdelivr.net/npm/simple-icons@16.33.0/icons/';
 const BRANDS = {
   'Claude Code':  { logo: 'claude', glyph: 'terminal', color: '#D97757' },
   'Codex':        { glyph: 'terminal', color: '#2a2b33' },
+  'ElevenLabs':   { logo: 'elevenlabs', glyph: 'speaker', color: '#24262d' },
   'Roblox Studio':{ logo: 'robloxstudio', glyph: 'plug', color: '#00A2FF' },
   'Studio MCP':   { logo: 'modelcontextprotocol', glyph: 'plug', color: '#2a2b33' },
   'Lync':         { glyph: 'sync', color: '#6d4aff' },
@@ -17,8 +18,10 @@ const BRANDS = {
   'GitHub':       { logo: 'github', glyph: 'branch', color: '#24262d' },
   'Commit check': { glyph: 'shield', color: '#0f9f7a' },
   'Studio sync':  { glyph: 'sync', color: '#0284c7' },
+  'TopbarPlus':   { glyph: 'layers', color: '#0f766e' },
+  'Cmdr':         { glyph: 'terminal', color: '#334155' },
 };
-const brandOf = item => BRANDS[item.name] || { glyph: / plugin$/.test(item.name) ? 'package' : 'plug', color: '#3b3f52' };
+const brandOf = item => BRANDS[item.name] || { glyph: / plugin$/.test(item.name) || item.group === 'Libraries' ? 'package' : 'plug', color: '#3b3f52' };
 
 // size: '' (40px), 'sm' (30px) or 'lg' (52px).
 export function logoHTML(item, size = '') {

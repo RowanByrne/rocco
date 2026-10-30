@@ -95,6 +95,13 @@ function seed(id) {
       { ...base, id: 'T-053', status: 'inbox', type: 'idea', kind: 'suggestion', title: 'Daily reward claims have no analytics event', note: 'Daily reward claims have no analytics event',
         summary: "Spotted while fixing T-038: claims aren't logged, so the dashboard can't count them." },
 
+      // Questions the user asked from the note box: one answered, one waiting.
+      { ...base, id: 'T-057', status: 'ready', kind: 'question', type: 'question', title: 'Do pets save if I leave mid-trade?', note: 'Do pets save if I leave mid-trade?',
+        summary: "Yes. A trade only goes through after both players confirm and the countdown ends, so leaving before that keeps everything you had. If you leave during the countdown, the trade is cancelled and nothing moves.",
+        log: [{ who: 'you', at: ago(8), text: 'Do pets save if I leave mid-trade?' }, { who: 'conductor', at: ago(2), text: 'Yes. A trade only goes through after both players confirm.' }] },
+      { ...base, id: 'T-058', status: 'queued', kind: 'question', type: 'question', pending: 'question', waiting: 'Waiting for the conductor',
+        title: 'How many lanes are free right now?', note: 'How many lanes are free right now?' },
+
       // A feature plan waiting for the user's go-ahead.
       { ...base, id: 'T-056', status: 'inbox', kind: 'plan', type: 'feature', title: 'Pet evolution', note: 'pets should level up and evolve after a while',
         summary: 'Pets earn XP while equipped and evolve at level 10 and 25, with a new look each time.',
@@ -133,6 +140,9 @@ export async function connections() {
     { group: 'Project', name: 'GitHub', status: 'ok', detail: 'you/sample-game' },
     { group: 'Project', name: 'Commit check', status: 'ok', detail: 'Refuses files over 5 MB.' },
     { group: 'Project', name: 'Studio sync', status: 'ok', detail: 'Lync is serving Main and 7 lanes.' },
+    { group: 'Libraries', name: 'TopbarPlus', status: 'ok', version: 'v3.5.0', latest: 'v3.5.0', detail: 'github.com/1ForeverHD/TopbarPlus · no local patches' },
+    { group: 'Libraries', name: 'Cmdr', status: 'update', version: 'v1.9.0', latest: 'v1.13.1', detail: 'github.com/evaera/Cmdr · local patches: admin check reads Config',
+      update: 'Ask the conductor to update it: vendor the new release, re-apply any local patches, and update ARCHITECTURE.md (CODING.md "Third-party code").' },
     { group: 'AI', name: 'Claude Code', status: 'ok', version: '2.1.312', latest: '2.1.312', detail: 'Signed in as you@example.com' },
     { group: 'AI', name: 'Codex', status: 'update', version: '0.165.0', latest: '0.166.0', detail: 'Signed in · makes images', update: 'It updates with the Codex app: restart the app.' },
     { group: 'Roblox', name: 'Roblox Studio', status: 'ok', version: '0.745.0', latest: '0.745.0', detail: '8 open' },
@@ -141,14 +151,40 @@ export async function connections() {
     { group: 'Roblox', name: 'Lync plugin', status: 'ok', detail: 'Lync installs and updates it.' },
     { group: 'Tools', name: 'Git', status: 'update', version: '2.55.0', latest: '2.56.0', detail: 'Git for Windows', update: 'Update it:', command: 'git update-git-for-windows' },
     { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', update: 'Install it if you want Claude to handle GitHub for you:', command: 'winget install GitHub.cli' },
+    elevenLabs(),
   ] };
 }
 
+// ElevenLabs starts unlinked; any key links, on the Starter plan.
+let eleven = null;
+const elevenLabs = () => ({
+  group: 'AI', name: 'ElevenLabs', link: 'elevenlabs', linked: !!eleven, hint: eleven || '',
+  ...(eleven ? { status: 'ok', detail: 'Linked · Starter plan · 4,200 of 30,000 credits used' }
+    : { status: 'off', detail: "Not linked: sound effects and music can't be generated on this PC.", update: 'Link your ElevenLabs account in its details, to make sound effects and music (AUDIO-PIPELINE.md).' }),
+});
+export async function link(service, key) {
+  if (!key.trim()) throw new Error("That doesn't look like an ElevenLabs API key.");
+  eleven = key.trim().slice(-4);
+  return { tier: 'starter' };
+}
+export async function unlink() { eleven = null; return { ok: true }; }
+
 export async function note(text, type) {
-  const title = (text || 'Screenshot').split('\n')[0];
-  const t = { id: `T-${next++}`, kind: 'note', type: type || '', attempt: 1, where: 'main', title, note: text, shots: [], options: [], log: [] };
-  current().tasks.push(toConductor(t, 'plan'));
+  const title = (text || 'Screenshot').split('\n')[0], question = type === 'question';
+  const t = { id: `T-${next++}`, kind: question ? 'question' : 'note', type: type || '', attempt: 1, where: 'main', title, note: text, shots: [], options: [], log: [] };
+  current().tasks.push(toConductor(t, question ? 'question' : 'plan'));
+  if (question) answerSoon(t);
   return { id: t.id };
+}
+
+// The demo's conductor answers questions after a few seconds.
+function answerSoon(t) {
+  setTimeout(() => {
+    if (t.status !== 'queued') return;
+    const reply = 'This is the demo, so here is a stand-in answer. In a real project the conductor answers with rocco reply, and it shows here.';
+    Object.assign(t, { status: 'ready', pending: '', waiting: '', summary: reply });
+    t.log.push({ who: 'conductor', at: new Date().toISOString(), text: reply });
+  }, 5000);
 }
 
 export async function shot(id, file) {
@@ -166,8 +202,13 @@ export async function act(id, action, text) {
   const t = find(id), now = new Date().toISOString();
   const say = words => t.log.push({ who: 'you', at: now, text: words });
   switch (action) {
-    case 'approve': saveUndo(t); Object.assign(t, { status: 'done', doneAt: now }); say('Approved.'); if (t.where === 'lane') t.pending = 'merge'; break;
-    case 'reopen': t.attempt += 1; toConductor(t, 'reopen'); say(text || 'Not right yet.'); break;
+    case 'approve': saveUndo(t); Object.assign(t, { status: 'done', doneAt: now }); say(t.kind === 'question' ? 'Got it.' : 'Approved.'); if (t.where === 'lane') t.pending = 'merge'; break;
+    case 'reopen':
+      t.attempt += 1;
+      toConductor(t, t.kind === 'question' ? 'question' : 'reopen');
+      say(text || 'Not right yet.');
+      if (t.kind === 'question') answerSoon(t);
+      break;
     case 'answer': toConductor(t, 'answer'); say(text); break;
     case 'queue': saveUndo(t); toConductor(t, 'plan'); say('Queued.'); break;
     case 'remove': saveUndo(t); t.status = 'removed'; break;

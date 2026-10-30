@@ -47,7 +47,8 @@ function apply(s) {
     const was = before.get(t.id);
     if (was === t.status) continue;
     t.fresh = true;
-    if (!was && t.kind === 'plan') tell(`Plan to approve: ${t.title}`, t, 'var(--violet)');
+    if (t.kind === 'question') { if (was && t.status === 'ready') tell(`Answered: ${t.title}`, t, 'var(--claude)'); }
+    else if (!was && t.kind === 'plan') tell(`Plan to approve: ${t.title}`, t, 'var(--violet)');
     else if (!was && t.status === 'inbox') tell(`Claude spotted: ${t.title}`, t, 'var(--claude)');
     else if (was && t.status === 'ready') tell(`Ready to test: ${t.title}`, t);
     else if (was && t.status === 'stuck') tell(`Needs your answer: ${t.title}`, t, 'var(--amber)');

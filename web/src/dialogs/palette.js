@@ -22,7 +22,7 @@ function collect() {
     { group: 'Actions', label: 'New project', run: openNewProject },
     ...views.map(v => ({ group: 'Go to', label: v[0].toUpperCase() + v.slice(1), hint: keyFor(`go-${v}`), run: () => go(v) })),
     ...state.tasks.filter(t => t.status !== 'removed').map(t => ({
-      group: 'Tasks', label: `${t.id} ${t.title}`, hint: t.kind === 'plan' ? 'Feature plan' : STATUS[t.status] || '',
+      group: 'Tasks', label: `${t.id} ${t.title}`, hint: t.kind === 'plan' ? 'Feature plan' : t.kind === 'question' ? (t.status === 'ready' ? 'Answered' : 'Question') : STATUS[t.status] || '',
       run: () => { go('workboard'); openTask(t.id); },
     })),
     ...state.projects.filter(p => p.id !== state.project).map(p => ({ group: 'Switch project', label: p.name, hint: p.phase, run: () => switchProject(p.id) })),

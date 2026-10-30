@@ -33,6 +33,9 @@ export const api = {
   order: ids => DEMO ? demo.order(ids) : post(withProject('/api/order'), { ids }),
   changes: id => DEMO ? demo.changes(id) : getJson(withProject(`/api/tasks/${id}/changes`)),
   bookmark: hash => DEMO ? demo.bookmark(hash) : post(withProject('/api/history/bookmark'), { hash }),
+  // Accounts linked on this PC; the key is only ever sent, never read back.
+  link: (service, key) => DEMO ? demo.link(service, key) : post(withProject(`/api/links/${service}`), { key }),
+  unlink: service => DEMO ? demo.unlink(service) : post(withProject(`/api/links/${service}/remove`)),
   send: () => DEMO ? demo.send() : post(withProject('/api/send')),
   newProject: details => DEMO ? demo.newProject() : post('/api/projects/new', details),
   job: id => getJson(`/api/jobs/${id}`),

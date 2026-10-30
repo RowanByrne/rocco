@@ -1,0 +1,79 @@
+/* Rocco, the little guy on top of the note box (src/mascot.js). Drawn in 2px cells; --face flips him to walk left. */
+.mascot { position: absolute; left: 0; top: -47px; z-index: 3; width: 72px; height: 48px; pointer-events: none; will-change: transform; }
+.mascot[hidden] { display: none; }
+.m-jump { width: 100%; height: 100%; }
+.mascot.hop .m-jump { animation: m-hop .5s cubic-bezier(.3, .7, .4, 1); }
+.m-svg { display: block; overflow: visible; transform: scaleX(var(--face, 1)); }
+.m-hit { fill: transparent; pointer-events: all; cursor: pointer; }
+
+/* His colors, and his props' */
+.c-body { fill: #8b7dff; } .c-shade { fill: #6c5ce7; } .c-light { fill: #b9b0ff; } .c-dark { fill: #4c3fc4; }
+.c-tip { fill: #67e8f9; filter: drop-shadow(0 0 2px #67e8f9); }
+.c-eye { fill: #17142b; } .c-shine { fill: #fff; } .c-cheek { fill: #ff8fc7; opacity: .6; }
+.c-hat { fill: #fbbf24; } .c-brim { fill: #f59e0b; } .c-wood { fill: #a16207; } .c-metal { fill: #94a3b8; }
+.c-box { fill: #c08457; } .c-tape { fill: #e8b98a; } .c-paper { fill: #f4f4f5; } .c-accent { fill: #8b7dff; } .c-ok { fill: #34d399; }
+.c-coffee { fill: #7c3f12; } .c-slate { fill: #334155; } .c-screen { fill: #0e3a4a; } .c-glow { fill: #67e8f9; } .c-straw { fill: #eab308; }
+
+/* Only what he's doing shows */
+.m-prop, .m-mouth, .m-arms-up { display: none; }
+.mascot[data-mood="smile"] .mouth-smile, .mascot[data-mood="o"] .mouth-o, .mascot[data-mood="grin"] .mouth-grin { display: inline; }
+.mascot.on-job .p-hat { display: inline; }
+
+/* Blinking, walking, nodding */
+.m-eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: m-blink 4.2s infinite; }
+.mascot.walking .m-bod { animation: m-bob .36s steps(1) infinite; }
+.mascot.walking .leg-l { animation: m-step .36s steps(1) infinite; }
+.mascot.walking .leg-r { animation: m-step .36s steps(1) -.18s infinite; }
+.mascot.nod .m-bod { animation: m-nod .24s steps(1); }
+
+/* Odd jobs */
+.mascot[data-act="hammer"] :is(.p-hammer, .p-plank, .p-hat) { display: inline; }
+.mascot[data-act="hammer"] .p-hammer .swing { transform-box: fill-box; transform-origin: 50% 100%; animation: m-hammer .5s ease-in infinite; }
+.mascot[data-act="type"] .p-laptop { display: inline; }
+.mascot[data-act="type"] .m-arm-r { animation: m-tap .2s steps(1) infinite; }
+.mascot[data-act="sweep"] .p-broom { display: inline; }
+.mascot[data-act="sweep"] .p-broom .swing { transform-box: fill-box; transform-origin: 50% 0; animation: m-sweep .7s ease-in-out infinite alternate; }
+.mascot[data-act="sip"] .p-mug { display: inline; }
+.mascot[data-act="sip"] .m-arm-r { transform: translateY(-1px); }
+.mascot:is([data-act="box"], [data-act="note"]) .m-arms { display: none; }
+.mascot:is([data-act="box"], [data-act="note"]) .m-arms-up { display: inline; }
+.mascot[data-act="box"] .p-box, .mascot[data-act="note"] .p-note { display: inline; }
+.mascot[data-act="sign"] .p-sign { display: inline; }
+.mascot[data-act="sign"] .m-arm-r { transform: translateY(-3px); }
+.mascot[data-act="wave"] .m-arm-r { animation: m-wave .3s steps(1) infinite; }
+.mascot[data-act="listen"] .m-arm-l { transform: translateY(-3px); }
+.mascot:is([data-act="sit"], [data-act="sleep"]) .m-bod { transform: translateY(2px); }
+.mascot[data-act="sleep"] .m-eyes { animation: none; transform: scaleY(.2); }
+
+/* What he says */
+.m-bubble { position: absolute; left: 50%; bottom: 35px; padding: 3px 8px; border-radius: 9px; white-space: nowrap; pointer-events: none;
+  font-size: 11.5px; font-weight: 600; color: var(--text); background: rgba(30,31,44,.96); border: 1px solid var(--stroke-2);
+  box-shadow: 0 6px 18px rgba(0,0,0,.45); opacity: 0; transform: translate(-50%, 4px) scale(.9); transition: opacity .15s, transform .15s; }
+.m-bubble::after { content: ''; position: absolute; left: 50%; bottom: -4px; width: 7px; height: 7px; margin-left: -4px; transform: rotate(45deg);
+  background: inherit; border-right: 1px solid var(--stroke-2); border-bottom: 1px solid var(--stroke-2); }
+.m-bubble.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.m-bubble.ok { color: var(--green); } .m-bubble.warn { color: var(--amber); } .m-bubble.claude { color: var(--claude); } .m-bubble.accent { color: var(--accent-text); }
+
+/* Sparks, dust, steam, z's, hearts */
+.m-fx { position: absolute; inset: 0; pointer-events: none; }
+.fx { position: absolute; display: block; }
+.fx-spark { width: 3px; height: 3px; background: #fde047; box-shadow: 0 0 4px #fde047; animation: fx-fly .45s ease-out forwards; }
+.fx-dust { width: 5px; height: 5px; border-radius: 1px; background: rgba(203,213,225,.45); animation: fx-puff .8s ease-out forwards; }
+.fx-steam { width: 2px; height: 5px; background: rgba(255,255,255,.45); animation: fx-rise 1.2s ease-out forwards; }
+.fx-z { font: 700 9px/1 var(--mono); color: var(--accent-text); animation: fx-z 1.6s ease-out forwards; }
+.fx-heart { animation: fx-rise 1s ease-out forwards; }
+.fx-heart svg { display: block; }
+
+@keyframes m-hop { 0% { transform: none; } 35% { transform: translateY(-12px); } 70% { transform: none; } 85% { transform: translateY(-3px); } 100% { transform: none; } }
+@keyframes m-blink { 0%, 92%, 100% { transform: none; } 94% { transform: scaleY(.15); } }
+@keyframes m-bob { 50% { transform: translateY(-.5px); } }
+@keyframes m-step { 50% { transform: translateY(-1px); } }
+@keyframes m-nod { 50% { transform: translateY(.5px); } }
+@keyframes m-tap { 50% { transform: translateY(-.5px); } }
+@keyframes m-wave { 0%, 100% { transform: translateY(-4px); } 50% { transform: translateY(-2px); } }
+@keyframes m-hammer { 0% { transform: rotate(-55deg); } 55% { transform: rotate(18deg); } 65% { transform: rotate(12deg); } 100% { transform: rotate(-55deg); } }
+@keyframes m-sweep { from { transform: rotate(18deg); } to { transform: rotate(-14deg); } }
+@keyframes fx-fly { to { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+@keyframes fx-puff { to { transform: translate(var(--dx), -6px) scale(1.6); opacity: 0; } }
+@keyframes fx-rise { to { transform: translate(var(--dx, 0), -14px); opacity: 0; } }
+@keyframes fx-z { to { transform: translate(10px, -16px) scale(1.4); opacity: 0; } }

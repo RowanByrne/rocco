@@ -2,7 +2,7 @@
 # screenshots, audio options, and the worker's notes.md. A feature plan is a task too (kind 'plan').
 
 $Statuses = 'inbox', 'queued', 'working', 'stuck', 'ready', 'done', 'removed'
-$Types = 'bug', 'tweak', 'idea', 'feature'
+$Types = 'bug', 'tweak', 'idea', 'feature', 'question'
 $ToConductor = 'Waiting for the conductor'
 
 function Set-Field($t, [string]$name, $value) {
@@ -21,7 +21,7 @@ function Set-Status($t, [string]$status) {
 		if ($status -eq 'working') { Set-Field $t 'startedAt' (Now) }
 		if ($status -eq 'done') { Set-Field $t 'doneAt' (Now) }
 		# Picking a task back up handles what the user asked of it; a follow-up stays until it's read (clear).
-		if ($status -in 'working', 'stuck', 'ready' -and $t.pending -in 'plan', 'answer', 'reopen', 'approved') { Set-Field $t 'pending' '' }
+		if ($status -in 'working', 'stuck', 'ready' -and $t.pending -in 'plan', 'answer', 'reopen', 'approved', 'question') { Set-Field $t 'pending' '' }
 	}
 	Set-Field $t 'status' $status
 }
@@ -136,13 +136,14 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 		'approve' {
 			Save-Undo $t
 			Set-Status $t 'done'
-			Add-Log $t 'you' 'Approved.'
+			Add-Log $t 'you' $(if ($t.kind -eq 'question') { 'Got it.' } else { 'Approved.' })
 			# A feature on its own branch merges once it's approved.
 			if ($t.where -eq 'lane') { Set-Field $t 'pending' 'merge' }
 		}
 		'reopen' {
 			Set-Field $t 'attempt' ([int]$t.attempt + 1)
-			Send-ToConductor $t 'reopen'
+			# On an answered question, reopen is "ask more".
+			Send-ToConductor $t $(if ($t.kind -eq 'question') { 'question' } else { 'reopen' })
 			Add-Log $t 'you' $(if ($text) { $text } else { 'Not right yet.' })
 		}
 		'answer' {

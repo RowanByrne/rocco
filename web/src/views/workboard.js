@@ -15,11 +15,16 @@ import { initPopover, hidePopover } from '../ui/popover.js';
 const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
 const COLOR = { ready: 'var(--green)', stuck: 'var(--amber)', working: 'var(--blue)', queued: 'var(--gray)', inbox: 'var(--claude)', done: 'var(--green)' };
-const TYPES = { bug: 'Bug', tweak: 'Tweak', idea: 'Idea', feature: 'Feature' };
+const TYPES = { bug: 'Bug', tweak: 'Tweak', idea: 'Idea', feature: 'Feature', question: 'Question' };
 const SKIP = '\u0000skip';
 const place = t => t.where === 'lane' ? 'Lane ' + t.lane : 'Main';
 const isPlan = t => t.kind === 'plan';
-const work = status => of(status).filter(t => !isPlan(t));
+const isQuestion = t => t.kind === 'question';
+const work = status => of(status).filter(t => !isPlan(t) && !isQuestion(t));
+// The user's questions to the conductor: waiting, or answered and not yet marked "got it".
+const openQuestions = () => state.tasks.filter(t => isQuestion(t) && t.status !== 'done' && t.status !== 'removed');
+const answered = () => openQuestions().filter(t => t.status === 'ready');
+const approvedWork = () => approvedToday().filter(t => !isPlan(t) && !isQuestion(t));
 const queue = () => work('queued').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id));
 const plansToApprove = () => state.tasks.filter(t => isPlan(t) && t.status === 'inbox');
 const features = () => state.tasks.filter(t => isPlan(t) && ['queued', 'working', 'stuck', 'ready'].includes(t.status));
@@ -133,6 +138,24 @@ function featuresHTML() {
   }).join('');
 }
 
+// ---- Questions: asked from the note box, answered by the conductor ----
+
+function questionHTML(t) {
+  const done = t.status === 'ready';
+  const status = done ? `<span class="qa-state on">Answered</span>` : `<span class="qa-state"><span class="spin"></span>Waiting for an answer</span>`;
+  return `<div class="qa${done ? ' answered' : ''}${t.fresh ? ' fresh' : ''}" data-id="${t.id}">`
+    + `<div class="qa-q" title="Open the whole thread"><span class="qa-icon">?</span><span class="qa-text">${esc(t.note || t.title)}</span>${status}</div>`
+    // After "Ask more", the follow-up it's waiting on.
+    + (!done && t.attempt > 1 ? `<div class="qa-follow">${esc(t.log.filter(l => l.who === 'you').at(-1)?.text || '')}</div>` : '')
+    + (done ? `<div class="qa-a">${esc(t.summary || '')}</div>`
+      + `<div class="qa-actions"><button class="btn-sm go" data-got-it="${t.id}">${icon.check}Got it</button><button class="btn-sm" data-ask-more="${t.id}">Ask more</button></div>`
+      + `<div class="qa-reply" hidden><textarea class="field" placeholder="Ask a follow-up"></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send="${t.id}">Ask</button></div></div>`
+      : `<div class="qa-actions"><button class="linkish" data-unask="${t.id}">Take it back</button></div>`)
+    + `</div>`;
+}
+
+const questionsHTML = () => openQuestions().sort((a, b) => a.id.localeCompare(b.id)).map(questionHTML).join('');
+
 // ---- Inbox: what Claude spotted ----
 
 function inboxHTML() {
@@ -166,11 +189,14 @@ function queueHTML() {
 }
 
 export function renderWorkboard() {
-  const ready = work('ready').length, stuck = work('stuck').length, asks = work('inbox').length + plansToApprove().length;
-  $('#boardSub').textContent = [ready && `${ready} to test`, stuck && `${stuck} stuck`, asks && `${asks} waiting for your OK`].filter(Boolean).join(' · ');
-  $('#boardBadge').textContent = ready + stuck + asks;
-  $('#boardBadge').hidden = !(ready + stuck + asks);
-  $('#approvedText').textContent = `${approvedToday().filter(t => !isPlan(t)).length} approved today`;
+  const ready = work('ready').length, stuck = work('stuck').length, asks = work('inbox').length + plansToApprove().length, replies = answered().length;
+  const waiting = ready + stuck + asks + replies;
+  $('#boardSub').textContent = [ready && `${ready} to test`, stuck && `${stuck} stuck`, asks && `${asks} waiting for your OK`, replies && `${replies} answer${replies === 1 ? '' : 's'} for you`].filter(Boolean).join(' · ');
+  $('#boardBadge').textContent = waiting;
+  $('#boardBadge').hidden = !waiting;
+  $('#approvedText').textContent = `${approvedWork().length} approved today`;
+  $('#questions').innerHTML = questionsHTML();
+  $('#questions').hidden = !openQuestions().length;
   $('#plans').innerHTML = plansToApprove().map(planCardHTML).join('');
   $('#plans').hidden = !plansToApprove().length;
   $('#inbox').innerHTML = inboxHTML();
@@ -179,7 +205,7 @@ export function renderWorkboard() {
   $('#features').hidden = !features().length;
   $('#board').innerHTML = columnHTML('ready') + columnHTML('stuck') + columnHTML('working');
   $('#queue').innerHTML = queueHTML();
-  document.title = ready + stuck + asks ? `(${ready + stuck + asks}) Rocco` : 'Rocco';
+  document.title = waiting ? `(${waiting}) Rocco` : 'Rocco';
   state.tasks.forEach(t => { t.fresh = false; });
 }
 
@@ -197,6 +223,7 @@ function summaryHTML(t) {
 
 function whereLine(t) {
   if (isPlan(t)) return t.status === 'inbox' ? 'Feature plan · waiting for your OK' : `Feature · ${childrenOf(t).filter(k => k.status === 'done').length} of ${Math.max(childrenOf(t).length, (t.steps || []).length)} done`;
+  if (isQuestion(t)) return t.status === 'ready' ? 'Answered' : t.status === 'done' ? `Got it at ${hhmm(t.doneAt)}` : 'Waiting for an answer';
   switch (t.status) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
     case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
@@ -236,6 +263,12 @@ function sheetBody(t) {
 const followUpHTML = placeholder => `<textarea class="field" id="followText" placeholder="${placeholder}"></textarea><div class="row"><span class="sp"></span><button class="btn accent" data-follow>Send follow-up</button></div>`;
 
 function sheetFoot(t) {
+  if (isQuestion(t)) {
+    if (t.status === 'ready') return `<div class="row"><button class="btn go" data-got-it="${t.id}">${icon.checkSm}Got it</button></div>`
+      + `<textarea class="field" id="followText" placeholder="Ask a follow-up"></textarea><div class="row"><span class="sp"></span><button class="btn" data-ask-more-send>Ask more</button></div>`;
+    if (t.status === 'done') return '';
+    return followUpHTML('Add to your question') + '<div class="row"><button class="btn" data-remove>Take it back</button></div>';
+  }
   if (isPlan(t) && t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-plan-approve="${t.id}">Approve plan</button></div>`
     + `<textarea class="field" id="followText" placeholder="Want changes? Say what, then send"></textarea><div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
   if (t.status === 'ready') return `<div class="row"><button class="btn go" data-approve-open>${icon.checkSm}Approve</button><button class="btn" data-reopen-toggle>Reopen</button></div>`
@@ -263,13 +296,14 @@ async function loadChanges(t) {
 export function openTask(id) {
   const t = byId(id);
   if (!t) return;
-  const color = isPlan(t) ? 'var(--accent)' : COLOR[t.status];
-  showSheet(id, { color, chip: isPlan(t) ? 'Feature plan' : NAMES[t.status], id: t.id, body: sheetBody(t), foot: sheetFoot(t) });
+  const color = isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status];
+  const chip = isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status];
+  showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t) });
   if (t.branch) loadChanges(t);
 }
 
 function openApproved() {
-  const list = approvedToday().filter(t => !isPlan(t));
+  const list = approvedWork();
   showSheet('approved', {
     color: COLOR.done,
     chip: 'Approved today',
@@ -317,6 +351,9 @@ async function approve(id) {
 }
 
 const queueIt = id => attempt('queue it', async () => { await act(id, 'queue'); undoable(id, 'Added to Up next', 'var(--violet)'); });
+const gotIt = id => attempt('close it', async () => { await act(id, 'approve'); undoable(id, 'Got it', 'var(--claude)'); });
+const askMore = (id, text) => attempt('ask it', async () => { await act(id, 'reopen', text); toast('Asked. The answer shows here.', 'var(--claude)'); });
+const unask = id => attempt('take it back', async () => { await act(id, 'remove'); undoable(id, 'Question taken back', 'var(--gray)'); });
 const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); });
 const queueAll = () => attempt('queue them', async () => {
   const n = work('inbox').length;
@@ -418,6 +455,18 @@ export function initWorkboard() {
     else if (hit('[data-queue]')) queueIt(hit('[data-queue]').dataset.queue);
     else if (hit('[data-dismiss]')) dismiss(hit('[data-dismiss]').dataset.dismiss);
     else if (hit('[data-queue-all]')) queueAll();
+    else if (hit('[data-got-it]')) gotIt(card);
+    else if (hit('[data-unask]')) unask(card);
+    else if (hit('[data-ask-more]')) {
+      const box = hit('.qa').querySelector('.qa-reply');
+      box.hidden = !box.hidden;
+      if (!box.hidden) box.querySelector('textarea').focus();
+    } else if (hit('[data-ask-send]')) {
+      const field = hit('.qa-reply').querySelector('textarea'), text = field.value.trim();
+      if (!text) { field.focus(); return; }
+      askMore(card, text);
+    } else if (hit('.qa-reply')) { /* typing in it */ }
+    else if (hit('.qa-q')) openTask(card);
     else if (hit('[data-plan-approve]')) attempt('approve the plan', async () => { await act(card, 'approve-plan'); toast('Plan approved. The conductor starts it.', 'var(--accent-text)'); });
     else if (hit('[data-plan-reply]')) {
       const box = hit('.plan').querySelector('.plan-reply'), mode = hit('[data-plan-reply]').dataset.mode;
@@ -460,6 +509,12 @@ export function initWorkboard() {
     } else if (hit('[data-plan-approve]')) {
       closeSheet();
       attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. The conductor starts it.', 'var(--accent-text)'); });
+    } else if (hit('[data-got-it]')) { closeSheet(); gotIt(id); }
+    else if (hit('[data-ask-more-send]')) {
+      const text = $('#followText').value.trim();
+      if (!text) { $('#followText').focus(); return; }
+      closeSheet();
+      askMore(id, text);
     } else if (hit('[data-queue-open]')) { closeSheet(); queueIt(id); }
     else if (hit('[data-remove]')) { closeSheet(); dismiss(id); }
     else if (el.matches('.shots img')) el.classList.toggle('big');

@@ -70,15 +70,22 @@ function Invoke-Request($ctx) {
 		$body = Read-Json $req
 		Send-Json $ctx @{ job = (Start-NewProject ([string]$body.name) ([string]$body.code) ([string]$body.repo)) }; return
 	}
-	# The user's note goes straight to the queue, for the conductor to plan.
+	# Accounts linked on this PC (Connections). The key goes into the user's environment; it never comes back out.
+	if ($path -eq '/api/links/elevenlabs') {
+		try { Send-Json $ctx (Connect-ElevenLabs ([string](Read-Json $req).key)) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	if ($path -eq '/api/links/elevenlabs/remove') { Disconnect-ElevenLabs; Send-Json $ctx @{ ok = $true }; return }
+	# The user's note goes straight to the queue, for the conductor to plan. A question goes to the conductor to answer (rocco.ps1 reply).
 	if ($path -eq '/api/note') {
 		$body = Read-Json $req
 		$text = [string]$body.text
 		$type = if ([string]$body.type -in $Types) { [string]$body.type } else { '' }
 		$title = if ($text) { ($text -split "`r?`n")[0] } else { 'Screenshot' }
 		if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
-		$t = New-Task $title $text 'queued' 'note' $type
-		Send-ToConductor $t 'plan'
+		$question = $type -eq 'question'
+		$t = New-Task $title $text 'queued' $(if ($question) { 'question' } else { 'note' }) $type
+		Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
 		Save-Task $t
 		Send-Json $ctx @{ id = $t.id }; return
 	}

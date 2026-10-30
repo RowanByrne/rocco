@@ -9,6 +9,7 @@
 #   rocco.ps1 plan -Title "..." -Summary "..." -Steps "Trade window UI|4|standard","Trade service|6|heavy"
 #                                      a feature plan for the user to approve; prints its id
 #   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck)
+#   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
 #   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, follow-ups) is handled
@@ -49,6 +50,7 @@ switch ($Command) {
 			$wants = if ($t.pending) { "[$($t.pending)]" } else { '' }
 			$extra = @()
 			if ($t.kind -eq 'plan') { $extra += 'PLAN' }
+			if ($t.kind -eq 'question') { $extra += 'QUESTION: answer with reply' }
 			if ($t.plan) { $extra += "in $($t.plan)" }
 			if (@(Get-List $t.after).Count) { $extra += "after $((Get-List $t.after) -join ',')" }
 			'{0,-6} {1,-8} {2,-4} {3,-10} {4}{5}' -f $t.id, $t.status, $laneText, $wants, $t.title, $(if ($extra) { "  ($($extra -join '; '))" })
@@ -60,6 +62,7 @@ switch ($Command) {
 		$dir = Get-TaskDir $Id
 		$head = "$($t.id)  $($t.status)"
 		if ($t.kind -eq 'plan') { $head += '  feature plan' }
+		if ($t.kind -eq 'question') { $head += '  question from the user' }
 		if ($t.type) { $head += "  $($t.type)" }
 		if ($t.lane) { $head += "  lane $($t.lane)" }
 		if ($t.branch) { $head += "  $($t.branch)" }
@@ -155,6 +158,18 @@ switch ($Command) {
 		Save-Task $t
 	}
 
+	# Answer the user's question; it shows under the note box until they say they've got it.
+	'reply' {
+		if (-not $Text) { throw 'reply needs -Text.' }
+		$t = Read-Task $Id
+		Set-Field $t 'summary' $Text
+		Set-Status $t 'ready'
+		Set-Field $t 'pending' ''
+		Set-Field $t 'waiting' ''
+		Add-Log $t $(if ($PSBoundParameters.ContainsKey('Who')) { $Who } else { 'conductor' }) $Text
+		Save-Task $t
+	}
+
 	'clear' {
 		$t = Read-Task $Id
 		Set-Field $t 'pending' ''
@@ -162,5 +177,5 @@ switch ($Command) {
 		Save-Task $t
 	}
 
-	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, set, log or clear." }
+	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, reply, set, log or clear." }
 }

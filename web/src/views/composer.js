@@ -1,6 +1,6 @@
 // The note box at the top of the Workboard: type or say a note, pick its type, attach, paste, drop or
 // capture screenshots (and draw on them); Enter adds it to Up next.
-import { state, on } from '../state.js';
+import { state, on, emit } from '../state.js';
 import { $ } from '../lib/dom.js';
 import { api } from '../api.js';
 import { refresh } from '../sync.js';
@@ -12,7 +12,8 @@ import { voiceSupported, listening, listeningFor, toggleVoice } from '../voice.j
 import { openMarkup } from '../dialogs/markup.js';
 import { go } from '../router.js';
 
-const TYPES = [['bug', 'Bug'], ['tweak', 'Tweak'], ['idea', 'Idea']];
+// Question isn't work: it goes to the conductor to answer, and the answer shows under the note box.
+const TYPES = [['bug', 'Bug'], ['tweak', 'Tweak'], ['idea', 'Idea'], ['question', 'Question']];
 let drafts = []; // screenshots going with the next note: { file, url }
 let type = '';
 let voiceTimer = null;
@@ -31,7 +32,11 @@ export function renderComposerTools() {
   $('#captureSlot').innerHTML = capturing()
     ? `<span class="cap on"><button type="button" class="tool-label" data-capture title="Capture Studio${hint('capture')}"><i></i>Capture</button><button type="button" class="cap-stop" data-capture-stop title="Stop sharing Studio" aria-label="Stop sharing Studio">×</button></span>`
     : `<button type="button" class="tool-label" data-capture title="Pick Studio's window once, then capture it any time${hint('capture')}">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/>')}Capture Studio</button>`;
-  $('#types').innerHTML = TYPES.map(([id, label]) => `<button type="button" class="type t-${id}${type === id ? ' on' : ''}" data-type="${id}" role="radio" aria-checked="${type === id}" title="${label}${hint('type')}">${label}</button>`).join('');
+  $('#types').innerHTML = TYPES.map(([id, label]) => `<button type="button" class="type t-${id}${type === id ? ' on' : ''}" data-type="${id}" role="radio" aria-checked="${type === id}" title="${id === 'question' ? 'Just need to know something? Ask, and the answer shows here' : label}${hint('type')}">${label}</button>`).join('');
+  const asking = type === 'question';
+  text().placeholder = asking ? 'What do you want to know?' : 'What did you notice?';
+  $('#sendBtn').title = asking ? 'Ask' : 'Add to Up next';
+  $('#sendBtn').setAttribute('aria-label', $('#sendBtn').title);
   const on = settings().voice && voiceSupported();
   $('#voiceSlot').innerHTML = on ? (listening()
     ? `<button type="button" class="mic on" data-voice title="Stop${hint('voice')}">${svg('<rect x="7" y="7" width="10" height="10" rx="2"/>')}<span>${Math.floor(listeningFor() / 60)}:${String(listeningFor() % 60).padStart(2, '0')}</span></button>`
@@ -63,7 +68,8 @@ async function addNote() {
     const { id } = await api.note(note, noteType);
     for (const d of shots) await api.shot(id, d.file);
     await refresh();
-    toast('Added to Up next', 'var(--violet)');
+    emit('note-sent', noteType);
+    toast(noteType === 'question' ? 'Asked. The answer shows here.' : 'Added to Up next', noteType === 'question' ? 'var(--claude)' : 'var(--violet)');
   } catch (e) {
     // Put it all back so nothing is lost.
     text().value = note;

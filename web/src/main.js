@@ -10,6 +10,7 @@ import { showView, go, syncUrl } from './router.js';
 import { initSidebar, renderSidebar, renderMe, loadMe } from './sidebar.js';
 import { initWorkboard, renderWorkboard, openTask } from './views/workboard.js';
 import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType } from './views/composer.js';
+import { initMascot } from './mascot.js';
 import { initConnections, renderConnections, loadConnections } from './views/connections.js';
 import { initHistory, renderHistory, loadHistory } from './views/history.js';
 import { initSettings, renderSettings } from './views/settings.js';
@@ -79,6 +80,7 @@ document.addEventListener('keydown', e => {
   initSidebar();
   initWorkboard();
   initComposer();
+  initMascot();
   initConnections();
   initHistory();
   initSettings();
