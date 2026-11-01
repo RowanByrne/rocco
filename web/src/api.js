@@ -32,7 +32,11 @@ export const api = {
   // Up next in this order; the server refuses an order that puts a task before one it needs.
   order: ids => DEMO ? demo.order(ids) : post(withProject('/api/order'), { ids }),
   changes: id => DEMO ? demo.changes(id) : getJson(withProject(`/api/tasks/${id}/changes`)),
-  bookmark: hash => DEMO ? demo.bookmark(hash) : post(withProject('/api/history/bookmark'), { hash }),
+  docs: () => DEMO ? demo.docs() : getJson(withProject('/api/docs')),
+  doc: path => DEMO ? demo.doc(path) : getJson(withProject('/api/docs/file', `&path=${encodeURIComponent(path)}`)),
+  // The user's edit, committed on main and pushed. { conflict, hash } instead if the doc changed since base.
+  saveDoc: (path, text, base, message) => DEMO ? demo.saveDoc(path, text, base, message) : post(withProject('/api/docs/save'), { path, text, base, message }),
+  bookmark: hash =>DEMO ? demo.bookmark(hash) : post(withProject('/api/history/bookmark'), { hash }),
   // Accounts linked on this PC; the key is only ever sent, never read back.
   link: (service, key) => DEMO ? demo.link(service, key) : post(withProject(`/api/links/${service}`), { key }),
   unlink: service => DEMO ? demo.unlink(service) : post(withProject(`/api/links/${service}/remove`)),

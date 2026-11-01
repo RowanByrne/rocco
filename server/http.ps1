@@ -50,11 +50,14 @@ function Invoke-Request($ctx) {
 	if ($get -and $path -notmatch '^/(api|files)/') { Send-Static $ctx $path; return }
 
 	# Everything else is about one project, named by ?p=.
-	Use-Project (Find-Project $req.QueryString['p']).path
+	$project = Find-Project $req.QueryString['p']
+	Use-Project $project.path
 	if ($get) {
 		if ($path -eq '/api/state') { Send-Json $ctx (Get-State $req.QueryString['p']); return }
 		if ($path -eq '/api/connections') { Send-Json $ctx (Get-Connections ($req.QueryString['refresh'] -eq '1')); return }
 		if ($path -eq '/api/history') { Send-Json $ctx (Get-History); return }
+		if ($path -eq '/api/docs') { Send-Json $ctx (Get-Docs $project.template); return }
+		if ($path -eq '/api/docs/file') { Send-Json $ctx (Read-Doc $req.QueryString['path'] $project.template); return }
 		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Read-Task $Matches[1])); return }
 		# A task's screenshot or audio option.
 		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a))$' -and $Matches[2] -notmatch '\.\.') {
@@ -88,6 +91,12 @@ function Invoke-Request($ctx) {
 		Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
 		Save-Task $t
 		Send-Json $ctx @{ id = $t.id }; return
+	}
+	# The user's own edit to a doc: committed on main and pushed. { conflict } if it changed since the user opened it.
+	if ($path -eq '/api/docs/save') {
+		$body = Read-Json $req
+		try { Send-Json $ctx (Save-Doc ([string]$body.path) ([string]$body.text) ([string]$body.base) ([string]$body.message) $project.template) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
 	}
 	if ($path -eq '/api/send') { Send-Json $ctx @{ sent = (Send-Inbox) }; return }
 	if ($path -eq '/api/order') {

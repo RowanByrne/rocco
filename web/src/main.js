@@ -13,6 +13,7 @@ import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType 
 import { initMascot } from './mascot.js';
 import { initConnections, renderConnections, loadConnections } from './views/connections.js';
 import { initHistory, renderHistory, loadHistory } from './views/history.js';
+import { initDocs, renderDocs, loadDocs, resetDocs } from './views/docs.js';
 import { initSettings, renderSettings } from './views/settings.js';
 import { initNewProject, newProjectOpen, closeNewProject } from './dialogs/new-project.js';
 import { openPalette, paletteOpen, closePalette } from './dialogs/palette.js';
@@ -34,6 +35,7 @@ on('sheet-closed', renderWorkboard);
 on('me', () => { renderMe(); renderConnections(); });
 on('connections', renderConnections);
 on('history', renderHistory);
+on('docs', renderDocs);
 on('settings', () => { renderSettings(); renderWorkboard(); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
 on('view', () => {
@@ -41,6 +43,7 @@ on('view', () => {
   closeMenus();
   if (state.view === 'connections') loadConnections(false);
   if (state.view === 'history') { renderHistory(); loadHistory(); }
+  if (state.view === 'docs') { renderDocs(); loadDocs(); }
   if (state.view === 'settings') renderSettings();
 });
 on('project', () => {
@@ -48,13 +51,16 @@ on('project', () => {
   closeMenus();
   syncUrl();
   sync.reset();
+  resetDocs();
   renderSidebar();
   renderWorkboard();
   renderConnections();
   renderHistory();
+  renderDocs();
   sync.load();
   loadConnections(false);
   loadHistory();
+  loadDocs();
 });
 
 // What each hotkey does (the keys themselves are in hotkeys.js, and the user's own in Settings).
@@ -63,7 +69,10 @@ register('voice', toggleVoiceNote);
 register('capture', captureStudio);
 register('type', cycleType);
 register('palette', openPalette);
-for (const view of ['workboard', 'history', 'connections', 'settings']) register(`go-${view}`, () => go(view));
+for (const view of ['workboard', 'history', 'docs', 'connections', 'settings']) register(`go-${view}`, () => go(view));
+
+// A view or doc typed or pasted into the address.
+addEventListener('hashchange', () => showView(location.hash.slice(1)));
 
 // Esc closes the top-most thing.
 document.addEventListener('keydown', e => {
@@ -83,6 +92,7 @@ document.addEventListener('keydown', e => {
   initMascot();
   initConnections();
   initHistory();
+  initDocs();
   initSettings();
   initNewProject();
   showView(location.hash.slice(1));
@@ -94,6 +104,7 @@ document.addEventListener('keydown', e => {
   sync.start();
   loadMe();
   loadConnections(false); // for the sidebar badge
+  if (state.view !== 'docs') loadDocs(); // for the palette; opening Docs loads them anyway
   setInterval(() => loadConnections(false), 5 * 60000);
   setInterval(() => { if (!openSheetKey()) { renderSidebar(); renderWorkboard(); } }, 30000); // keeps "12m" and "4m ago" current
   if (DEMO) demo.start();

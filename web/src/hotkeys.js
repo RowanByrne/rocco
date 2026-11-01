@@ -10,6 +10,7 @@ export const ACTIONS = [
   { id: 'palette',        label: 'Command palette',       key: 'Ctrl+K' },
   { id: 'go-workboard',   label: 'Go to Workboard',       key: 'Alt+1' },
   { id: 'go-history',     label: 'Go to History',         key: 'Alt+2' },
+  { id: 'go-docs',        label: 'Go to Docs',            key: 'Alt+5' },
   { id: 'go-connections', label: 'Go to Connections',     key: 'Alt+3' },
   { id: 'go-settings',    label: 'Go to Settings',        key: 'Alt+4' },
 ];

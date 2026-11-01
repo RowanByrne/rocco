@@ -312,6 +312,103 @@ export async function history() {
   };
 }
 
+// ---- Docs: a few sample docs per project; saves mirror rocco/server/docs.ps1 Save-Doc ----
+
+const md = (...lines) => lines.join('\n') + '\n';
+const lf = text => String(text).replace(/\r\n?/g, '\n');
+const hashOf = text => [...lf(text)].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261).toString(16);
+const TEMPLATE_OWNED = /^(CLAUDE\.md|AGENTS\.md|\.claude\/|docs\/workflow\/|tools\/|rocco\/)/;
+const docData = {};
+
+function sampleDocs() {
+  const doc = (text, minutes, subject, extra = {}) => ({ text, at: ago(minutes), by: 'Sample User', subject, ...extra });
+  return docData[state.project] ??= {
+    'README.md': doc(md('# Sample Game', '', 'A pet-collecting Roblox game made with Claude, from the RoDev template. What it is: `docs/game/PITCH.md`. Where it stands: `docs/game/PROJECT.md` and `docs/game/ROADMAP.md`.',
+      '', '## Working on it', '', '1. **Open Claude** in `repo\\` and say **"refresh"** to sync with GitHub.', '2. **Start Lync:** `tools\\serve-all.bat`.', '3. **Before you stop:** save and close Studio, then say "refresh".'), 2900, 'README.md: work session steps'),
+    'CLAUDE.md': doc(md('# Agent rules', '', 'A Roblox game built from the RoDev template. Luau source in `src/` is synced into Studio by Lync. GitHub `origin/main` is the source of truth for code and every text file.',
+      '', '## Talking to the user', '', 'Keep replies short: what\'s **done**, and what\'s **flagged**.', '', '## Rules', '', '- Merge, don\'t rebase, into `main`, and pull right before pushing it.',
+      '- Code against `docs/game/CONTRACTS.md` and `docs/game/EVENT-CATALOG.md`.', '- New feature: its own spec in `docs/game/features/`.', '', '## Docs', '', '| Read | When |', '|---|---|',
+      '| `docs/workflow/WORKFLOW.md` | Starting a phase |', '| `docs/workflow/TESTING.md` | Before using Studio tools |'), 4300, 'CLAUDE.md: short replies'),
+    'docs/README.md': doc(md('# docs', '', 'Every doc in the project, by folder. Agents find which to read when in CLAUDE.md "Docs".', '', '## game/: what this game is', '',
+      '| Doc | What |', '|---|---|', '| `PITCH.md` | What we\'re making and why it can win |', '| `GDD.md` | The design map |', '| `features/` | One spec per feature |'), 4300, 'docs/README.md: index'),
+    'docs/game/PROJECT.md': doc(md('# Sample Game', '', 'This game\'s details. CLAUDE.md imports this file, so every session sees it.', '', '## At a glance', '', '| | |', '|---|---|',
+      '| Game | Sample Game |', '| Code | `SG` |', '| Phase | Production |', '| Lanes | 8 |', '', '## Current focus', '', 'Pets that follow you, then trading.'), 1500, 'PROJECT.md: Production phase'),
+    'docs/game/PITCH.md': doc(md('# Pitch', '', 'Collect pets on floating islands, raise them, and trade the rare ones. Short sessions, a pet that grows with you, and a reason to come back every day.',
+      '', '## Why it can win', '', '- Pet games keep players for months when trading is safe.', '- Every island is a short, clear goal.', '', '## Not doing', '', '- Paid random eggs (PLATFORM-RISKS.md).'), 9000, 'PITCH.md: the pitch'),
+    'docs/game/GDD.md': doc(md('# Game design', '', 'The design map: the loop, the systems, and how they feed each other. Each feature has its own spec in `features/`.', '', '## Loop', '',
+      'Explore an island, collect coins, hatch pets, upgrade them, unlock the next island.', '', '## Currencies', '', '| Currency | From | Spent on |', '|---|---|---|',
+      '| Coins | Collecting, quests | Eggs, upgrades |', '| Gems | Daily reward, events | Cosmetics |', '', '## Systems', '', '- **Pets:** follow you and level up (`docs/game/features/pets.md`).',
+      '- **Trading:** player to player, with a confirm countdown (`docs/game/features/trading.md`).', '- **Daily reward:** a streak that resets after a missed day.'), 50, 'GDD.md: currencies table'),
+    'docs/game/DECISIONS.md': doc(md('# Decisions', '', 'The user\'s decisions, one dated line each, so they aren\'t reopened.', '', '- 2026-10-02: No paid random eggs. Eggs cost coins only.',
+      '- 2026-10-11: Pets evolve at levels 10 and 25.', '- 2026-10-24: Trades need both players to confirm, then a 5 second countdown.'), 600, 'DECISIONS.md: trade countdown'),
+    'docs/game/ROADMAP.md': doc(md('# Roadmap', '', 'Milestones to launch, and what\'s now, next and later.', '', '## Now', '', '- [x] Pets follow you', '- [ ] Pet evolution', '- [ ] Trading', '',
+      '## Later', '', '- Seasonal islands', '- Guilds'), 180, 'ROADMAP.md: now and later'),
+    'docs/game/features/pets.md': doc(md('# Pets', '', 'Pets follow the player, earn XP from collecting, and evolve at levels 10 and 25 with a new look each time.', '', '## How it works', '',
+      '1. A hatched pet follows its owner on the client.', '2. Collecting gives the equipped pets XP (server).', '3. At 40+ studs behind, a pet teleports to its owner.', '', '## Done when', '',
+      '- Pets keep up on every island.', '- Evolving shows the new model within a second.'), 9, 'pets.md: teleport when far behind'),
+    'docs/game/features/trading.md': doc(md('# Trading', '', 'Two players offer pets, both confirm, then a short countdown before the swap, so nobody is rushed into a bad trade.', '', '## Flow', '',
+      '1. Send a trade request.', '2. Both players add offers.', '3. Both confirm; a 5 second countdown starts.', '4. Any change cancels the countdown.'), 12, 'trading.md: the confirm countdown', { dirty: true }),
+    'docs/workflow/WORKFLOW.md': doc(md('# Workflow', '', 'How we make games: the phases from pitch to live, and the gate at the end of each.', '', '## Phases', '',
+      '| Phase | Gate |', '|---|---|', '| Pitch | The user says go on the pitch |', '| Foundation | Lanes, places and the data layer work |', '| Core loop | The loop is fun with programmer art |',
+      '| Production | Launch scope is built |'), 4300, 'WORKFLOW.md: phases and gates'),
+    'docs/workflow/TESTING.md': doc(md('# Testing', '', 'Studio tools, playtests and measuring. Prove behaviour with numbers; screenshot only to answer "does this look right?".', '', '## Playtests', '',
+      '- Mark every playtest you start so it stays silent.', '- Never leave one running.'), 4300, 'TESTING.md: playtests'),
+    'live/RELEASES.md': doc(md('# Releases', '', 'Every publish to players, newest first.', '', '| Date | Build | What changed |', '|---|---|---|',
+      `| ${ago(1500).slice(0, 10)} | release/${ago(1500).slice(0, 10)} | Shop: phone layout for item cards |`), 1500, 'RELEASES.md: shop phone layout'),
+    '.claude/agents/roblox-dev-standard.md': doc(md('---', 'name: roblox-dev-standard', 'description: A worker for routine Roblox tasks in one lane.', '---', '',
+      'You build one task in your lane: code in `src/`, tested in your lane\'s place, committed to your `agent/` branch.'), 4300, 'Worker agents'),
+  };
+}
+
+// What the hover shows, as rocco/server/docs.ps1 Get-DocSummary finds it.
+function summarize(text) {
+  let title = '', inCode = false, inFront = false, done = false;
+  const sections = [], para = [];
+  lf(text).split('\n').forEach((line, n) => {
+    if (n === 0 && line === '---') { inFront = true; return; }
+    if (inFront) { if (line === '---') inFront = false; else if (!title && /^name:\s*(.+)$/.test(line)) title = line.replace(/^name:\s*/, '').trim(); return; }
+    if (/^\s*(```|~~~)/.test(line)) { inCode = !inCode; if (para.length) done = true; return; }
+    if (inCode) return;
+    if (!title && /^#\s+/.test(line)) { title = line.replace(/^#\s+/, '').trim(); return; }
+    if (/^#{2,3}\s+/.test(line)) { if (sections.length < 8) sections.push(line.replace(/^#+\s+/, '').replace(/`/g, '')); if (para.length) done = true; return; }
+    if (done) return;
+    if (!line.trim() || /^\s*(\||>|---|<!--|@)/.test(line)) { if (para.length) done = true; return; }
+    para.push(line.trim().replace(/^([-*+]|\d+\.)\s+/, ''));
+  });
+  let preview = para.join(' ').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
+  if (preview.length > 240) preview = preview.slice(0, preview.lastIndexOf(' ', 236)) + '…';
+  return { title, preview, sections };
+}
+
+const isTemplate = () => !!PROJECTS.find(p => p.id === state.project)?.template;
+const docLocked = path => !isTemplate() && TEMPLATE_OWNED.test(path);
+
+export async function docs() {
+  return {
+    repo: state.project === 'sample-game' ? 'https://github.com/you/sample-game' : '', template: isTemplate(),
+    docs: Object.entries(sampleDocs()).map(([path, f]) => ({
+      path, ...summarize(f.text), hash: hashOf(f.text), size: f.text.length, dirty: !!f.dirty, locked: docLocked(path), at: f.at, by: f.dirty ? '' : f.by,
+    })),
+  };
+}
+
+export async function doc(path) {
+  const f = sampleDocs()[path];
+  if (!f) throw new Error(`There's no doc ${path}.`);
+  return { path, text: f.text, hash: hashOf(f.text), dirty: !!f.dirty, locked: docLocked(path), last: { at: f.at, by: f.by, subject: f.subject } };
+}
+
+export async function saveDoc(path, text, base, message) {
+  const f = sampleDocs()[path];
+  if (!f) throw new Error(`There's no doc ${path}.`);
+  if (docLocked(path)) throw new Error(`${path} belongs to the template, so it changes there, not in a game. Ask Claude to change it.`);
+  if (hashOf(f.text) !== base) return { conflict: true, hash: hashOf(f.text) };
+  if (lf(text) === lf(f.text)) return { nothing: true };
+  await new Promise(resolve => setTimeout(resolve, 700)); // a push takes a moment
+  Object.assign(f, { text, at: ago(0), by: 'Sample User', subject: message || `${path.split('/').pop()}: edited in Rocco`, dirty: false });
+  return { saved: true, commit: 'd0c5e1a', pushed: true, note: '' };
+}
+
 // One worker steps along and finishes shortly after opening, to show live steps and a card arriving.
 export function start() {
   const camera = () => data['sample-game']?.tasks.find(x => x.id === 'T-046');

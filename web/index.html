@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="styles/workboard.css">
 <link rel="stylesheet" href="styles/connections.css">
 <link rel="stylesheet" href="styles/history.css">
+<link rel="stylesheet" href="styles/docs.css">
 <link rel="stylesheet" href="styles/settings.css">
 <link rel="stylesheet" href="styles/dialogs.css">
 <link rel="stylesheet" href="styles/mascot.css">
@@ -48,6 +49,10 @@
       <a href="#history" data-view="history" title="History">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
         <span class="label">History</span>
+      </a>
+      <a href="#docs" data-view="docs" title="Docs">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+        <span class="label">Docs</span>
       </a>
     </nav>
     <div class="nav-label">System</div>
@@ -129,6 +134,27 @@
         </a>
       </div>
       <div id="histBody"></div>
+    </section>
+
+    <section class="view view-wide" data-view="docs" hidden>
+      <div class="head">
+        <h1>Docs</h1><span class="sub" id="docsSub"></span>
+        <span class="sp"></span>
+        <a class="ghost" id="docsRepo" target="_blank" rel="noreferrer" hidden>
+          Open on GitHub
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+        </a>
+      </div>
+      <div class="docs">
+        <div class="panel doc-tree">
+          <label class="dt-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input id="docsFilter" placeholder="Filter docs" autocomplete="off" aria-label="Filter docs">
+          </label>
+          <div class="dt-list" id="docsTree"></div>
+        </div>
+        <div class="doc-pane" id="docPane"></div>
+      </div>
     </section>
 
     <section class="view" data-view="settings" hidden>

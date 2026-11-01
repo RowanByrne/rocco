@@ -1,7 +1,8 @@
-// The summary that appears when the pointer rests on a card.
+// The summary that appears when the pointer rests on a card or a doc.
 import { $ } from '../lib/dom.js';
 
 const pop = $('#pop');
+const sources = []; // { selector, summary } for each kind of thing that has one
 let hovered = null;
 let timer = null;
 
@@ -13,15 +14,22 @@ export function hidePopover() {
 
 // selector: what to hover over; summary(el): its HTML, or '' for none.
 export function initPopover(selector, summary) {
-  document.addEventListener('mouseover', e => {
-    const el = e.target.closest(selector);
-    if (el === hovered) return;
-    hidePopover();
-    if (!el || $('#sheet').classList.contains('open')) return;
-    hovered = el;
-    timer = setTimeout(() => show(el, summary(el)), 280);
-  });
-  document.addEventListener('scroll', hidePopover, true);
+  if (!sources.length) {
+    document.addEventListener('mouseover', over);
+    document.addEventListener('scroll', hidePopover, true);
+  }
+  sources.push({ selector, summary });
+}
+
+// One listener for every kind, so moving within one thing doesn't hide its summary.
+function over(e) {
+  let el = null, summary = null;
+  for (const s of sources) { el = e.target.closest(s.selector); if (el) { summary = s.summary; break; } }
+  if (el === hovered) return;
+  hidePopover();
+  if (!el || $('#sheet').classList.contains('open')) return;
+  hovered = el;
+  timer = setTimeout(() => show(el, summary(el)), 280);
 }
 
 // To the right of the element, else below it, kept on screen.

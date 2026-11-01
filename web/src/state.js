@@ -9,6 +9,8 @@ export const state = {
   me: null,             // the user: git name and email, GitHub avatar, Claude account, this PC
   conn: null,           // Connections: { checking, checkedAt, online, items }
   history: null,        // History: { repo, main, branches, lanes }
+  docs: null,           // Docs: { repo, template, docs }, every Markdown file in the repo
+  doc: '',              // the doc open in Docs: its path in the repo
   online: true,         // false while the Rocco server can't be reached
   view: 'workboard',
 };

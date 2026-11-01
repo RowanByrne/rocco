@@ -5,6 +5,7 @@ import { ACTIONS, keyFor, run } from '../hotkeys.js';
 import { go } from '../router.js';
 import { switchProject } from '../projects.js';
 import { openTask } from '../views/workboard.js';
+import { showDoc } from '../views/docs.js';
 import { openNewProject } from './new-project.js';
 
 const modal = $('#paletteModal');
@@ -16,7 +17,7 @@ let items = [], shown = [], active = 0;
 export const paletteOpen = () => modal.classList.contains('open');
 
 function collect() {
-  const views = ['workboard', 'history', 'connections', 'settings', 'metrics'];
+  const views = ['workboard', 'history', 'docs', 'connections', 'settings', 'metrics'];
   return [
     ...ACTIONS.filter(a => !a.id.startsWith('go-') && a.id !== 'palette').map(a => ({ group: 'Actions', label: a.label, hint: keyFor(a.id), run: () => run(a.id) })),
     { group: 'Actions', label: 'New project', run: openNewProject },
@@ -26,6 +27,7 @@ function collect() {
       run: () => { go('workboard'); openTask(t.id); },
     })),
     ...state.projects.filter(p => p.id !== state.project).map(p => ({ group: 'Switch project', label: p.name, hint: p.phase, run: () => switchProject(p.id) })),
+    ...(state.docs?.docs || []).map(d => ({ group: 'Docs', label: d.path, hint: d.title, run: () => showDoc(d.path) })),
   ];
 }
 

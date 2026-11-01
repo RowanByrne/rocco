@@ -4,6 +4,7 @@ Rocco is the web app for making games from this template. One Rocco serves every
 
 - **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval; the inbox, where things Claude spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options; Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
+- **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask Claude to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (CLAUDE.md "Template-owned files", and `rocco/`) can't be edited here; Claude changes them through the template.
 - **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
 - **Settings:** desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, and hotkeys. Kept per browser.
 - **Metrics:** not built yet.
@@ -34,6 +35,7 @@ rocco/
     projects.ps1         projects, lanes, Main, the user, new projects
     connections.ps1      project links and this PC's tools
     history.ps1          main's commits, open branches, each lane's reflog
+    docs.ps1             the repo's Markdown, one doc, saving and pushing the user's edit
     http.ps1             static files, the API, the server loop
   web/                   the app
     index.html
@@ -54,9 +56,9 @@ rocco/
       notify.js          desktop notifications
       mascot.js          Rocco, the little guy on the note box
       demo.js            sample data
-      lib/               dom, format, icons, brands (logos), storage
+      lib/               dom, format, icons, brands (logos), storage, markdown (for reading docs)
       ui/                menu, popover, sheet, toast
-      views/             workboard, composer, history, connections, settings
+      views/             workboard, composer, history, docs, connections, settings
       dialogs/           new-project, markup (draw on a screenshot), palette (Ctrl+K)
 ```
 
@@ -90,6 +92,8 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /api/state?p=` | The project's tasks, lanes (how many, which are open) and Main's last change |
 | `GET /api/connections?p=[&refresh=1]` | Project links and this PC's tools; the PC part is re-checked in the background |
 | `GET /api/history?p=` | Main's last 40 commits, branches other than main, and each lane's state and recent reflog |
+| `GET /api/docs?p=` | Every Markdown file in the repo: title, preview, sections, last change, uncommitted or not, template-owned or not |
+| `GET /api/docs/file?p=&path=` | One doc: its text, a hash of it, and its last commit |
 | `GET /api/tasks/<id>/changes?p=` | The files a task changed: its merge into main, else its branch against main |
 | `GET /files/<task>/<file>?p=` | A screenshot or a sound option |
 | `GET /api/jobs/<id>` | A new project's progress |
@@ -100,6 +104,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/history/bookmark?p=` | Bookmark a commit, or remove its bookmark (`{ hash }`) |
 | `POST /api/links/elevenlabs?p=` | Link ElevenLabs (`{ key }`): checked with ElevenLabs, then kept as `ELEVENLABS_API_KEY` in the user's environment. The key is never sent back |
 | `POST /api/links/elevenlabs/remove?p=` | Unlink it: removes the key from the user's environment |
+| `POST /api/docs/save?p=` | The user's edit to a doc (`{ path, text, base, message }`): committed on main and pushed. `{ conflict, hash }` instead if the doc's hash isn't `base` any more; refused for template-owned docs in a game |
 | `POST /api/send?p=` | Queue everything in the inbox |
 | `POST /api/projects/new` | Start a new project: `{ name, code, repo }` |
 
