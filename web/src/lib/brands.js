@@ -27,8 +27,9 @@ const brandOf = item => BRANDS[item.name] || { glyph: / plugin$/.test(item.name)
 // size: '' (40px), 'sm' (30px) or 'lg' (52px).
 export function logoHTML(item, size = '') {
   const b = brandOf(item);
-  const src = b.img || (b.logo ? `${SIMPLE_ICONS}${b.logo}.svg` : '');
-  const mark = src ? `<img src="${src}" alt="" data-glyph="${b.glyph}">` : icon[b.glyph];
+  // Our own logo keeps its colors and fills the tile; brand marks are drawn white on the brand's color.
+  const mark = b.img ? `<img class="own" src="${b.img}" alt="" data-glyph="${b.glyph}">`
+    : b.logo ? `<img src="${SIMPLE_ICONS}${b.logo}.svg" alt="" data-glyph="${b.glyph}">` : icon[b.glyph];
   return `<span class="brand${size ? ' ' + size : ''}" style="--brand:${b.color}">${mark}</span>`;
 }
 
