@@ -1,4 +1,4 @@
-# The HTTP side: the app's files from web\, the JSON API (rocco\README.md "API"), and the server loop.
+# The HTTP side: the app's files from web\, the JSON API (README.md "API"), and the server loop.
 
 function Send($ctx, [int]$code, [string]$type, [byte[]]$bytes) {
 	$res = $ctx.Response
@@ -6,7 +6,8 @@ function Send($ctx, [int]$code, [string]$type, [byte[]]$bytes) {
 	$res.ContentType = $type
 	$res.Headers['Cache-Control'] = 'no-store'
 	$res.ContentLength64 = $bytes.Length
-	$res.OutputStream.Write($bytes, 0, $bytes.Length)
+	# A HEAD request (a check that the server is up) gets the headers only.
+	if ($ctx.Request.HttpMethod -ne 'HEAD') { $res.OutputStream.Write($bytes, 0, $bytes.Length) }
 	$res.OutputStream.Close()
 }
 function Send-Json($ctx, $value, [int]$code = 200) { Send $ctx $code 'application/json; charset=utf-8' $Utf8.GetBytes((ConvertTo-Json -InputObject $value -Depth 8 -Compress)) }

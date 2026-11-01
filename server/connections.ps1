@@ -133,7 +133,7 @@ function Get-LibraryConnections([bool]$refresh) {
 # Everything installed on this PC, against the latest versions online. Runs as a job, so it can't
 # use anything defined outside this block.
 $CheckPc = {
-	param([string]$roDev, [string]$appDir)
+	param([string]$roDev, [string]$roccoDir)
 	$ErrorActionPreference = 'SilentlyContinue'
 	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 	$net = @{ up = $true }
@@ -245,16 +245,18 @@ $CheckPc = {
 
 	# Rocco itself (README.md "Updating"). A release newer than the installed commit is an update; a development copy,
 	# ahead of every release, is never offered an older one. A check in the background never asks anyone to sign in.
+	# Git's complaints go to nul: anything this job's programs write to stderr fails the whole job. No ^ in the
+	# arguments (cmd eats it), and no quotes nested in quotes (Windows PowerShell drops what follows them).
 	$env:GIT_TERMINAL_PROMPT = '0'; $env:GCM_INTERACTIVE = 'never'
-	function RoccoGit([string]$arguments) { "$(Run 'git.exe' "-C `"$appDir`" $arguments")".Trim() }
-	function RoccoTest([string]$arguments) { (Run 'cmd.exe' "/d /c git -C `"$appDir`" $arguments >nul 2>nul && echo yes") -match 'yes' }
+	function RoccoGit([string]$arguments) { $out = Run 'cmd.exe' ('/d /c git -C "' + $roccoDir + '" ' + $arguments + ' 2>nul'); "$out".Trim() }
+	function RoccoTest([string]$arguments) { (Run 'cmd.exe' ('/d /c git -C "' + $roccoDir + '" ' + $arguments + ' >nul 2>nul && echo yes')) -match 'yes' }
 	$installed = RoccoGit 'describe --tags --exact-match --match v* HEAD'
 	$onBranch = RoccoGit 'symbolic-ref --short -q HEAD'
-	$version = if ($installed) { $installed } else { "$onBranch @ $(RoccoGit 'rev-parse --short HEAD')" }
+	$version = if ($installed) { $installed } else { $onBranch + ' @ ' + (RoccoGit 'rev-parse --short HEAD') }
 	$hasOrigin = [bool](RoccoGit 'remote get-url origin')
-	$fetched = $hasOrigin -and $net.up -and (RoccoTest 'fetch --tags --force --quiet origin')
-	$newest = "$((RoccoGit 'tag -l v* --sort=-v:refname') -split "`r?`n" | Select-Object -First 1)"
-	$newer = $newest -and $newest -ne $installed -and (RoccoGit 'rev-parse HEAD') -ne (RoccoGit "rev-parse $newest^{commit}") -and (RoccoTest "merge-base --is-ancestor HEAD $newest")
+	$fetched = $hasOrigin -and (RoccoTest 'fetch --tags --force --quiet origin')
+	$newest = @((RoccoGit 'tag -l v* --sort=-v:refname') -split '\r?\n')[0]
+	$newer = $newest -and $newest -ne $installed -and (RoccoGit 'rev-parse HEAD') -ne (RoccoGit "rev-list -n 1 $newest") -and (RoccoTest "merge-base --is-ancestor HEAD $newest")
 	$detail = if ($installed) { 'In the RoDev folder''s _tools\rocco' } else { "Development copy on $(if ($onBranch) { $onBranch } else { 'no branch' })" }
 	if ($hasOrigin -and -not $fetched) { $detail += " $([char]0x00B7) couldn't check for updates" }
 	$rocco = Item 'Tools' 'Rocco' $(if ($newer) { 'update' } else { 'ok' }) $version $newest $detail $(if ($newer) { "Update it from here, or in _tools\rocco check out $newest and restart Rocco." } else { '' }) ''
@@ -345,7 +347,9 @@ function Update-Rocco([string]$tag) {
 	if ($tag -notmatch '^v\d+(\.\d+)*$') { throw "Not a Rocco release: '$tag'." }
 	if (-not (Invoke-Git $AppDir rev-parse --verify --quiet "refs/tags/$tag")) { throw "There's no release $tag here. Check for updates again." }
 	if (@(Invoke-Git $AppDir status --porcelain --untracked-files=no | Where-Object { $_ }).Count) { throw 'Rocco has changes of its own in _tools\rocco, so it won''t update over them.' }
-	$newer = "$(Invoke-Git $AppDir rev-parse HEAD)" -ne "$(Invoke-Git $AppDir rev-parse "$tag^{commit}")" -and (Invoke-GitText $AppDir merge-base --is-ancestor HEAD $tag).ok
+	$here = "$(Invoke-Git $AppDir rev-parse HEAD)"
+	$target = "$(Invoke-Git $AppDir rev-list -n 1 $tag)"
+	$newer = $here -ne $target -and (Invoke-GitText $AppDir merge-base --is-ancestor HEAD $tag).ok
 	if (-not $newer) { throw "$tag isn't newer than this Rocco ($RoccoVersion)." }
 	$checkout = Invoke-GitText $AppDir checkout --quiet $tag
 	if (-not $checkout.ok) { throw "Couldn't switch to ${tag}: $($checkout.text)" }
