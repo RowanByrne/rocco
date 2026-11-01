@@ -40,7 +40,7 @@ function Send-Static($ctx, [string]$path) {
 function Invoke-Request($ctx) {
 	$req = $ctx.Request
 	$path = $req.Url.AbsolutePath
-	$get = $req.HttpMethod -eq 'GET'
+	$get = $req.HttpMethod -in 'GET', 'HEAD' # HEAD: the same answer without its body (Send)
 
 	# Not about one project.
 	if ($get -and $path -eq '/api/projects') {
