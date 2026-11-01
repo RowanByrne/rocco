@@ -112,7 +112,8 @@ function questionHTML() {
     + `<div class="ob-body"><h2 class="ob-title">${esc(q.prompt)}</h2>${q.hint ? `<p class="ob-lede">${esc(q.hint)}</p>` : ''}`
     + `<textarea class="field ob-text" id="obText" placeholder="${esc(q.placeholder || 'As much or as little as you like')}" aria-label="${esc(q.prompt)}">${esc(value)}</textarea>`
     + `<div class="ob-for">Goes into ${esc((q.for || []).join(', '))}</div></div>`
-    + foot(button('back', 'Back'), `${value.trim() ? '' : button('skip', 'Skip', 'btn ghost-btn')}${button('next', 'Next <kbd>Ctrl</kbd><kbd>Enter</kbd>', 'btn accent')}`);
+    + foot(button('back', 'Back'), ob.editing ? button('next', 'Done <kbd>Ctrl</kbd><kbd>Enter</kbd>', 'btn accent')
+      : `${value.trim() ? '' : button('skip', 'Skip', 'btn ghost-btn')}${button('next', 'Next <kbd>Ctrl</kbd><kbd>Enter</kbd>', 'btn accent')}`);
 }
 
 function jobHTML() {
@@ -176,7 +177,8 @@ function render() {
   root.innerHTML = `<div class="ob-card">${html()}</div>`;
   root.querySelectorAll('textarea').forEach(fit);
   const focus = root.querySelector('#obText') || root.querySelector('[data-field="name"]:placeholder-shown') || root.querySelector('textarea');
-  if (focus && ob.screen !== 'tiles') setTimeout(() => focus.focus({ preventScroll: true }), 30);
+  // At once, so a quick Ctrl+Enter or keystroke after the last one lands here.
+  if (focus && ob.screen !== 'tiles') focus.focus({ preventScroll: true });
 }
 
 function fit(el) { el.style.height = 'auto'; el.style.height = Math.min(Math.max(el.scrollHeight + 2, el.classList.contains('sm') ? 90 : 160), 420) + 'px'; }
@@ -300,6 +302,8 @@ async function send() {
 }
 
 function step(delta) {
+  // An answer opened from the review goes back to it.
+  if (ob.editing) { show('review', { editing: false }); return; }
   const list = questions();
   const next = ob.index + delta;
   if (next < 0) show('basics');
@@ -319,7 +323,7 @@ export function initOnboarding() {
     else if (action === 'basics-next') ob.job && ob.job.state !== 'failed' ? show('question', { index: 0 }) : (ob.job = null, startProject());
     else if (action === 'back') ob.screen === 'basics' ? show('start') : ob.screen === 'review' ? show('question', { index: questions().length - 1 }) : step(-1);
     else if (action === 'next' || action === 'skip') step(1);
-    else if (action === 'goto') show('question', { index: +arg });
+    else if (action === 'goto') show('question', { index: +arg, editing: true });
     else if (action === 'finish') finish();
     else if (action === 'tile') show('tile', { tile: arg });
     else if (action === 'tiles') show('tiles');

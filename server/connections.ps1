@@ -45,7 +45,11 @@ function Get-TemplateConnection([bool]$refresh) {
 	}
 	Update-TemplateTags $refresh
 	if (-not $releases) { return Conn 'Project' 'Template' 'ok' '' '' 'The template has no releases yet (as of the last check).' '' '' }
-	$current = "$(Invoke-Git $RepoDir describe --tags --abbrev=0 --match 'template/v*' main)" -replace '^template/', ''
+	# A game being brought in gets the template when it's set up, not as an update.
+	if (-not (Test-Path (Join-Path $RepoDir 'docs\game\PROJECT.md'))) {
+		return Conn 'Project' 'Template' 'ok' '' $short[0] "Being brought in: setting it up merges in template $($short[0]) (the template's SETUP.md `"Existing game`")." '' ''
+	}
+	$current ="$(Invoke-Git $RepoDir describe --tags --abbrev=0 --match 'template/v*' main)" -replace '^template/', ''
 	# Releases this game doesn't have yet, newest first.
 	$newer = @($releases | Where-Object { -not (Invoke-GitText $RepoDir merge-base --is-ancestor $_ main).ok })
 	if (-not $newer) { return Conn 'Project' 'Template' 'ok' $current $short[0] "On the newest template release, $($short[0]) (as of the last check)." '' '' }

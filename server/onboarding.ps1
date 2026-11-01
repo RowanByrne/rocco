@@ -16,11 +16,12 @@ $FlowNames = @{ new = 'A new game'; existing = 'A game brought in' }
 # ONBOARDING.md back into answers: each one follows its <!-- answer: id --> marker and heading, up to its *For:* line.
 function Read-Answers {
 	$path = Get-AnswersPath
-	$result = [pscustomobject]@{ flow = ''; source = ''; answers = [ordered]@{} }
+	$result = [pscustomobject]@{ flow = ''; source = ''; started = ''; answers = [ordered]@{} }
 	if (-not (Test-Path $path)) { return $result }
 	$text = [IO.File]::ReadAllText($path, $Utf8) -replace "`r`n", "`n"
 	if ($text -match '(?m)^- \*\*Flow:\*\* (.+)$') { $name = $Matches[1].Trim(); $result.flow = @($FlowNames.Keys | Where-Object { $FlowNames[$_] -eq $name })[0] }
 	if ($text -match '(?m)^- \*\*Source:\*\* (.+)$') { $result.source = $Matches[1].Trim() }
+	if ($text -match '(?m)^- \*\*Started:\*\* (.+)$') { $result.started = $Matches[1].Trim() }
 	foreach ($m in [regex]::Matches($text, '<!-- answer: ([\w-]+) -->\n#+ [^\n]*\n\n([\s\S]*?)\n\n\*For: [^\n]*\*')) {
 		$result.answers[$m.Groups[1].Value] = $m.Groups[2].Value.Trim()
 	}
@@ -29,12 +30,12 @@ function Read-Answers {
 
 # The whole file, in the survey's order: the flow's steps, then the tiles under "More detail". Unanswered questions
 # are left out, so the agent only sees what the user said.
-function Format-Answers($survey, [string]$flow, [string]$source, $answers) {
+function Format-Answers($survey, [string]$flow, [string]$source, [string]$started, $answers) {
 	$lines = @('# Onboarding', '',
 		'The user''s answers from Rocco''s onboarding, in their own words. An agent turns them into the docs (docs/workflow/SETUP.md). Rocco''s "Add game details" adds more, and they can be edited here.', '',
 		"- **Flow:** $($FlowNames[$flow])")
 	if ($source) { $lines += "- **Source:** $source" }
-	$lines += "- **Started:** $((Get-Date).ToString('yyyy-MM-dd'))", ''
+	$lines += "- **Started:** $(if ($started) { $started } else { (Get-Date).ToString('yyyy-MM-dd') })", ''
 	$block = { param($q, [string]$heading)
 		$answer = "$($answers[$q.id])".Trim()
 		if (-not $answer) { return @() }
@@ -67,7 +68,7 @@ function Save-Answers([string]$flow, [string]$source, $posted) {
 	$path = Get-AnswersPath
 	$first = -not (Test-Path $path)
 	New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
-	[IO.File]::WriteAllText($path, (Format-Answers $survey $flow $source $answers), $Utf8)
+	[IO.File]::WriteAllText($path, (Format-Answers $survey $flow $source $current.started $answers), $Utf8)
 	$script:DocsCache = @{}
 
 	$relative = 'docs/game/ONBOARDING.md'
