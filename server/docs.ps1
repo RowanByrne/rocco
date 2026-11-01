@@ -141,18 +141,7 @@ function Save-Doc([string]$path, [string]$text, [string]$base, [string]$message,
 
 	$result = [pscustomobject]@{ saved = $true; commit = "$(Invoke-Git $RepoDir rev-parse --short HEAD)"; pushed = $false; note = '' }
 	if (-not (Invoke-Git $RepoDir remote get-url origin)) { $result.note = 'Committed on main. This project has no GitHub repo yet, so nothing was pushed.'; return $result }
-	$fetch = Invoke-GitText $RepoDir fetch origin main
-	if (-not $fetch.ok) { $result.note = "Committed on main, but GitHub couldn't be reached, so it isn't pushed: $($fetch.text)"; return $result }
-	if (-not (Invoke-GitText $RepoDir merge-base --is-ancestor origin/main HEAD).ok) {
-		$merge = Invoke-GitText $RepoDir merge --no-edit origin/main
-		if (-not $merge.ok) {
-			Invoke-GitText $RepoDir merge --abort | Out-Null
-			$result.note = 'Committed on main, but not pushed: main on GitHub has changes that clash with it. Say "refresh" to Claude to merge them.'
-			return $result
-		}
-	}
-	$push = Invoke-GitText $RepoDir push origin main
-	if ($push.ok) { $result.pushed = $true } else { $result.note = "Committed on main, but the push failed: $($push.text)" }
-	$script:HistoryCache = @{}; $script:MainCache = @{}
+	$problem = Push-Main
+	if ($problem) { $result.note = "Committed on main, but $problem" } else { $result.pushed = $true }
 	$result
 }

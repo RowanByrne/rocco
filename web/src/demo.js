@@ -134,31 +134,67 @@ export async function me() {
   return { name: 'Sample User', login: 'sample-user', email: 'you@example.com', claude: 'you@example.com', pc: 'THIS-PC', avatar: '' };
 }
 
+// Each kind of one-click fix (server/actions.ps1). A fix that's been run shows its row up to date.
+const fixed = new Set();
+const done = item => item.action && fixed.has(item.action.id)
+  ? { ...item, status: 'ok', version: item.latest || item.version, action: undefined, update: '', command: '', detail: item.fixedDetail || item.detail } : item;
+
 export async function connections() {
   return { checking: false, checkedAt: ago(3), online: true, items: [
     { group: 'Project', name: 'Template', status: 'update', version: 'v1.1.0', latest: 'v1.3.0', detail: 'Template v1.3.0 is out; this game is on v1.1.0.',
       update: "Ask Claude to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md).",
-      release: { tag: 'template/v1.3.0', action: 'ask', notes: 'v1.3.0\nDocs: a WORLD.md for the map\nLANES.md: how many lanes a PC opens\n\nv1.2.0\nRocco: Docs view' } },
-    { group: 'Project', name: 'GitHub', status: 'ok', detail: 'you/sample-game' },
-    { group: 'Project', name: 'Commit check', status: 'ok', detail: 'Refuses files over 5 MB.' },
+      release: { tag: 'template/v1.3.0', notes: 'v1.3.0\nDocs: a WORLD.md for the map\nLANES.md: how many lanes a PC opens\n\nv1.2.0\nRocco: Docs view' },
+      action: { kind: 'ask', label: 'Ask Claude to update', note: 'Update from template to template/v1.3.0 (TEMPLATE.md "Taking an update").' } },
+    // Sky Farm has no GitHub repo yet: its row asks for one.
+    state.project === 'sky-farm' ? { group: 'Project', name: 'GitHub', status: 'warn', detail: 'No GitHub repo yet, so nothing is backed up.', fixedDetail: 'you/sky-farm',
+      update: 'Create an empty private repo on GitHub (no README), then connect it: Rocco adds it and pushes main (NEW-PROJECT.md).', command: 'git remote add origin <url>',
+      action: { kind: 'input', label: 'Connect', id: 'github-connect', placeholder: 'https://github.com/you/game.git' } }
+      : { group: 'Project', name: 'GitHub', status: 'ok', detail: 'you/sample-game' },
+    { group: 'Project', name: 'Commit check', status: 'warn', detail: 'Off: big files can get into git.', fixedDetail: 'Refuses files over 5 MB.',
+      update: 'Turn it on in repo\\:', command: 'git config core.hooksPath tools/hooks', action: { kind: 'run', label: 'Turn on', id: 'hooks-on' } },
     { group: 'Project', name: 'Studio sync', status: 'ok', detail: 'Lync is serving Main and 7 lanes.' },
     { group: 'Libraries', name: 'TopbarPlus', status: 'ok', version: 'v3.5.0', latest: 'v3.5.0', detail: 'github.com/1ForeverHD/TopbarPlus · no local patches' },
     { group: 'Libraries', name: 'Cmdr', status: 'update', version: 'v1.9.0', latest: 'v1.13.1', detail: 'github.com/evaera/Cmdr · local patches: admin check reads Config',
-      update: 'Ask the conductor to update it: vendor the new release, re-apply any local patches, and update ARCHITECTURE.md (CODING.md "Third-party code").' },
+      update: 'Claude updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md "Third-party code").',
+      action: { kind: 'ask', label: 'Ask Claude to update', note: 'Update Cmdr from v1.9.0 to v1.13.1 (CODING.md "Third-party code").' } },
     { group: 'AI', name: 'Claude Code', status: 'ok', version: '2.1.312', latest: '2.1.312', detail: 'Signed in as you@example.com' },
     { group: 'AI', name: 'Codex', status: 'update', version: '0.165.0', latest: '0.166.0', detail: 'Signed in · makes images', update: 'It updates with the Codex app: restart the app.' },
     { group: 'Roblox', name: 'Roblox Studio', status: 'ok', version: '0.745.0', latest: '0.745.0', detail: '8 open' },
     { group: 'Roblox', name: 'Studio MCP', status: 'ok', detail: 'Registered as Roblox_Studio' },
-    { group: 'Roblox', name: 'Lync', status: 'ok', version: 'Alpha 30', latest: '0.30.14', detail: "In the RoDev folder's _tools\\lync" },
+    { group: 'Roblox', name: 'Lync', status: 'update', version: '0.30.12', latest: '0.30.14', detail: "In the RoDev folder's _tools\\lync",
+      update: 'Download the latest release into _tools\\lync (WORKSTATION.md).', action: { kind: 'window', label: 'Update', id: 'lync-update' } },
     { group: 'Roblox', name: 'Lync plugin', status: 'ok', detail: 'Lync installs and updates it.' },
     roccoUpdated ? { group: 'Tools', name: 'Rocco', status: 'ok', version: 'v0.3.0', latest: 'v0.3.0', detail: "In the RoDev folder's _tools\\rocco" }
       : { group: 'Tools', name: 'Rocco', status: 'update', version: 'v0.2.0', latest: 'v0.3.0', detail: "In the RoDev folder's _tools\\rocco",
         update: 'Update it from here, or in _tools\\rocco check out v0.3.0 and restart Rocco.',
-        release: { tag: 'v0.3.0', notes: 'Docs: every doc in the repo, with previews, an ask box, and edit and push.\nConnections: Rocco tells you when a new release is out, and updates itself.' } },
-    { group: 'Tools', name: 'Git', status: 'update', version: '2.55.0', latest: '2.56.0', detail: 'Git for Windows', update: 'Update it:', command: 'git update-git-for-windows' },
-    { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', update: 'Install it if you want Claude to handle GitHub for you:', command: 'winget install GitHub.cli' },
+        release: { tag: 'v0.3.0', notes: 'Docs: every doc in the repo, with previews, an ask box, and edit and push.\nConnections: Rocco tells you when a new release is out, and updates itself.' },
+        action: { kind: 'rocco', label: 'Update to v0.3.0', tag: 'v0.3.0' } },
+    { group: 'Tools', name: 'Git', status: 'update', version: '2.55.0', latest: '2.56.0', detail: 'Git for Windows', update: 'Update it:', command: 'git update-git-for-windows',
+      action: { kind: 'window', label: 'Update', id: 'git-update' } },
+    { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', fixedDetail: 'gh', update: 'Install it if you want Claude to handle GitHub for you:',
+      command: 'winget install --id GitHub.cli --exact', action: { kind: 'window', label: 'Install', id: 'gh-install' } },
     elevenLabs(),
-  ] };
+  ].map(done) };
+}
+
+// The demo's fixes: quick ones at once, updates "in their own window" for a few seconds.
+const runs = {};
+export async function action(id, value = '') {
+  await new Promise(resolve => setTimeout(resolve, 500));
+  if (id === 'hooks-on') { fixed.add(id); return { message: 'The commit check is on.' }; }
+  if (id === 'github-connect') {
+    if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/.test(value.trim())) throw new Error("That isn't a GitHub repo address, like https://github.com/you/game.git");
+    fixed.add(id);
+    return { message: 'Connected to GitHub, and main is pushed.' };
+  }
+  const run = `demo-${id}`;
+  runs[run] = { id, until: Date.now() + 3500, label: { 'lync-update': 'Updating Lync', 'git-update': 'Updating Git for Windows', 'gh-install': 'Installing the GitHub CLI' }[id] || 'Updating' };
+  return { run, label: runs[run].label };
+}
+export async function actionRun(run) {
+  const r = runs[run], running = Date.now() < r.until;
+  if (!running) fixed.add(r.id);
+  return { running, ok: !running, label: r.label };
 }
 
 // ElevenLabs starts unlinked; any key links, on the Starter plan.

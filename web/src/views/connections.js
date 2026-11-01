@@ -7,7 +7,7 @@ import { icon } from '../lib/icons.js';
 import { logoHTML, useGlyphFallback } from '../lib/brands.js';
 import { api } from '../api.js';
 import { toast } from '../ui/toast.js';
-import { showSheet } from '../ui/sheet.js';
+import { showSheet, closeSheet } from '../ui/sheet.js';
 
 const PC_GROUPS = [['AI', 'AI'], ['Roblox', 'Roblox'], ['Tools', 'Developer tools']];
 const LABEL = { ok: 'Up to date', update: 'Update available', warn: 'Needs attention', missing: 'Missing', off: 'Off' };
@@ -31,10 +31,31 @@ export async function loadConnections(force) {
 const versionsHTML = c => (c.version ? `<span class="ver">${esc(c.version)}</span>` : '')
   + (c.status === 'update' && c.latest ? `${c.version ? '<span class="arrow">→</span>' : ''}<span class="ver new">${esc(c.latest)}</span>` : '');
 
-const fixHTML = c => (c.update ? `<span>${esc(c.update)}</span>` : '')
-  + (c.command ? `<code>${esc(c.command)}</code><button class="copy" data-copy="${esc(c.command)}">${icon.copy}Copy</button>` : '')
-  + (c.release?.action === 'ask' ? `<button class="btn-sm go" data-ask-template="${esc(c.release.tag)}">Ask Claude to update</button>`
-    : c.release ? `<button class="btn-sm go" data-update-rocco="${esc(c.release.tag)}">Update to ${esc(c.release.tag)}</button>` : '');
+// A row's one-click fix (server/actions.ps1), by kind: run (Rocco does it now), window (an update in a window of its
+// own, which Rocco waits for), input (run, with a value the user gives in the details), ask (a note for Claude),
+// rocco (Rocco's own update), link (a page to get it from). What's running keeps its spinner through re-renders.
+const busy = new Map();   // action key -> what its button says while it runs
+const asked = new Set();  // notes already added to Up next
+const actionKey = c => c.action.id || `${c.action.kind}:${c.name}`;
+
+function actionHTML(c, i, inSheet) {
+  const a = c.action;
+  if (!a) return '';
+  if (a.kind === 'link') return `<a class="btn-sm go act" href="${esc(a.url)}" target="_blank" rel="noreferrer">${esc(a.label)}${icon.external}</a>`;
+  if (busy.has(actionKey(c))) return `<button class="btn-sm go act" disabled><span class="spin"></span>${esc(busy.get(actionKey(c)))}</button>`;
+  if (a.kind === 'ask' && asked.has(a.note)) return `<button class="btn-sm act" disabled>${icon.checkSm}Asked</button>`;
+  if (a.kind === 'input' && inSheet) {
+    return `<span class="act-input"><input class="input" id="actInput" placeholder="${esc(a.placeholder || '')}" autocomplete="off" spellcheck="false">`
+      + `<button class="btn-sm go act" data-conn-act="${i}">${esc(a.label)}</button></span>`;
+  }
+  return `<button class="btn-sm go act" data-conn-act="${i}">${esc(a.label)}${a.kind === 'input' ? '…' : ''}</button>`;
+}
+
+// What to do, then its button. With a button, the command it stands for shows only in the details, for doing it by hand,
+// along with the words that lead into it ("Update it:").
+const fixHTML = (c, i, inSheet = false) => (c.update && (inSheet || !c.action || !/:\s*$/.test(c.update)) ? `<span>${esc(c.update)}</span>` : '')
+  + (c.command && (inSheet || !c.action) ? `<code>${esc(c.command)}</code><button class="copy" data-copy="${esc(c.command)}">${icon.copy}Copy</button>` : '')
+  + actionHTML(c, i, inSheet);
 
 function healthHTML(items) {
   const n = status => items.filter(c => c.status === status).length;
@@ -58,7 +79,7 @@ function attentionHTML(items) {
   return `<div class="section">Needs attention</div><div class="attn">`
     + rows.map(([c, i]) => `<div class="attn-row k-${esc(c.status)}" data-conn="${i}">${logoHTML(c, 'sm')}`
       + `<div class="attn-main"><div class="attn-title">${esc(c.name)}<span class="attn-ver">${versionsHTML(c)}</span></div>`
-      + `<div class="attn-fix">${c.update || c.command ? fixHTML(c) : esc(c.detail)}</div></div>`
+      + `<div class="attn-fix">${c.update || c.command || c.action ? fixHTML(c, i) : esc(c.detail)}</div></div>`
       + `<span class="state-pill">${esc(stateLabel(c))}</span></div>`).join('')
     + `</div>`;
 }
@@ -129,9 +150,9 @@ function openConnection(i) {
   const row = (key, value) => value ? `<div class="kv-row"><span>${key}</span><span>${esc(value)}</span></div>` : '';
   const body = `<div class="cd-head">${logoHTML(c, 'lg')}<div class="cd-title"><h2 class="s-title">${esc(c.name)}</h2><div class="s-where">${esc(c.detail)}</div></div></div>`
     + `<div class="cd-rows">${row('Status', stateLabel(c))}${row(c.group === 'Libraries' ? 'In the game' : 'Installed', c.version)}${row('Latest', c.latest)}${row('Checked on', ofProject(c) ? currentProject().name : state.me?.pc || 'This PC')}</div>`
-    + (c.status !== 'ok' && !c.link && (c.update || c.command) ? `<div class="cd-fix"><small>${c.status === 'update' ? 'How to update' : 'How to fix'}</small><div class="attn-fix">${fixHTML(c)}</div></div>` : '')
+    + ((c.status !== 'ok' || c.action) && !c.link && (c.update || c.command || c.action) ? `<div class="cd-fix"><small>${c.status === 'update' ? 'How to update' : 'How to fix'}</small><div class="attn-fix">${fixHTML(c, i, true)}</div></div>` : '')
     + (c.link && c.status === 'warn' && c.update ? `<div class="cd-fix"><small>Heads up</small><div class="attn-fix"><span>${esc(c.update)}</span></div></div>` : '')
-    + (c.release?.notes ? `<div class="cd-fix"><small>What's new${c.release.action === 'ask' ? '' : ` in ${esc(c.release.tag)}`}</small><p class="cd-notes">${esc(c.release.notes)}</p></div>` : '')
+    + (c.release?.notes ? `<div class="cd-fix"><small>What's new${c.action?.kind === 'ask' ? '' : ` in ${esc(c.release.tag)}`}</small><p class="cd-notes">${esc(c.release.notes)}</p></div>` : '')
     + linkHTML(c);
   showSheet(`conn:${i}`, { color: COLOR[c.status], chip: stateLabel(c), id: ofProject(c) ? 'This project' : 'This PC', body });
 }
@@ -161,33 +182,61 @@ async function link(button) {
   }
 }
 
-// Rocco switches to the release and restarts; when the new version answers, the page reloads (main.js).
-async function updateRocco(button) {
-  const tag = button.dataset.updateRocco;
-  button.disabled = true;
-  button.innerHTML = '<span class="spin"></span>Updating';
-  try {
-    await api.updateRocco(tag);
-    toast(`Updating Rocco to ${tag}. It restarts in a moment`, 'var(--update)');
-    loadConnections(false);
-  } catch (e) {
-    toast(`Couldn't update Rocco: ${e.message}`, 'var(--red)');
-    button.disabled = false;
-    button.textContent = `Update to ${tag}`;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// An update in its own window: done when the window closes. It stays open on failure, until the user has read it.
+async function waitForRun(run) {
+  for (;;) {
+    await sleep(1500);
+    try { const s = await api.actionRun(run); if (!s.running) return s; } catch { /* Rocco is busy or restarting: ask again */ }
   }
 }
 
-// A template release is merged by the conductor (the template's TEMPLATE.md), so this asks for it in Up next.
-async function askTemplateUpdate(button) {
-  const tag = button.dataset.askTemplate;
+// A row's button (actionHTML). Afterwards the PC is checked again, so the row shows what's true now.
+async function runAction(button) {
+  const i = +button.dataset.connAct, c = state.conn?.items[i], a = c?.action;
+  if (!a) return;
+  const inSheet = !!button.closest('#sheet');
+  // The value goes in the details. They slide in, and a field can't take focus until they're showing.
+  if (a.kind === 'input' && !inSheet) { openConnection(i); setTimeout(() => $('#actInput')?.focus(), 80); return; }
+  if (a.kind === 'ask') {
+    button.disabled = true;
+    try {
+      await api.note(a.note, '');
+      asked.add(a.note);
+      toast('Added to Up next', 'var(--violet)');
+      button.innerHTML = `${icon.checkSm}Asked`;
+    } catch (e) { toast(`Couldn't add the note: ${e.message}`, 'var(--red)'); button.disabled = false; }
+    return;
+  }
+  const value = a.kind === 'input' ? ($('#actInput')?.value || '').trim() : '';
+  if (a.kind === 'input' && !value) { $('#actInput')?.focus(); return; }
+  const key = actionKey(c), label = button.textContent;
+  busy.set(key, a.kind === 'rocco' || a.kind === 'window' ? 'Updating' : 'Working');
   button.disabled = true;
+  button.innerHTML = `<span class="spin"></span>${busy.get(key)}`;
+  renderConnections();
+  let ok = false;
   try {
-    await api.note(`Update from template to ${tag} (TEMPLATE.md "Taking an update").`, '');
-    toast('Added to Up next', 'var(--violet)');
-    button.textContent = 'Asked';
+    // Rocco switches to the release and restarts; when the new version answers, the page reloads (main.js).
+    if (a.kind === 'rocco') { await api.updateRocco(a.tag); ok = true; toast(`Updating Rocco to ${a.tag}. It restarts in a moment`, 'var(--update)'); return; }
+    const r = await api.action(a.id, value);
+    if (r.run) {
+      toast(`${r.label} in its own window`, 'var(--update)');
+      const done = await waitForRun(r.run);
+      ok = done.ok;
+      toast(ok ? `${done.label}: done` : `${done.label} didn't finish. Its window said why`, ok ? 'var(--green)' : 'var(--red)');
+    } else {
+      ok = true;
+      toast(r.message);
+    }
   } catch (e) {
-    toast(`Couldn't add the note: ${e.message}`, 'var(--red)');
-    button.disabled = false;
+    toast(e.message, 'var(--red)');
+  } finally {
+    busy.delete(key);
+    if (button.isConnected && !ok) { button.disabled = false; button.textContent = label; }
+    if (ok && inSheet) closeSheet();
+    loadConnections(true);
   }
 }
 
@@ -213,17 +262,19 @@ export function initConnections() {
     else if (hit('[data-unlink]')) unlink(hit('[data-unlink]'));
     else if (hit('[data-link-replace]')) { const form = $('.link-form'); form.hidden = !form.hidden; if (!form.hidden) $('#linkKey').focus(); }
   });
-  $('#sheet').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'linkKey') { e.preventDefault(); $('[data-link]')?.click(); } });
+  $('#sheet').addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (e.target.id === 'linkKey') { e.preventDefault(); $('[data-link]')?.click(); }
+    if (e.target.id === 'actInput') { e.preventDefault(); $('#sheet [data-conn-act]')?.click(); }
+  });
   document.addEventListener('click', e => {
     const copy = e.target.closest('[data-copy]');
     if (copy) {
       navigator.clipboard?.writeText(copy.dataset.copy).then(() => toast('Copied'), () => toast("Couldn't copy", 'var(--red)'));
       return;
     }
-    const update = e.target.closest('[data-update-rocco]');
-    if (update) { updateRocco(update); return; }
-    const askTemplate = e.target.closest('[data-ask-template]');
-    if (askTemplate) { askTemplateUpdate(askTemplate); return; }
+    const act = e.target.closest('[data-conn-act]');
+    if (act) { runAction(act); return; }
     const item = e.target.closest('.view[data-view="connections"] [data-conn]');
     if (item) openConnection(+item.dataset.conn);
   });

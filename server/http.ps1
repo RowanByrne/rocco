@@ -48,6 +48,7 @@ function Invoke-Request($ctx) {
 	}
 	if ($get -and $path -eq '/api/me') { Send-Json $ctx (Get-Me); return }
 	if ($get -and $path -match '^/api/jobs/(\w+)$') { Send-Json $ctx (Get-JobStatus $Matches[1]); return }
+	if ($get -and $path -match '^/api/actions/runs/(\w+)$') { Send-Json $ctx (Get-ActionRun $Matches[1]); return }
 	if ($get -and $path -notmatch '^/(api|files)/') { Send-Static $ctx $path; return }
 
 	# Everything else is about one project, named by ?p=.
@@ -80,6 +81,11 @@ function Invoke-Request($ctx) {
 		return
 	}
 	if ($path -eq '/api/links/elevenlabs/remove') { Disconnect-ElevenLabs; Send-Json $ctx @{ ok = $true }; return }
+	# A Connections row's button (actions.ps1): only actions defined there can run.
+	if ($path -match '^/api/actions/([\w-]+)$') {
+		try { Send-Json $ctx (Invoke-ConnectionAction $Matches[1] ([string](Read-Json $req).value)) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
 	# Rocco moves to a newer release, then restarts on it once this answer is sent (README.md "Updating").
 	if ($path -eq '/api/rocco/update') {
 		try { Update-Rocco ([string](Read-Json $req).tag) } catch { Send-Text $ctx 400 $_.Exception.Message; return }

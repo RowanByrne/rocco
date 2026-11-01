@@ -81,6 +81,11 @@
   border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .cd-fix small { display: block; font-size: 11px; font-weight: 600; color: var(--c); letter-spacing: .02em; }
 .cd-fix .attn-fix { margin-top: 6px; }
+/* A row's one-click fix, and the field for one that needs a value (a GitHub repo) */
+.btn-sm.act { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.btn-sm.act:disabled { cursor: default; opacity: .8; }
+.act-input { display: flex; flex: 1 1 100%; gap: 6px; }
+.act-input .input { flex: 1; height: 30px; font-size: 12.5px; }
 .cd-notes { margin: 6px 0 0; white-space: pre-wrap; font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
 
 /* Linking an account (ElevenLabs): the key goes in once and is never shown again */

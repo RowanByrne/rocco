@@ -40,6 +40,9 @@ export const api = {
   // Accounts linked on this PC; the key is only ever sent, never read back.
   link: (service, key) => DEMO ? demo.link(service, key) : post(withProject(`/api/links/${service}`), { key }),
   unlink: service => DEMO ? demo.unlink(service) : post(withProject(`/api/links/${service}/remove`)),
+  // A Connections row's button: { message } once it's done, or { run, label } for an update in its own window.
+  action: (id, value) => DEMO ? demo.action(id, value) : post(withProject(`/api/actions/${id}`), { value }),
+  actionRun: run => DEMO ? demo.actionRun(run) : getJson(`/api/actions/runs/${run}`),
   // Rocco moves to a newer release and restarts; the page reloads when the new version answers.
   updateRocco: tag => DEMO ? demo.updateRocco(tag) : post(withProject('/api/rocco/update'), { tag }),
   send: () =>DEMO ? demo.send() : post(withProject('/api/send')),

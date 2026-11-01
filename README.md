@@ -5,7 +5,13 @@ Rocco is the web app for making games from this template. One Rocco serves every
 - **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval; the inbox, where things Claude spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options; Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
 - **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask Claude to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (CLAUDE.md "Template-owned files", and `rocco/`) can't be edited here; Claude changes them through the template.
-- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The Template row shows which template release the game is on; when a newer one is out, it shows what's new and asks Claude to bring it in (the template's TEMPLATE.md). Rocco's own row does the same for Rocco, and updates it in one click ("Updating"). The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
+- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The Template row shows which template release the game is on; when a newer one is out, it shows what's new and asks Claude to bring it in (the template's TEMPLATE.md). Rocco's own row does the same for Rocco, and updates it in one click ("Updating"). Every fix is one click, its command still shown in the details for doing it by hand:
+  - **Quick fixes** Rocco does at once: turning on the commit check, adding the template remote, connecting an empty GitHub repo and pushing main, pushing main, starting Lync.
+  - **Updates to this PC's tools** (Claude Code, Codex, Git, the GitHub CLI, Lync) run in a window of their own, so you see them and can answer an installer's prompts. Rocco waits for the window, then checks again; a window that failed stays open until you've read it.
+  - **Changes to the game** (a library, the template, registering the Studio MCP) are Claude's: their button adds a note to Up next.
+  - **A Studio plugin** opens its releases page.
+
+  What each button runs is defined in `server/actions.ps1`; the app only names it. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
 - **Settings:** desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, and hotkeys. Kept per browser.
 - **Metrics:** not built yet.
 
@@ -64,6 +70,7 @@ _tools\rocco\
     connections.ps1      project links, this PC's tools, and Rocco's own updates
     history.ps1          main's commits, open branches, each lane's reflog
     docs.ps1             the repo's Markdown, one doc, saving and pushing the user's edit
+    actions.ps1          what each Connections button does, and pushing main
     http.ps1             static files, the API, the server loop
   web/                   the app
     index.html
@@ -125,6 +132,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /api/tasks/<id>/changes?p=` | The files a task changed: its merge into main, else its branch against main |
 | `GET /files/<task>/<file>?p=` | A screenshot or a sound option |
 | `GET /api/jobs/<id>` | A new project's progress |
+| `GET /api/actions/runs/<run>` | An update running in its own window: `{ running, ok, label }` |
 | `POST /api/note?p=` | Add the user's note (`{ text, type }`) to Up next, for the conductor to plan; returns its id |
 | `POST /api/tasks/<id>/shot?p=` | Attach a screenshot (the image as the body) |
 | `POST /api/tasks/<id>/<action>?p=` | What the user does to a task: approve, reopen, answer, queue (an inbox item), remove, followup, undo (the last approve, queue or remove), approve-plan, revise (a plan). `{ text }` for reopen, answer, followup and revise |
@@ -133,6 +141,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/links/elevenlabs?p=` | Link ElevenLabs (`{ key }`): checked with ElevenLabs, then kept as `ELEVENLABS_API_KEY` in the user's environment. The key is never sent back |
 | `POST /api/links/elevenlabs/remove?p=` | Unlink it: removes the key from the user's environment |
 | `POST /api/docs/save?p=` | The user's edit to a doc (`{ path, text, base, message }`): committed on main and pushed. `{ conflict, hash }` instead if the doc's hash isn't `base` any more; refused for template-owned docs in a game |
+| `POST /api/actions/<action>?p=` | A Connections button (`{ value }` for one that needs it, like a GitHub repo address): `{ message }` when it's done, or `{ run, label }` for an update in its own window. Only the actions in `server/actions.ps1` run |
 | `POST /api/rocco/update?p=` | Switch to a newer release (`{ tag }`), then restart on it. Refused for a development copy, an older release, or local changes in `_tools\rocco`. `/api/state` and `/api/me` carry the running version as `rocco` |
 | `POST /api/send?p=` | Queue everything in the inbox |
 | `POST /api/projects/new` | Start a new project: `{ name, code, repo }` |
