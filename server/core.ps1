@@ -13,7 +13,8 @@ function Invoke-Git([string]$dir) {
 # Git, keeping what it says, to show the user when something fails.
 function Invoke-GitText([string]$dir) {
 	$ErrorActionPreference = 'Continue'
-	$text = @(git -C $dir @args 2>&1 | ForEach-Object { "$_" }) -join "`n"
+	# A blank line on stderr comes back as just the exception's type name: leave those out.
+	$text = @(git -C $dir @args 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -ne 'System.Management.Automation.RemoteException' }) -join "`n"
 	[pscustomobject]@{ ok = ($LASTEXITCODE -eq 0); text = $text.Trim() }
 }
 

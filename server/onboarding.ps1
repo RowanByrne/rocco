@@ -1,13 +1,19 @@
 # Onboarding (the template's docs/workflow/SETUP.md): the survey a new or brought-in game starts with, the user's
 # answers in docs/game/ONBOARDING.md, and handing them to the user's agent with a Workboard card.
 
-# The survey: the project's own (its template release), else the template's.
+# The survey: the project's own (its template release), else the template's. A template checkout from before the
+# survey existed is brought up to date first, as new-project.ps1 does.
 function Get-Survey([string]$repo = '') {
-	foreach ($dir in @($repo, (Join-Path $RoDev 'template\repo')) | Where-Object { $_ }) {
-		$file = Join-Path $dir 'tools\onboarding.json'
-		if (Test-Path $file) { return [IO.File]::ReadAllText($file, $Utf8) | ConvertFrom-Json }
+	$template = Join-Path $RoDev 'template\repo'
+	$pull = $null
+	foreach ($try in 1, 2) {
+		foreach ($dir in @($repo, $template) | Where-Object { $_ }) {
+			$file = Join-Path $dir 'tools\onboarding.json'
+			if (Test-Path $file) { return [IO.File]::ReadAllText($file, $Utf8) | ConvertFrom-Json }
+		}
+		if ($try -eq 1) { $pull = Invoke-GitText $template pull --ff-only }
 	}
-	throw 'There''s no onboarding survey in the template (tools\onboarding.json). Update the template first.'
+	throw "There's no onboarding survey in the template (tools\onboarding.json), and updating it didn't work$(if ($pull.text) { ": $($pull.text.TrimEnd('.'))" }). In template\repo, run: git pull"
 }
 
 function Get-AnswersPath { Join-Path $RepoDir 'docs\game\ONBOARDING.md' }
