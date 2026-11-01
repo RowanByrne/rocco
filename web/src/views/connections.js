@@ -33,7 +33,8 @@ const versionsHTML = c => (c.version ? `<span class="ver">${esc(c.version)}</spa
 
 const fixHTML = c => (c.update ? `<span>${esc(c.update)}</span>` : '')
   + (c.command ? `<code>${esc(c.command)}</code><button class="copy" data-copy="${esc(c.command)}">${icon.copy}Copy</button>` : '')
-  + (c.release ? `<button class="btn-sm go" data-update-rocco="${esc(c.release.tag)}">Update to ${esc(c.release.tag)}</button>` : '');
+  + (c.release?.action === 'ask' ? `<button class="btn-sm go" data-ask-template="${esc(c.release.tag)}">Ask Claude to update</button>`
+    : c.release ? `<button class="btn-sm go" data-update-rocco="${esc(c.release.tag)}">Update to ${esc(c.release.tag)}</button>` : '');
 
 function healthHTML(items) {
   const n = status => items.filter(c => c.status === status).length;
@@ -130,7 +131,7 @@ function openConnection(i) {
     + `<div class="cd-rows">${row('Status', stateLabel(c))}${row(c.group === 'Libraries' ? 'In the game' : 'Installed', c.version)}${row('Latest', c.latest)}${row('Checked on', ofProject(c) ? currentProject().name : state.me?.pc || 'This PC')}</div>`
     + (c.status !== 'ok' && !c.link && (c.update || c.command) ? `<div class="cd-fix"><small>${c.status === 'update' ? 'How to update' : 'How to fix'}</small><div class="attn-fix">${fixHTML(c)}</div></div>` : '')
     + (c.link && c.status === 'warn' && c.update ? `<div class="cd-fix"><small>Heads up</small><div class="attn-fix"><span>${esc(c.update)}</span></div></div>` : '')
-    + (c.release?.notes ? `<div class="cd-fix"><small>What's new in ${esc(c.release.tag)}</small><p class="cd-notes">${esc(c.release.notes)}</p></div>` : '')
+    + (c.release?.notes ? `<div class="cd-fix"><small>What's new${c.release.action === 'ask' ? '' : ` in ${esc(c.release.tag)}`}</small><p class="cd-notes">${esc(c.release.notes)}</p></div>` : '')
     + linkHTML(c);
   showSheet(`conn:${i}`, { color: COLOR[c.status], chip: stateLabel(c), id: ofProject(c) ? 'This project' : 'This PC', body });
 }
@@ -176,6 +177,20 @@ async function updateRocco(button) {
   }
 }
 
+// A template release is merged by the conductor (the template's TEMPLATE.md), so this asks for it in Up next.
+async function askTemplateUpdate(button) {
+  const tag = button.dataset.askTemplate;
+  button.disabled = true;
+  try {
+    await api.note(`Update from template to ${tag} (TEMPLATE.md "Taking an update").`, '');
+    toast('Added to Up next', 'var(--violet)');
+    button.textContent = 'Asked';
+  } catch (e) {
+    toast(`Couldn't add the note: ${e.message}`, 'var(--red)');
+    button.disabled = false;
+  }
+}
+
 async function unlink(button) {
   // A second click confirms.
   if (!button.classList.contains('confirm')) { button.classList.add('confirm'); button.textContent = 'Unlink from this PC?'; return; }
@@ -207,6 +222,8 @@ export function initConnections() {
     }
     const update = e.target.closest('[data-update-rocco]');
     if (update) { updateRocco(update); return; }
+    const askTemplate = e.target.closest('[data-ask-template]');
+    if (askTemplate) { askTemplateUpdate(askTemplate); return; }
     const item = e.target.closest('.view[data-view="connections"] [data-conn]');
     if (item) openConnection(+item.dataset.conn);
   });

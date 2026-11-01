@@ -13,6 +13,7 @@
 #   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck)
 #   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
+#   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
 #   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, follow-ups) is handled
 param(
@@ -30,6 +31,14 @@ $AppDir = $PSScriptRoot
 foreach ($part in 'core', 'tasks', 'projects', 'connections', 'history', 'docs', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
 
 function Format-Time($iso) { if ($iso) { ([datetime]$iso).ToString('HH:mm') } else { '' } }
+
+# A plan's steps from "title|lane|tier" strings.
+function ConvertTo-Steps([string[]]$steps) {
+	@($steps | ForEach-Object {
+		$f = $_ -split '\|'
+		[pscustomobject]@{ title = $f[0].Trim(); lane = $(if ($f.Count -gt 1 -and $f[1].Trim() -match '^\d+$') { [int]$f[1] } else { $null }); tier = $(if ($f.Count -gt 2) { $f[2].Trim() } else { '' }) }
+	})
+}
 
 # The fields new and set share.
 function Set-Common($t) {
@@ -118,10 +127,7 @@ switch ($Command) {
 		$t = New-Task $Title $Title 'inbox' 'plan' 'feature'
 		Set-Field $t 'feature' $true
 		if ($Summary) { Set-Field $t 'summary' $Summary }
-		Set-Field $t 'steps' @($Steps | ForEach-Object {
-			$f = $_ -split '\|'
-			[pscustomobject]@{ title = $f[0].Trim(); lane = $(if ($f.Count -gt 1 -and $f[1].Trim() -match '^\d+$') { [int]$f[1] } else { $null }); tier = $(if ($f.Count -gt 2) { $f[2].Trim() } else { '' }) }
-		})
+		Set-Field $t 'steps' (ConvertTo-Steps $Steps)
 		Save-Task $t
 		$t.id
 	}
@@ -149,6 +155,8 @@ switch ($Command) {
 		if ($Question) { Set-Field $t 'questions' @(); Add-Question $t $Question @($Options) @($Audio) }
 		if ($Lane -ge 0) { Set-Field $t 'lane' $(if ($Lane -eq 0) { $null } else { $Lane }) }
 		if ($Progress -ge 0) { Set-Field $t 'progress' ([Math]::Min(100, $Progress)) }
+		# A revised feature plan (the user asked for changes): its new steps.
+		if ($Steps) { Set-Field $t 'steps' (ConvertTo-Steps $Steps) }
 		if ($Order -ge 0) { Set-Field $t 'order' $Order }
 		Set-Common $t
 		Save-Task $t

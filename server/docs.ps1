@@ -60,17 +60,17 @@ function Get-Docs([bool]$template) {
 	if ($hit -and $hit.Template -eq $template -and ((Get-Date) - $hit.Read).TotalSeconds -lt 5) { return $hit.Value }
 
 	$dirty = @{}
-	foreach ($line in @(Invoke-Git $RepoDir -c core.quotepath=false status --porcelain --untracked-files=all -- '*.md')) {
+	foreach ($line in @(Invoke-Git $RepoDir -c core.quotepath=false status --porcelain --untracked-files=all '--' '*.md')) {
 		if ("$line".Length -gt 3) { $dirty[("$line".Substring(3) -replace '^.* -> ', '').Trim('"')] = $true }
 	}
 	# The last commit to each doc, from one walk of the history.
 	$last = @{}; $at = ''; $by = ''
-	foreach ($line in @(Invoke-Git $RepoDir -c core.quotepath=false log -n 400 '--format=@@%cI%x09%an' --name-only -- '*.md')) {
+	foreach ($line in @(Invoke-Git $RepoDir -c core.quotepath=false log -n 400 '--format=@@%cI%x09%an' --name-only '--' '*.md')) {
 		if ("$line".StartsWith('@@')) { $at, $by = "$line".Substring(2) -split "`t", 2 }
 		elseif ($line -and -not $last.ContainsKey("$line")) { $last["$line"] = @($at, $by) }
 	}
 
-	$docs = foreach ($path in @(Invoke-Git $RepoDir -c core.quotepath=false ls-files --cached --others --exclude-standard -- '*.md') | Sort-Object -Unique) {
+	$docs = foreach ($path in @(Invoke-Git $RepoDir -c core.quotepath=false ls-files --cached --others --exclude-standard '--' '*.md') | Sort-Object -Unique) {
 		$file = Join-Path $RepoDir $path
 		if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { continue } # deleted, not committed yet
 		$info = Get-Item -LiteralPath $file
@@ -98,11 +98,12 @@ function Get-Docs([bool]$template) {
 function Read-Doc([string]$path, [bool]$template) {
 	$doc = Resolve-Doc $path
 	$text = [IO.File]::ReadAllText($doc.file, $Utf8)
-	$line = "$(Invoke-Git $RepoDir log -1 '--format=%cI%x09%an%x09%s' -- $doc.path)"
+	# '--' is quoted throughout: a bare one ends a PowerShell function's arguments instead of reaching git.
+	$line = "$(Invoke-Git $RepoDir log -1 '--format=%cI%x09%an%x09%s' '--' $doc.path)"
 	$at, $by, $subject = if ($line) { $line -split "`t", 3 } else { '', '', '' }
 	[pscustomobject]@{
 		path = $doc.path; text = $text; hash = (Get-TextHash $text); locked = (Test-TemplateOwned $doc.path $template)
-		dirty = [bool](Invoke-Git $RepoDir status --porcelain -- $doc.path)
+		dirty = [bool](Invoke-Git $RepoDir status --porcelain '--' $doc.path)
 		last = [pscustomobject]@{ at = $at; by = $by; subject = $subject }
 	}
 }
@@ -132,8 +133,8 @@ function Save-Doc([string]$path, [string]$text, [string]$base, [string]$message,
 	$messageFile = [IO.Path]::GetTempFileName()
 	try {
 		[IO.File]::WriteAllText($messageFile, $message.Trim(), $Utf8)
-		$add = Invoke-GitText $RepoDir add -- $doc.path
-		$commit = if ($add.ok) { Invoke-GitText $RepoDir commit -F $messageFile --only -- $doc.path } else { $add }
+		$add = Invoke-GitText $RepoDir add '--' $doc.path
+		$commit = if ($add.ok) { Invoke-GitText $RepoDir commit -F $messageFile --only '--' $doc.path } else { $add }
 	} finally { Remove-Item -LiteralPath $messageFile -ErrorAction SilentlyContinue }
 	if (-not $commit.ok) { throw "Saved the file, but git couldn't commit it: $($commit.text)" }
 	$script:HistoryCache = @{}; $script:MainCache = @{}; $script:ProjectCache = $null

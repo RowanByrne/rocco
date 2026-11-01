@@ -5,18 +5,52 @@ function Conn([string]$group, [string]$name, [string]$status, [string]$version, 
 	[pscustomobject]@{ group = $group; name = $name; status = $status; version = $version; latest = $latest; detail = $detail; update = $update; command = $command }
 }
 
-# The template, GitHub, the commit check, and this project's Lync servers.
-function Get-ProjectConnections {
-	$isTemplate = (Get-ProjectField 'Game') -like '*{{*'
-	if ($isTemplate) {
-		Conn 'Project' 'Template' 'ok' '' '' 'This is the template every game is copied from.' '' ''
-	} elseif (-not (Invoke-Git $RepoDir remote get-url template)) {
-		Conn 'Project' 'Template' 'warn' '' '' 'No template remote, so this game can''t take template updates.' 'Add it in repo\:' 'git remote add template https://github.com/RowanByrne/rodev_template.git'
-	} else {
-		$behind = [int](Invoke-Git $RepoDir rev-list --count main..template/main)
-		if ($behind) { Conn 'Project' 'Template' 'update' '' '' "$behind new template commits (as of the last fetch)." 'Say "update from template" to the conductor.' '' }
-		else { Conn 'Project' 'Template' 'ok' '' '' 'Up to date with the template (as of the last fetch).' '' '' }
+# ---- Template releases (the template's docs/workflow/TEMPLATE.md) ----
+# A game takes the template only as releases, tags named template/vX.Y.Z. Their tags are fetched in the background
+# every half hour, so the Template row says when a newer one is out; the conductor brings it in.
+
+$script:TemplateFetch = @{}   # repo -> @{ At; Job }
+function Update-TemplateTags([bool]$refresh) {
+	$f = $script:TemplateFetch[$RepoDir]
+	if ($f -and $f.Job -and $f.Job.State -ne 'Running') { Remove-Job $f.Job -Force; $f.Job = $null }
+	if ($f -and ($f.Job -or (-not $refresh -and ((Get-Date) - $f.At).TotalMinutes -lt 30))) { return }
+	# Git's messages are caught here: anything a job's programs write to stderr fails the job.
+	$job = Start-Job -ArgumentList $RepoDir -ScriptBlock {
+		param([string]$repo)
+		$env:GIT_TERMINAL_PROMPT = '0'; $env:GCM_INTERACTIVE = 'never'
+		git -C $repo fetch --quiet --tags --force template 2>&1 | Out-Null
 	}
+	$script:TemplateFetch[$RepoDir] = @{ At = Get-Date; Job = $job }
+}
+function Test-TemplateFetching { $f = $script:TemplateFetch[$RepoDir]; [bool]($f -and $f.Job -and $f.Job.State -eq 'Running') }
+
+function Get-TemplateConnection([bool]$refresh) {
+	$releases = @(Invoke-Git $RepoDir tag -l 'template/v*' --sort=-v:refname)
+	$short = @($releases | ForEach-Object { $_ -replace '^template/', '' })
+	if ((Get-ProjectField 'Game') -like '*{{*') {
+		if (-not $releases) { return Conn 'Project' 'Template' 'ok' '' '' 'This is the template every game is copied from. Not released yet.' 'To release it, say "release the template" (TEMPLATE.md).' '' }
+		$since = [int](Invoke-Git $RepoDir rev-list --count "$($releases[0])..main")
+		$detail = "This is the template every game is copied from. Released as $($short[0])$(if ($since) { "; $since commit$(if ($since -ne 1) { 's' }) on main since" })."
+		return Conn 'Project' 'Template' 'ok' $short[0] '' $detail $(if ($since) { 'Games get them in the next release: say "release the template" (TEMPLATE.md).' } else { '' }) ''
+	}
+	if (-not (Invoke-Git $RepoDir remote get-url template)) {
+		return Conn 'Project' 'Template' 'warn' '' '' 'No template remote, so this game can''t take template updates.' 'Add it in repo\:' 'git remote add template https://github.com/RowanByrne/rodev_template.git'
+	}
+	Update-TemplateTags $refresh
+	if (-not $releases) { return Conn 'Project' 'Template' 'ok' '' '' 'The template has no releases yet (as of the last check).' '' '' }
+	$current = "$(Invoke-Git $RepoDir describe --tags --abbrev=0 --match 'template/v*' main)" -replace '^template/', ''
+	# Releases this game doesn't have yet, newest first.
+	$newer = @($releases | Where-Object { -not (Invoke-GitText $RepoDir merge-base --is-ancestor $_ main).ok })
+	if (-not $newer) { return Conn 'Project' 'Template' 'ok' $current $short[0] "On the newest template release, $($short[0]) (as of the last check)." '' '' }
+	$notes = @($newer | Select-Object -First 5 | ForEach-Object { "$($_ -replace '^template/', '')`n$((@(Invoke-Git $RepoDir tag -l $_ '--format=%(contents)') -join "`n").Trim())" }) -join "`n`n"
+	$item = Conn 'Project' 'Template' 'update' $current $short[0] "Template $($short[0]) is out; this game is on $(if ($current) { $current } else { 'an earlier version' })." 'Ask Claude to bring it in: it merges the release and keeps this game''s own docs (TEMPLATE.md).' ''
+	$item | Add-Member release ([pscustomobject]@{ tag = $releases[0]; notes = $notes; action = 'ask' })
+	$item
+}
+
+# The template, GitHub, the commit check, and this project's Lync servers.
+function Get-ProjectConnections([bool]$refresh) {
+	Get-TemplateConnection $refresh
 
 	$origin = Invoke-Git $RepoDir remote get-url origin
 	if (-not $origin) {
@@ -378,6 +412,6 @@ function Get-Connections([bool]$refresh) {
 	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev, $AppDir }
 	$checkedAt = $null; $online = $true; $pcItems = @()
 	if ($script:PcResult) { $checkedAt = $script:PcResult.At; $online = $script:PcResult.Value.online; $pcItems = @($script:PcResult.Value.items) }
-	$items = @(@(Get-ProjectConnections) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-ElevenLabsItem))
-	[pscustomobject]@{ checking = [bool]$script:PcJob -or [bool]$script:LibJob; checkedAt = $checkedAt; online = $online; items = $items }
+	$items = @(@(Get-ProjectConnections $refresh) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-ElevenLabsItem))
+	[pscustomobject]@{ checking = [bool]$script:PcJob -or [bool]$script:LibJob -or (Test-TemplateFetching); checkedAt = $checkedAt; online = $online; items = $items }
 }

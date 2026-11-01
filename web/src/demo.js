@@ -136,7 +136,9 @@ export async function me() {
 
 export async function connections() {
   return { checking: false, checkedAt: ago(3), online: true, items: [
-    { group: 'Project', name: 'Template', status: 'update', detail: '3 new template commits (as of the last fetch).', update: 'Say "update from template" to the conductor.' },
+    { group: 'Project', name: 'Template', status: 'update', version: 'v1.1.0', latest: 'v1.3.0', detail: 'Template v1.3.0 is out; this game is on v1.1.0.',
+      update: "Ask Claude to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md).",
+      release: { tag: 'template/v1.3.0', action: 'ask', notes: 'v1.3.0\nDocs: a WORLD.md for the map\nLANES.md: how many lanes a PC opens\n\nv1.2.0\nRocco: Docs view' } },
     { group: 'Project', name: 'GitHub', status: 'ok', detail: 'you/sample-game' },
     { group: 'Project', name: 'Commit check', status: 'ok', detail: 'Refuses files over 5 MB.' },
     { group: 'Project', name: 'Studio sync', status: 'ok', detail: 'Lync is serving Main and 7 lanes.' },

@@ -5,7 +5,7 @@ Rocco is the web app for making games from this template. One Rocco serves every
 - **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval; the inbox, where things Claude spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options; Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
 - **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask Claude to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (CLAUDE.md "Template-owned files", and `rocco/`) can't be edited here; Claude changes them through the template.
-- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
+- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The Template row shows which template release the game is on; when a newer one is out, it shows what's new and asks Claude to bring it in (the template's TEMPLATE.md). Rocco's own row does the same for Rocco, and updates it in one click ("Updating"). The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
 - **Settings:** desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, and hotkeys. Kept per browser.
 - **Metrics:** not built yet.
 
@@ -94,7 +94,7 @@ A project's Rocco data lives outside git, next to its `repo\`: `<Game>\rocco\tas
 
 ## Commands
 
-Claude keeps the Workboard current with `rocco.ps1`. Run from a project's `repo\` or a lane, it acts on that project (`-Project <folder>` names another); from `repo\` that's `..\..\_tools\rocco\rocco.ps1`, and from a lane `..\..\..\_tools\rocco\rocco.ps1`. Its header lists every option:
+Claude keeps the Workboard current with `rocco.ps1`. Run from a project's `repo\` or a lane, it acts on that project (`-Project <folder>` names another); from `repo\` that's `..\..\_tools\rocco\rocco.ps1`, and from a lane `..\..\..\_tools\rocco\rocco.ps1`. Run it in PowerShell, not through `powershell -File`, which breaks lists like `-Steps` and `-Options` apart. Its header lists every option:
 
 | | |
 |---|---|
@@ -102,7 +102,7 @@ Claude keeps the Workboard current with `rocco.ps1`. Run from a project's `repo\
 | `show T-012` | One task in full |
 | `new -Title "..." [-Type bug] [-Plan T-020] [-After T-011]` | Add a task to Up next. `-Plan`: part of that feature. `-After`: it needs those done first, so the user can't drag it ahead of them |
 | `suggest -Title "..." [-Summary "why"]` | Put something Claude spotted in the inbox |
-| `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",...` | A feature plan for the user to approve or change |
+| `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",...` | A feature plan for the user to approve or change. When they ask for changes, `set T-020 -Summary "..." -Steps ...` revises it, then `clear` |
 | `ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]` | Ask the user; more `ask`s while it's stuck add questions. `-Audio` files (one per option, in order) get play buttons |
 | `reply T-012 -Text "..."` | Answer a question the user asked from the note box (`list` marks them QUESTION). It shows under the note box until they click Got it, or Ask more, which sends it back |
 | `set T-012 -Status working -Lane 3 -Step "..." [-Progress 40]` | Where a task stands. A worker's `log` lines show live on its card |
