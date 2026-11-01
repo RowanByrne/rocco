@@ -87,7 +87,8 @@ function Get-MainHistory {
 			full = $f[0]; hash = $f[1]; author = $f[3]; at = $f[4]; subject = $f[5]
 			merge = @($f[2] -split ' ' | Where-Object { $_ }).Count -gt 1
 			branch = $branch
-			claude = ($f.Count -gt 6 -and $f[6] -match 'Claude')
+			# The agent that co-wrote it, from its Co-Authored-By line ("Claude Opus 5.5", "Codex", ...).
+			agent = $(if ($f.Count -gt 6 -and $f[6] -match '^\s*([^<,]+?)\s*<') { $Matches[1] } else { '' })
 			pushed = -not $unpushed[$f[0]]
 			release = "$($releaseOf[$f[0]])"
 			live = ($f[0] -eq $live)

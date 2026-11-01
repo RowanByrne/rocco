@@ -142,9 +142,9 @@ const done = item => item.action && fixed.has(item.action.id)
 export async function connections() {
   return { checking: false, checkedAt: ago(3), online: true, items: [
     { group: 'Project', name: 'Template', status: 'update', version: 'v1.1.0', latest: 'v1.3.0', detail: 'Template v1.3.0 is out; this game is on v1.1.0.',
-      update: "Ask Claude to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md).",
+      update: "Ask your agent to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md).",
       release: { tag: 'template/v1.3.0', notes: 'v1.3.0\nDocs: a WORLD.md for the map\nLANES.md: how many lanes a PC opens\n\nv1.2.0\nRocco: Docs view' },
-      action: { kind: 'ask', label: 'Ask Claude to update', note: 'Update from template to template/v1.3.0 (TEMPLATE.md "Taking an update").' } },
+      action: { kind: 'ask', label: 'Ask your agent to update', note: 'Update from template to template/v1.3.0 (TEMPLATE.md "Taking an update").' } },
     // Sky Farm has no GitHub repo yet: its row asks for one.
     state.project === 'sky-farm' ? { group: 'Project', name: 'GitHub', status: 'warn', detail: 'No GitHub repo yet, so nothing is backed up.', fixedDetail: 'you/sky-farm',
       update: 'Create an empty private repo on GitHub (no README), then connect it: Rocco adds it and pushes main (NEW-PROJECT.md).', command: 'git remote add origin <url>',
@@ -155,8 +155,8 @@ export async function connections() {
     { group: 'Project', name: 'Studio sync', status: 'ok', detail: 'Lync is serving Main and 7 lanes.' },
     { group: 'Libraries', name: 'TopbarPlus', status: 'ok', version: 'v3.5.0', latest: 'v3.5.0', detail: 'github.com/1ForeverHD/TopbarPlus · no local patches' },
     { group: 'Libraries', name: 'Cmdr', status: 'update', version: 'v1.9.0', latest: 'v1.13.1', detail: 'github.com/evaera/Cmdr · local patches: admin check reads Config',
-      update: 'Claude updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md "Third-party code").',
-      action: { kind: 'ask', label: 'Ask Claude to update', note: 'Update Cmdr from v1.9.0 to v1.13.1 (CODING.md "Third-party code").' } },
+      update: 'Your agent updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md "Third-party code").',
+      action: { kind: 'ask', label: 'Ask your agent to update', note: 'Update Cmdr from v1.9.0 to v1.13.1 (CODING.md "Third-party code").' } },
     { group: 'AI', name: 'Claude Code', status: 'ok', version: '2.1.312', latest: '2.1.312', detail: 'Signed in as you@example.com' },
     { group: 'AI', name: 'Codex', status: 'update', version: '0.165.0', latest: '0.166.0', detail: 'Signed in · makes images', update: 'It updates with the Codex app: restart the app.' },
     { group: 'Roblox', name: 'Roblox Studio', status: 'ok', version: '0.745.0', latest: '0.745.0', detail: '8 open' },
@@ -171,7 +171,7 @@ export async function connections() {
         action: { kind: 'rocco', label: 'Update to v0.3.0', tag: 'v0.3.0' } },
     { group: 'Tools', name: 'Git', status: 'update', version: '2.55.0', latest: '2.56.0', detail: 'Git for Windows', update: 'Update it:', command: 'git update-git-for-windows',
       action: { kind: 'window', label: 'Update', id: 'git-update' } },
-    { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', fixedDetail: 'gh', update: 'Install it if you want Claude to handle GitHub for you:',
+    { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', fixedDetail: 'gh', update: 'Install it if you want your agent to handle GitHub for you:',
       command: 'winget install --id GitHub.cli --exact', action: { kind: 'window', label: 'Install', id: 'gh-install' } },
     elevenLabs(),
   ].map(done) };
@@ -307,7 +307,52 @@ export async function bookmark(hash) {
   return { ok: true };
 }
 
-export async function newProject() { throw new Error('Start Rocco with tools\\rocco.bat in a project to create projects.'); }
+// ---- Your agent, and onboarding (server/agents.ps1, server/onboarding.ps1) ----
+
+const AGENTS = [{ id: 'claude', name: 'Claude Code', short: 'Claude' }, { id: 'codex', name: 'Codex', short: 'Codex' }, { id: 'gemini', name: 'Gemini CLI', short: 'Gemini' }];
+let agentId = 'claude';
+export async function agent() {
+  const installed = id => id !== 'gemini';
+  const a = AGENTS.find(x => x.id === agentId);
+  return { ...a, installed: installed(a.id), chosen: true, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+}
+export async function setAgent(id) { agentId = id; return agent(); }
+
+// The survey is the template's own, from the Rocco serving the demo.
+export async function survey() {
+  const res = await fetch('/api/onboarding/survey', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Start Rocco to see the onboarding.');
+  return res.json();
+}
+const answersOf = {};
+export async function onboarding() { return { survey: await survey(), answers: answersOf[state.project] || { flow: 'new', source: '', answers: {} } }; }
+export async function saveAnswers(project, body) {
+  const saved = answersOf[project] ??= { flow: body.flow || 'new', source: body.source || '', answers: {} };
+  for (const [id, text] of Object.entries(body.answers || {})) { if (String(text).trim()) saved.answers[id] = text; else delete saved.answers[id]; }
+  return { saved: true, committed: true, pushed: true, note: '' };
+}
+export async function startSetup(project, part, tiles) {
+  const a = await agent();
+  const title = { new: 'Write the first docs from the onboarding answers', existing: 'Bring the game in, and fill in its docs from its code', more: `Fill in more detail: ${tiles.join(', ')}` }[part];
+  const t = { id: `T-${next++}`, kind: 'task', type: '', attempt: 1, where: 'main', title, note: title, shots: [], options: [], status: 'working', step: 'Writing the docs',
+    startedAt: new Date().toISOString(), log: [{ who: 'conductor', at: new Date().toISOString(), text: `Opened ${a.name} on it.` }] };
+  (data[project] ??= seed(project)).tasks.push(t);
+  return { task: t.id, opened: a.installed, agent: a.name, prompt: `Follow docs/workflow/SETUP.md, part ${part}, for Workboard task ${t.id}. The answers are in docs/game/ONBOARDING.md.` };
+}
+
+// A new project takes a few seconds, then joins the project list.
+const jobs = {};
+export async function newProject({ name }) {
+  if (PROJECTS.some(p => p.id.toLowerCase() === name.toLowerCase())) throw new Error(`There's already a ${name} in this RoDev folder.`);
+  const id = `demo${Object.keys(jobs).length}`;
+  jobs[id] = { until: Date.now() + 4000, name };
+  return { job: id };
+}
+export async function job(id) {
+  const j = jobs[id], running = Date.now() < j.until;
+  if (!running && !PROJECTS.some(p => p.id === j.name)) PROJECTS.push({ id: j.name, name: j.name, phase: 'Pitch' });
+  return { running, ok: !running, project: j.name, output: running ? 'Copying the template ...' : `${j.name} is ready.` };
+}
 
 // The demo "updates" at once: the Rocco row turns up to date, with no restart.
 let roccoUpdated = false;
@@ -319,10 +364,10 @@ export async function updateRocco() {
 
 export async function history() {
   if (state.project !== 'sample-game') return { repo: '', main: { remote: false, unpushed: 0, total: 1, live: null, commits: [
-    { full: 'c0ffee1', hash: 'c0ffee1', author: 'You', at: ago(600), subject: 'Start from the template', merge: false, branch: '', claude: false, pushed: false }] }, branches: [], lanes: [] };
+    { full: 'c0ffee1', hash: 'c0ffee1', author: 'You', at: ago(600), subject: 'Start from the template', merge: false, branch: '', agent: '', pushed: false }] }, branches: [], lanes: [] };
   const commit = (hash, minutes, subject, extra = {}) => {
     const full = hash + '0'.repeat(33);
-    return { full, hash, author: 'Sample User', at: ago(minutes), subject, merge: false, branch: '', claude: true, pushed: true, release: '', live: false, bookmarked: bookmarks.has(full), ...extra };
+    return { full, hash, author: 'Sample User', at: ago(minutes), subject, merge: false, branch: '', agent: 'Claude Opus 5.5', pushed: true, release: '', live: false, bookmarked: bookmarks.has(full), ...extra };
   };
   const merge = (hash, minutes, branch, extra = {}) => commit(hash, minutes, `Merge branch '${branch}'`, { merge: true, branch, ...extra });
   const ev = (minutes, kind, text) => ({ hash: 'abc1234', at: ago(minutes), kind, text });
@@ -337,7 +382,7 @@ export async function history() {
       merge('19aa6c3', 65, 'agent/music-toggle-save'),
       commit('d5e2b90', 70, 'EVENT-CATALOG.md: SettingChanged'),
       merge('f7c1d02', 80, 'agent/spawn-facing'),
-      commit('8812ab4', 1500, 'Shop: phone layout for item cards', { claude: false, author: 'You', release: `release/${day(1500)}`, live: true }),
+      commit('8812ab4', 1500, 'Shop: phone layout for item cards', { agent: '', author: 'You', release: `release/${day(1500)}`, live: true }),
       merge('0b3e9d1', 1560, 'agent/quest-list-scroll'),
       commit('6a71c3e', 4400, 'PROJECT.md: Production phase', { release: `release/${day(4400)}` }),
     ] },
@@ -367,14 +412,14 @@ export async function history() {
 const md = (...lines) => lines.join('\n') + '\n';
 const lf = text => String(text).replace(/\r\n?/g, '\n');
 const hashOf = text => [...lf(text)].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261).toString(16);
-const TEMPLATE_OWNED = /^(CLAUDE\.md|AGENTS\.md|\.claude\/|docs\/workflow\/|tools\/)/;
+const TEMPLATE_OWNED = /^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|\.claude\/|docs\/workflow\/|tools\/)/;
 const docData = {};
 
 function sampleDocs() {
   const doc = (text, minutes, subject, extra = {}) => ({ text, at: ago(minutes), by: 'Sample User', subject, ...extra });
   return docData[state.project] ??= {
-    'README.md': doc(md('# Sample Game', '', 'A pet-collecting Roblox game made with Claude, from the RoDev template. What it is: `docs/game/PITCH.md`. Where it stands: `docs/game/PROJECT.md` and `docs/game/ROADMAP.md`.',
-      '', '## Working on it', '', '1. **Open Claude** in `repo\\` and say **"refresh"** to sync with GitHub.', '2. **Start Lync:** `tools\\serve-all.bat`.', '3. **Before you stop:** save and close Studio, then say "refresh".'), 2900, 'README.md: work session steps'),
+    'README.md': doc(md('# Sample Game', '', 'A pet-collecting Roblox game made with an AI coding agent, from the RoDev template. What it is: `docs/game/PITCH.md`. Where it stands: `docs/game/PROJECT.md` and `docs/game/ROADMAP.md`.',
+      '', '## Working on it', '', '1. **Open your agent** in `repo\\` and say **"refresh"** to sync with GitHub.', '2. **Start Lync:** `tools\\serve-all.bat`.', '3. **Before you stop:** save and close Studio, then say "refresh".'), 2900, 'README.md: work session steps'),
     'CLAUDE.md': doc(md('# Agent rules', '', 'A Roblox game built from the RoDev template. Luau source in `src/` is synced into Studio by Lync. GitHub `origin/main` is the source of truth for code and every text file.',
       '', '## Talking to the user', '', 'Keep replies short: what\'s **done**, and what\'s **flagged**.', '', '## Rules', '', '- Merge, don\'t rebase, into `main`, and pull right before pushing it.',
       '- Code against `docs/game/CONTRACTS.md` and `docs/game/EVENT-CATALOG.md`.', '- New feature: its own spec in `docs/game/features/`.', '', '## Docs', '', '| Read | When |', '|---|---|',
@@ -451,7 +496,7 @@ export async function doc(path) {
 export async function saveDoc(path, text, base, message) {
   const f = sampleDocs()[path];
   if (!f) throw new Error(`There's no doc ${path}.`);
-  if (docLocked(path)) throw new Error(`${path} belongs to the template, so it changes there, not in a game. Ask Claude to change it.`);
+  if (docLocked(path)) throw new Error(`${path} belongs to the template, so it changes there, not in a game. Ask your agent to change it.`);
   if (hashOf(f.text) !== base) return { conflict: true, hash: hashOf(f.text) };
   if (lf(text) === lf(f.text)) return { nothing: true };
   await new Promise(resolve => setTimeout(resolve, 700)); // a push takes a moment

@@ -32,7 +32,7 @@ const versionsHTML = c => (c.version ? `<span class="ver">${esc(c.version)}</spa
   + (c.status === 'update' && c.latest ? `${c.version ? '<span class="arrow">→</span>' : ''}<span class="ver new">${esc(c.latest)}</span>` : '');
 
 // A row's one-click fix (server/actions.ps1), by kind: run (Rocco does it now), window (an update in a window of its
-// own, which Rocco waits for), input (run, with a value the user gives in the details), ask (a note for Claude),
+// own, which Rocco waits for), input (run, with a value the user gives in the details), ask (a note for the agent),
 // rocco (Rocco's own update), link (a page to get it from). What's running keeps its spinner through re-renders.
 const busy = new Map();   // action key -> what its button says while it runs
 const asked = new Set();  // notes already added to Up next
@@ -127,7 +127,7 @@ const LINKS = {
     name: 'ElevenLabs',
     keys: 'https://elevenlabs.io/app/settings/api-keys',
     why: 'Makes sound effects and music for the game (AUDIO-PIPELINE.md). Game audio needs a paid plan (Starter or above): the free plan doesn\'t allow commercial use.',
-    where: 'Rocco checks the key with ElevenLabs, then keeps it on this PC as ELEVENLABS_API_KEY in your Windows account, where Claude\'s tools read it. It never shows the key again, and it never goes into git. Claude Code sessions that are already open need a restart to see it.',
+    where: 'Rocco checks the key with ElevenLabs, then keeps it on this PC as ELEVENLABS_API_KEY in your Windows account, where your agent\'s tools read it. It never shows the key again, and it never goes into git. Agent sessions that are already open need a restart to see it.',
   },
 };
 

@@ -6,11 +6,12 @@ function Get-ProjectField([string]$name, [string]$repo = $script:RepoDir) {
 	''
 }
 
-# Every project in the RoDev folder: a folder whose repo\ has docs\game\PROJECT.md. The template is one too.
+# Every project in the RoDev folder (Test-ProjectDir). The template is one too. A game brought in from its own repo
+# has no PROJECT.md until the template is merged into it: it's listed by its folder's name until then.
 $script:ProjectCache = $null
 function Get-Projects {
 	if (-not $script:ProjectCache -or ((Get-Date) - $script:ProjectCache.Read).TotalSeconds -gt 10) {
-		$list = @(Get-ChildItem $RoDev -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'repo\docs\game\PROJECT.md') } | ForEach-Object {
+		$list = @(Get-ChildItem $RoDev -Directory | Where-Object { Test-ProjectDir $_.FullName } | ForEach-Object {
 			$repo = Join-Path $_.FullName 'repo'
 			$game = Get-ProjectField 'Game' $repo
 			$isTemplate = $game -like '*{{*'
@@ -18,8 +19,8 @@ function Get-Projects {
 			if ($phase -match '^([A-Za-z][A-Za-z ]*?)\s*[(.]') { $phase = $Matches[1] }
 			[pscustomobject]@{
 				id = $_.Name
-				name = $(if ($isTemplate) { 'RoDev template' } else { $game })
-				phase = $(if ($isTemplate) { 'Template' } else { $phase })
+				name = $(if ($isTemplate) { 'RoDev template' } elseif ($game) { $game } else { $_.Name })
+				phase = $(if ($isTemplate) { 'Template' } elseif ($phase) { $phase } else { 'Being brought in' })
 				template = $isTemplate
 				path = $_.FullName
 			}
@@ -121,18 +122,30 @@ function Get-Me {
 
 # ---- New projects: the template's tools\new-project.ps1, run in the background ----
 
+$GitHubUrl = '^(https://github\.com/[\w.-]+/[\w.-]+?(\.git)?|git@github\.com:[\w.-]+/[\w.-]+?(\.git)?)$'
 $script:Jobs = @{}
-function Start-NewProject([string]$name, [string]$code, [string]$repo) {
+# A game brought in (onboarding, "A game I've already made") says where it is: kind github, folder, place or studio.
+function Start-NewProject([string]$name, [string]$code, [string]$repo, [string]$kind = '', [string]$from = '') {
 	if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{1,39}$') { throw 'Name: 2 to 40 letters, numbers, - or _, starting with a letter or number.' }
 	if ($code -notmatch '^[A-Za-z0-9]{2,4}$') { throw 'Code: 2 to 4 letters or numbers.' }
-	if ($repo -and $repo -notmatch '^(https://github\.com/[\w.-]+/[\w.-]+?(\.git)?|git@github\.com:[\w.-]+/[\w.-]+?(\.git)?)$') { throw 'GitHub repo: a github.com URL, like https://github.com/you/game.git' }
+	if ($repo -and $repo -notmatch $GitHubUrl) { throw 'GitHub repo: a github.com URL, like https://github.com/you/game.git' }
 	if (Test-Path (Join-Path $RoDev $name)) { throw "$name already exists in $RoDev." }
+	$from = $from.Trim().Trim('"')
+	switch ($kind) {
+		'' { }
+		'github' { if ($from -notmatch $GitHubUrl) { throw 'The game''s repo: a github.com URL, like https://github.com/you/game.git' } }
+		'folder' { if (-not (Test-Path -LiteralPath $from -PathType Container)) { throw "There's no folder $from on this PC." } }
+		'place' { if (-not ((Test-Path -LiteralPath $from -PathType Leaf) -and $from -match '\.rbxlx?$')) { throw "There's no place file (.rbxl) at $from." } }
+		'studio' { }
+		default { throw "Not a kind of game to bring in: '$kind'." }
+	}
 	$newProject = Join-Path $RoDev 'template\repo\tools\new-project.ps1'
 	if (-not (Test-Path $newProject)) { throw "There's no template in $RoDev to copy." }
 	$jobId = [guid]::NewGuid().ToString('N').Substring(0, 8)
 	$log = Join-Path ([IO.Path]::GetTempPath()) "rocco-new-$jobId.log"
 	$arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$newProject`"", '-Name', $name, '-Code', $code)
 	if ($repo) { $arguments += '-GitHubRepo', $repo }
+	if ($kind -eq 'studio') { $arguments += '-StudioOnly' } elseif ($kind) { $arguments += '-Existing', "`"$from`"" }
 	$process = Start-Process powershell -ArgumentList $arguments -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Hidden -PassThru
 	$null = $process.Handle # without holding the handle, ExitCode reads as empty once it exits
 	$script:Jobs[$jobId] = @{ Process = $process; Log = $log; Name = $name }

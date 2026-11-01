@@ -1,4 +1,4 @@
-// Docs: every Markdown file in the repo, by folder; hover one for a preview. Open one to read it, ask Claude to
+// Docs: every Markdown file in the repo, by folder; hover one for a preview. Open one to read it, ask the agent to
 // change it (a note in Up next), or edit it here and push the change to GitHub (server/docs.ps1).
 import { state, emit } from '../state.js';
 import { $, esc } from '../lib/dom.js';
@@ -10,6 +10,7 @@ import { api } from '../api.js';
 import { toast } from '../ui/toast.js';
 import { initPopover } from '../ui/popover.js';
 import { go, syncUrl, docUrl } from '../router.js';
+import { agentShort } from '../agent.js';
 import * as sync from '../sync.js';
 
 let open = null;            // the open doc as the server sent it: { path, text, hash, dirty, locked, last }, or { path, error }
@@ -30,7 +31,7 @@ const nameOf = path => path.split('/').pop();
 const docOf = path => state.docs?.docs.find(d => d.path === path);
 const lf = text => String(text).replace(/\r\n?/g, '\n');
 export const hasDrafts = () => drafts.size > 0;
-const LOCKED ='Owned by the template: in a game it changes through the template, so ask Claude to change it.';
+const locked = () => `Owned by the template: in a game it changes through the template, so ask ${agentShort()} to change it.`;
 
 // Folders the user closed, kept in this browser. .claude (agent definitions) starts closed.
 let closed;
@@ -58,7 +59,7 @@ function afterList() {
   if (!listed) return;
   if ((!open || open.path !== state.doc) && opening !== state.doc) { openDoc(state.doc); return; }
   if (!open || open.error || opening || listed.hash === open.hash) return;
-  // It changed on disk (Claude edited it, or a refresh pulled it in): show the new text, or warn about the edit.
+  // It changed on disk (the agent edited it, or a refresh pulled it in): show the new text, or warn about the edit.
   if (!drafts.has(key(open.path))) reopen();
   else if (!conflict) { conflict = { hash: listed.hash }; renderDoc(); }
 }
@@ -193,7 +194,7 @@ function metaHTML(d) {
   return last
     + (drafts.has(key(d.path)) ? '<span class="doc-flag draft"><i></i>Your edit, not pushed</span>' : '')
     + (d.dirty ? '<span class="doc-flag warn"><i></i>Uncommitted changes in repo\\</span>' : '')
-    + (d.locked ? `<span class="doc-flag" title="${esc(LOCKED)}">${icon.lock}Owned by the template</span>` : '');
+    + (d.locked ? `<span class="doc-flag" title="${esc(locked())}">${icon.lock}Owned by the template</span>` : '');
 }
 
 function headHTML(d) {
@@ -203,14 +204,14 @@ function headHTML(d) {
   const tab = (m, label, on, extra = '') => `<button role="tab" data-mode="${m}" class="${on ? 'on' : ''}" aria-selected="${on}"${extra}>${label}</button>`;
   const github = state.docs?.repo ? `<a class="icon-btn" href="${esc(`${state.docs.repo}/blob/main/${encodeURI(d.path)}`)}" target="_blank" rel="noreferrer" title="Open on GitHub" aria-label="Open on GitHub">${icon.external}</a>` : '';
   return `<div class="doc-head"><div class="doc-crumbs" title="${esc(d.path)}">${crumbs}</div>`
-    + `<div class="doc-tabs" role="tablist">${tab('read', 'Read', !editing)}${tab('edit', `${icon.pen}Edit`, editing, d.locked ? ` disabled title="${esc(LOCKED)}"` : '')}</div>${github}</div>`
+    + `<div class="doc-tabs" role="tablist">${tab('read', 'Read', !editing)}${tab('edit', `${icon.pen}Edit`, editing, d.locked ? ` disabled title="${esc(locked())}"` : '')}</div>${github}</div>`
     + `<div class="doc-meta" id="docMeta">${metaHTML(d)}</div>`;
 }
 
 function askHTML(d) {
-  const hint = d.locked ? 'Ask Claude to change this doc (it goes through the template)' : 'Ask Claude to change this doc…';
+  const hint = d.locked ? `Ask ${agentShort()} to change this doc (it goes through the template)` : `Ask ${agentShort()} to change this doc…`;
   return `<form class="doc-ask" id="docAskForm" autocomplete="off"><span class="doc-ask-icon">${icon.sparkle}</span>`
-    + `<textarea id="docAsk" rows="1" placeholder="${esc(hint)}" aria-label="Ask Claude to change this doc"></textarea>`
+    + `<textarea id="docAsk" rows="1" placeholder="${esc(hint)}" aria-label="Ask ${esc(agentShort())} to change this doc"></textarea>`
     + '<button class="send" type="submit" title="Add to Up next" aria-label="Add to Up next"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button></form>';
 }
 
@@ -223,7 +224,7 @@ function notesHTML(d) {
   }
   if (notice) html += `<div class="doc-note" style="--c:var(--amber)">${icon.alert}<span>${esc(notice)}</span><button class="mini" data-act="dismiss">OK</button></div>`;
   if (d.dirty && mode === 'edit' && !d.locked) {
-    html += `<div class="doc-note" style="--c:var(--blue)">${icon.alert}<span>This doc has changes in repo\\ that aren't committed yet, likely Claude's work in progress. Pushing commits them along with your edit.</span></div>`;
+    html += `<div class="doc-note" style="--c:var(--blue)">${icon.alert}<span>This doc has changes in repo\\ that aren't committed yet, likely your agent's work in progress. Pushing commits them along with your edit.</span></div>`;
   }
   return html;
 }
@@ -241,7 +242,7 @@ function barHTML(d) {
 function blankHTML() {
   const recent = (state.docs?.docs || []).slice().sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 6);
   return `<div class="panel doc doc-blank"><div class="blank-icon">${icon.doc}</div><div class="blank-title">Pick a doc</div>`
-    + '<div class="blank-sub">Hover one for a preview. Open it to read it, edit it and push, or ask Claude to change it.</div>'
+    + `<div class="blank-sub">Hover one for a preview. Open it to read it, edit it and push, or ask ${esc(agentShort())} to change it.</div>`
     + (recent.length ? `<div class="doc-recents"><div class="doc-recents-label">Changed lately</div>${recent.map(d => `<button class="doc-recent" data-doc="${esc(d.path)}">${icon.doc}`
       + `<span class="dr-name">${esc(d.title || nameOf(d.path))}</span><span class="dr-path">${esc(d.path)}</span><span class="dr-at">${agoText(d.at)}</span></button>`).join('')}</div>` : '')
     + '</div>';
@@ -292,6 +293,7 @@ export function renderDocs() {
   const d = state.docs;
   $('#docsRepo').hidden = !d?.repo;
   if (d?.repo) $('#docsRepo').href = d.repo;
+  $('#docsDetails').hidden = !d || d.template; // the onboarding's detail tiles: a game's, not the template's
   const dirty = d ? d.docs.filter(x => x.dirty).length : 0, locked = d ? d.docs.filter(x => x.locked).length : 0;
   $('#docsSub').textContent = d ? [`${d.docs.length} docs`, dirty && `${dirty} with uncommitted changes`, locked && `${locked} owned by the template`].filter(Boolean).join(' · ') : '';
   renderTree();

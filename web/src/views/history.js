@@ -42,7 +42,7 @@ function commitHTML(c, repo) {
   const release = c.release ? `<span class="rel-chip${c.live ? ' is-live' : ''}" title="${c.live ? 'The build players have now' : 'Published to players'}">${icon.rocket}${c.live ? 'Live' : esc(c.release.replace(/^release\//, ''))}</span>` : '';
   const mark = `<button class="mark${c.bookmarked ? ' on' : ''}" data-mark="${esc(c.full)}" title="${c.bookmarked ? 'Remove bookmark' : 'Bookmark'}" aria-pressed="${!!c.bookmarked}">${icon.bookmark}</button>`;
   return `<div class="cm${c.merge ? ' merge' : ''}${c.live ? ' is-live' : ''}${c.bookmarked ? ' marked' : ''}"><span class="cm-node"></span><div class="cm-main"><div class="cm-subject">${subject}${release}</div>`
-    + `<div class="cm-meta"><span class="who${c.claude ? ' claude' : ''}">${c.claude ? 'Claude' : esc(c.author)}</span>${hash}`
+    + `<div class="cm-meta"><span class="who${c.agent ? ' agent' : ''}" title="${esc(c.author)}">${esc(c.agent || c.author)}</span>${hash}`
     + `${c.pushed ? '' : '<span class="unpushed">Not pushed</span>'}</div></div>${mark}<span class="cm-time">${hhmm(c.at)}</span></div>`;
 }
 

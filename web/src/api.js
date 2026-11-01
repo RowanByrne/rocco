@@ -46,7 +46,16 @@ export const api = {
   // Rocco moves to a newer release and restarts; the page reloads when the new version answers.
   updateRocco: tag => DEMO ? demo.updateRocco(tag) : post(withProject('/api/rocco/update'), { tag }),
   send: () =>DEMO ? demo.send() : post(withProject('/api/send')),
-  newProject: details => DEMO ? demo.newProject() : post('/api/projects/new', details),
-  job: id => getJson(`/api/jobs/${id}`),
+  // This PC's coding agent (server/agents.ps1).
+  agent: () => DEMO ? demo.agent() : getJson('/api/agent'),
+  setAgent: id => DEMO ? demo.setAgent(id) : post(withProject('/api/agent'), { id }),
+  // Onboarding (server/onboarding.ps1). A game being made isn't the open project yet, so these name theirs.
+  survey: () => DEMO ? demo.survey() : getJson('/api/onboarding/survey'),
+  onboarding: () => DEMO ? demo.onboarding() : getJson(withProject('/api/onboarding')),
+  saveAnswers: (project, body) => DEMO ? demo.saveAnswers(project, body) : post(`/api/onboarding/answers?p=${encodeURIComponent(project)}`, body),
+  startSetup: (project, part, tiles) => DEMO ? demo.startSetup(project, part, tiles) : post(`/api/onboarding/setup?p=${encodeURIComponent(project)}`, { part, tiles }),
+  // { name, code, repo, existing: { kind, from } }: a new game, or one brought in. Returns { job }.
+  newProject: details => DEMO ? demo.newProject(details) : post('/api/projects/new', details),
+  job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
 };

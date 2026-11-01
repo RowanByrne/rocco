@@ -14,6 +14,14 @@
 .set-select { width: auto; min-width: 120px; height: 32px; }
 .key-row .set-title { flex: 1; font-weight: 400; color: var(--text-2); }
 
+/* Your agent: one of a list */
+.agent-row { width: 100%; border: 0; background: transparent; text-align: left; color: inherit; }
+.agent-row .set-text { display: grid; }
+.agent-row:hover { background: var(--glass-2); }
+.radio { width: 16px; height: 16px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--stroke-2); transition: box-shadow .15s; }
+.agent-row.on .radio { box-shadow: inset 0 0 0 4.5px var(--accent), 0 0 10px rgba(124,108,255,.45); }
+.set-foot { font-size: 12.5px; color: var(--text-3); }
+
 /* Switch */
 .switch { position: relative; width: 38px; height: 22px; flex: none; padding: 0; border: 0; border-radius: 99px; background: rgba(255,255,255,.12);
   box-shadow: inset 0 0 0 1px var(--stroke-2); transition: background .2s, box-shadow .2s; }

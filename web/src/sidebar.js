@@ -7,7 +7,7 @@ import { storage } from './lib/storage.js';
 import { api, DEMO } from './api.js';
 import { openMenu, closeMenus } from './ui/menu.js';
 import { switchProject } from './projects.js';
-import { openNewProject } from './dialogs/new-project.js';
+import { openOnboarding } from './dialogs/onboarding.js';
 import { go } from './router.js';
 
 // A lane is busy while a worker is in it, or while it holds a branch: stuck, or a feature waiting for the user or the conductor.
@@ -64,7 +64,7 @@ function meMenuHTML() {
   const row = (key, value) => value ? `<div class="kv"><span>${key}</span><span title="${esc(value)}">${esc(value)}</span></div>` : '';
   return `<div class="me-card"><span class="avatar">${avatarHTML()}</span><span class="ws-text"><span class="ws-name">${esc(m.name || 'You')}</span>`
     + `<span class="ws-sub">${esc(m.login ? '@' + m.login : m.email || '')}</span></span></div><div class="menu-sep"></div>`
-    + row('Claude', m.claude) + row('Git email', m.email) + row('This PC', m.pc)
+    + row('Agent', state.agent?.name) + row('Claude account', m.claude) + row('Git email', m.email) + row('This PC', m.pc)
     + row('Lanes here', state.meta.lanes.count ? `${state.meta.lanes.count} for this project` : '')
     + `<div class="menu-sep"></div><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button>`
     + `<button class="menu-item" data-goto="settings" role="menuitem">${icon.sliders}<span class="mi-text">Settings</span></button>`;
@@ -99,7 +99,7 @@ export function initSidebar() {
   $('#projMenu').addEventListener('click', e => {
     const project = e.target.closest('[data-project]');
     if (project) { closeMenus(); switchProject(project.dataset.project); }
-    else if (e.target.closest('[data-new-project]')) { closeMenus(); openNewProject(); }
+    else if (e.target.closest('[data-new-project]')) { closeMenus(); openOnboarding(); }
   });
 
   $('#meBtn').addEventListener('click', () => openMenu($('#meMenu'), $('#meBtn'), meMenuHTML(), { up: true }));

@@ -5,6 +5,8 @@ import { ACTIONS, keyFor, comboOf, bind, resetKeys, pause } from '../hotkeys.js'
 import { askPermission } from '../notify.js';
 import { voiceSupported } from '../voice.js';
 import { toast } from '../ui/toast.js';
+import { state } from '../state.js';
+import { chooseAgent } from '../agent.js';
 
 let recording = null; // the action whose new hotkey is being pressed
 
@@ -12,11 +14,22 @@ const toggle = (key, on) => `<button class="switch" role="switch" aria-checked="
 const row = (title, sub, control) => `<div class="set-row"><div class="set-text"><div class="set-title">${title}</div><div class="set-sub">${sub}</div></div>${control}</div>`;
 const keyHTML = combo => combo ? combo.split('+').map(k => `<kbd>${esc(k)}</kbd>`).join('') : '<span class="unset">None</span>';
 
+// This PC's coding agent (agent.js): any of them can run the project, since every agent reads the project's AGENTS.md.
+function agentHTML() {
+  const a = state.agent;
+  if (!a) return '';
+  return `<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span></div>`
+    + a.agents.map(x => `<button class="set-row agent-row${x.id === a.id ? ' on' : ''}" data-agent="${esc(x.id)}" role="radio" aria-checked="${x.id === a.id}">`
+      + `<span class="radio"></span><span class="set-text"><span class="set-title">${esc(x.name)}</span>`
+      + `<span class="set-sub">${x.installed ? 'Installed' : 'Not installed on this PC (Connections)'}</span></span></button>`).join('')
+    + `<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
+}
+
 export function renderSettings() {
   const s = settings();
   const permission = 'Notification' in window ? Notification.permission : 'unsupported';
   const blocked = permission === 'denied' ? ' Your browser is blocking them: allow notifications for this site in its settings.' : '';
-  $('#setBody').innerHTML = `<div class="set-group"><div class="set-head">Notifications</div>`
+  $('#setBody').innerHTML = agentHTML() + `<div class="set-group"><div class="set-head">Notifications</div>`
     + row('Desktop notifications', `A notification when something is ready to test, stuck, or waiting for your OK while Rocco is in the background.${blocked}`, toggle('notifications', s.notifications))
     + `</div><div class="set-group"><div class="set-head">Workboard</div>`
     + row('Live steps on Working cards', 'Show what the worker did last on each Working card. Off: a progress bar only.', toggle('liveSteps', s.liveSteps))
@@ -47,6 +60,12 @@ export function initSettings() {
       const key = sw.dataset.setting, on = sw.getAttribute('aria-checked') !== 'true';
       if (key === 'notifications' && on && (await askPermission()) === 'denied') toast('Your browser is blocking notifications for this site', 'var(--amber)');
       setSetting(key, on);
+      return;
+    }
+    const agent = e.target.closest('[data-agent]');
+    if (agent) {
+      try { await chooseAgent(agent.dataset.agent); toast(`${state.agent.name} is your agent on this PC`); }
+      catch (err) { toast(`Couldn't change your agent: ${err.message}`, 'var(--red)'); }
       return;
     }
     const b = e.target.closest('[data-bind]');

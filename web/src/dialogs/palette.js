@@ -6,7 +6,7 @@ import { go } from '../router.js';
 import { switchProject } from '../projects.js';
 import { openTask } from '../views/workboard.js';
 import { showDoc } from '../views/docs.js';
-import { openNewProject } from './new-project.js';
+import { openOnboarding } from './onboarding.js';
 
 const modal = $('#paletteModal');
 const input = $('#paletteInput');
@@ -20,7 +20,7 @@ function collect() {
   const views = ['workboard', 'history', 'docs', 'connections', 'settings', 'metrics'];
   return [
     ...ACTIONS.filter(a => !a.id.startsWith('go-') && a.id !== 'palette').map(a => ({ group: 'Actions', label: a.label, hint: keyFor(a.id), run: () => run(a.id) })),
-    { group: 'Actions', label: 'New project', run: openNewProject },
+    { group: 'Actions', label: 'New project', run: () => openOnboarding() },
     ...views.map(v => ({ group: 'Go to', label: v[0].toUpperCase() + v.slice(1), hint: keyFor(`go-${v}`), run: () => go(v) })),
     ...state.tasks.filter(t => t.status !== 'removed').map(t => ({
       group: 'Tasks', label: `${t.id} ${t.title}`, hint: t.kind === 'plan' ? 'Feature plan' : t.kind === 'question' ? (t.status === 'ready' ? 'Answered' : 'Question') : STATUS[t.status] || '',

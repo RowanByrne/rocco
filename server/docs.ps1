@@ -1,8 +1,8 @@
 # Docs: every Markdown file in the repo by folder, each with a preview for the hover; one doc in full; and the
 # user's own edit to a doc, committed on main as the user and pushed to GitHub.
 
-# Files the template owns (CLAUDE.md "Template-owned files"). In a game they change only through the template.
-$TemplateOwned = '^(CLAUDE\.md|AGENTS\.md|\.claude/|docs/workflow/|tools/)'
+# Files the template owns (AGENTS.md "Template-owned files"). In a game they change only through the template.
+$TemplateOwned = '^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|\.claude/|docs/workflow/|tools/)'
 function Test-TemplateOwned([string]$path, [bool]$template) { (-not $template) -and $path -match $TemplateOwned }
 
 # Line endings don't count: the app edits with LF, and a doc may be stored with CRLF.
@@ -113,10 +113,10 @@ function Read-Doc([string]$path, [bool]$template) {
 # the app gets { conflict } and the current hash, and the user decides.
 function Save-Doc([string]$path, [string]$text, [string]$base, [string]$message, [bool]$template) {
 	$doc = Resolve-Doc $path
-	if (Test-TemplateOwned $doc.path $template) { throw "$($doc.path) belongs to the template, so it changes there, not in a game (CLAUDE.md `"Template-owned files`"). Ask Claude to change it." }
+	if (Test-TemplateOwned $doc.path $template) { throw "$($doc.path) belongs to the template, so it changes there, not in a game (AGENTS.md `"Template-owned files`"). Ask your agent to change it." }
 	$branch = "$(Invoke-Git $RepoDir rev-parse --abbrev-ref HEAD)"
-	if ($branch -ne 'main') { throw "repo\ is on '$branch', not main. Ask Claude to put it back on main first." }
-	if (Test-Path "$(Invoke-Git $RepoDir rev-parse --path-format=absolute --git-path MERGE_HEAD)") { throw 'repo\ is in the middle of a merge. Ask Claude to finish it first.' }
+	if ($branch -ne 'main') { throw "repo\ is on '$branch', not main. Ask your agent to put it back on main first." }
+	if (Test-Path "$(Invoke-Git $RepoDir rev-parse --path-format=absolute --git-path MERGE_HEAD)") { throw 'repo\ is in the middle of a merge. Ask your agent to finish it first.' }
 
 	$bytes = [IO.File]::ReadAllBytes($doc.file)
 	$bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF

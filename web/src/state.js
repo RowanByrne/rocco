@@ -6,7 +6,8 @@ export const state = {
   projects: [],         // every project in the RoDev folder
   tasks: [],            // the open project's Workboard tasks
   meta: { project: null, lanes: { count: 0, open: [], main: false }, main: {} },
-  me: null,             // the user: git name and email, GitHub avatar, Claude account, this PC
+  me: null,             // the user: git name and email, GitHub avatar, Claude account (if any), this PC
+  agent: null,          // this PC's coding agent: { id, name, short, installed, agents } (agent.js)
   conn: null,           // Connections: { checking, checkedAt, online, items }
   history: null,        // History: { repo, main, branches, lanes }
   docs: null,           // Docs: { repo, template, docs }, every Markdown file in the repo

@@ -1,7 +1,7 @@
 # One-click fixes on Connections: what each row's button does. The app only names an action; what runs is defined
 # here, never sent by the page. Quick fixes run at once. Updates to this PC's tools run in a window of their own, so
 # the user sees them and can answer anything they ask (an installer's prompt, a sign-in), and Rocco waits for the
-# window to close. Changes to the game itself are Claude's: those rows add a note to Up next instead (in the app).
+# window to close. Changes to the game itself are the agent's: those rows add a note to Up next instead (in the app).
 
 # Main to GitHub, with GitHub's main merged in first, never rebased (CLAUDE.md "Git"). Returns why it didn't push, or ''.
 # It won't merge into uncommitted work: a merge that went wrong couldn't be backed out without losing it.
@@ -10,12 +10,12 @@ function Push-Main {
 	if (-not $fetch.ok) { return "GitHub couldn't be reached, so it isn't pushed: $($fetch.text)" }
 	if (-not (Invoke-GitText $RepoDir merge-base --is-ancestor origin/main HEAD).ok) {
 		if (@(Invoke-Git $RepoDir status --porcelain --untracked-files=no | Where-Object { $_ }).Count) {
-			return 'not pushed: main on GitHub has newer commits, and repo\ has uncommitted changes. Say "refresh" to Claude.'
+			return 'not pushed: main on GitHub has newer commits, and repo\ has uncommitted changes. Say "refresh" to your agent.'
 		}
 		$merge = Invoke-GitText $RepoDir merge --no-edit origin/main
 		if (-not $merge.ok) {
 			Invoke-GitText $RepoDir merge --abort | Out-Null
-			return 'not pushed: main on GitHub has changes that clash with it. Say "refresh" to Claude to merge them.'
+			return 'not pushed: main on GitHub has changes that clash with it. Say "refresh" to your agent to merge them.'
 		}
 	}
 	$push = Invoke-GitText $RepoDir push origin main
@@ -24,8 +24,8 @@ function Push-Main {
 }
 
 function Assert-OnMain {
-	if ("$(Invoke-Git $RepoDir rev-parse --abbrev-ref HEAD)" -ne 'main') { throw 'repo\ isn''t on main. Ask Claude to put it back first.' }
-	if (Test-Path "$(Invoke-Git $RepoDir rev-parse --path-format=absolute --git-path MERGE_HEAD)") { throw 'repo\ is in the middle of a merge. Ask Claude to finish it first.' }
+	if ("$(Invoke-Git $RepoDir rev-parse --abbrev-ref HEAD)" -ne 'main') { throw 'repo\ isn''t on main. Ask your agent to put it back first.' }
+	if (Test-Path "$(Invoke-Git $RepoDir rev-parse --path-format=absolute --git-path MERGE_HEAD)") { throw 'repo\ is in the middle of a merge. Ask your agent to finish it first.' }
 }
 
 # The updates that run in their own window: the title, then the steps (PowerShell, setting $code on failure).
@@ -65,6 +65,7 @@ if (Get-Process lync -ErrorAction SilentlyContinue) {
 $WindowActions = @{
 	'claude-update' = @('Updating Claude Code', 'claude update; $code = $LASTEXITCODE')
 	'codex-update'  = @('Updating Codex', 'npm install -g @openai/codex@latest; $code = $LASTEXITCODE')
+	'gemini-update' = @('Installing the latest Gemini CLI', 'npm install -g @google/gemini-cli@latest; $code = $LASTEXITCODE')
 	'git-update'    = @('Updating Git for Windows', 'git update-git-for-windows; $code = $LASTEXITCODE')
 	'gh-update'     = @('Updating the GitHub CLI', 'winget upgrade --id GitHub.cli --exact; $code = $LASTEXITCODE')
 	'gh-install'    = @('Installing the GitHub CLI', 'winget install --id GitHub.cli --exact; $code = $LASTEXITCODE')

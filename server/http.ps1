@@ -49,6 +49,9 @@ function Invoke-Request($ctx) {
 	if ($get -and $path -eq '/api/me') { Send-Json $ctx (Get-Me); return }
 	if ($get -and $path -match '^/api/jobs/(\w+)$') { Send-Json $ctx (Get-JobStatus $Matches[1]); return }
 	if ($get -and $path -match '^/api/actions/runs/(\w+)$') { Send-Json $ctx (Get-ActionRun $Matches[1]); return }
+	if ($get -and $path -eq '/api/agent') { Send-Json $ctx (Get-Agent); return }
+	# The onboarding survey for a game that doesn't exist yet: the template's.
+	if ($get -and $path -eq '/api/onboarding/survey') { Send-Json $ctx (Get-Survey); return }
 	if ($get -and $path -notmatch '^/(api|files)/') { Send-Static $ctx $path; return }
 
 	# Everything else is about one project, named by ?p=.
@@ -60,6 +63,7 @@ function Invoke-Request($ctx) {
 		if ($path -eq '/api/history') { Send-Json $ctx (Get-History); return }
 		if ($path -eq '/api/docs') { Send-Json $ctx (Get-Docs $project.template); return }
 		if ($path -eq '/api/docs/file') { Send-Json $ctx (Read-Doc $req.QueryString['path'] $project.template); return }
+		if ($path -eq '/api/onboarding') { Send-Json $ctx ([pscustomobject]@{ survey = (Get-Survey $RepoDir); answers = (Read-Answers) }); return }
 		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Read-Task $Matches[1])); return }
 		# A task's screenshot or audio option.
 		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a))$' -and $Matches[2] -notmatch '\.\.') {
@@ -73,7 +77,26 @@ function Invoke-Request($ctx) {
 	if ($req.HttpMethod -ne 'POST' -or $req.Headers['X-Rocco'] -ne '1') { Send-Text $ctx 403 'Forbidden'; return }
 	if ($path -eq '/api/projects/new') {
 		$body = Read-Json $req
-		Send-Json $ctx @{ job = (Start-NewProject ([string]$body.name) ([string]$body.code) ([string]$body.repo)) }; return
+		try { Send-Json $ctx @{ job = (Start-NewProject ([string]$body.name) ([string]$body.code) ([string]$body.repo) ([string]$body.existing.kind) ([string]$body.existing.from)) } }
+		catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	# This PC's agent (agents.ps1). The tools check runs again, so Connections marks the new one.
+	if ($path -eq '/api/agent') {
+		try { $agent = Set-Agent ([string](Read-Json $req).id) } catch { Send-Text $ctx 400 $_.Exception.Message; return }
+		$script:PcResult = $null
+		Send-Json $ctx $agent; return
+	}
+	# Onboarding (onboarding.ps1): the user's answers into docs/game/ONBOARDING.md, then their agent on SETUP.md.
+	if ($path -eq '/api/onboarding/answers') {
+		$body = Read-Json $req
+		try { Send-Json $ctx (Save-Answers ([string]$body.flow) ([string]$body.source) $body.answers) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	if ($path -eq '/api/onboarding/setup') {
+		$body = Read-Json $req
+		try { Send-Json $ctx (Start-Setup ([string]$body.part) @($body.tiles | Where-Object { $_ })) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
 	}
 	# Accounts linked on this PC (Connections). The key goes into the user's environment; it never comes back out.
 	if ($path -eq '/api/links/elevenlabs') {

@@ -150,7 +150,7 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Send-ToConductor $t 'answer'
 			Add-Log $t 'you' $text
 		}
-		# Something Claude spotted (the inbox) that the user wants done.
+		# Something the agent spotted (the inbox) that the user wants done.
 		'queue' {
 			Save-Undo $t
 			Send-ToConductor $t 'plan'

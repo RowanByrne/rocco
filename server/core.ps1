@@ -25,7 +25,8 @@ $ToolsDir = Split-Path $AppDir -Parent
 if ((Split-Path $ToolsDir -Leaf) -ne '_tools') { throw "Rocco runs from a RoDev folder's _tools\rocco, not from $AppDir (README.md `"Install`")." }
 $RoDev = Split-Path $ToolsDir -Parent
 
-function Test-ProjectDir([string]$dir) { $dir -and (Test-Path (Join-Path $dir 'repo\docs\game\PROJECT.md')) }
+# A project: a folder whose repo\ has PROJECT.md, or ONBOARDING.md (a game brought in, before the template is merged into it).
+function Test-ProjectDir([string]$dir) { $dir -and ((Test-Path (Join-Path $dir 'repo\docs\game\PROJECT.md')) -or (Test-Path (Join-Path $dir 'repo\docs\game\ONBOARDING.md'))) }
 
 # The project Rocco opens on, and that a command is about: -Project, else the project the current folder is in
 # (its repo\ or a lane, found through git), else the template, else the first project.

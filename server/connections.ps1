@@ -6,7 +6,7 @@ function Conn([string]$group, [string]$name, [string]$status, [string]$version, 
 }
 
 # A row's one-click fix, its button. kind: run (Rocco does it now, actions.ps1), window (an update in a window of its
-# own), input (run, once the user gives a value), ask (a note for Claude in Up next), rocco (Rocco's own update).
+# own), input (run, once the user gives a value), ask (a note for the agent in Up next), rocco (Rocco's own update).
 function Add-Action($item, [string]$kind, [string]$label, [hashtable]$more = @{}) {
 	$item | Add-Member action ([pscustomobject](@{ kind = $kind; label = $label } + $more))
 	$item
@@ -50,9 +50,9 @@ function Get-TemplateConnection([bool]$refresh) {
 	$newer = @($releases | Where-Object { -not (Invoke-GitText $RepoDir merge-base --is-ancestor $_ main).ok })
 	if (-not $newer) { return Conn 'Project' 'Template' 'ok' $current $short[0] "On the newest template release, $($short[0]) (as of the last check)." '' '' }
 	$notes = @($newer | Select-Object -First 5 | ForEach-Object { "$($_ -replace '^template/', '')`n$((@(Invoke-Git $RepoDir tag -l $_ '--format=%(contents)') -join "`n").Trim())" }) -join "`n`n"
-	$item = Conn 'Project' 'Template' 'update' $current $short[0] "Template $($short[0]) is out; this game is on $(if ($current) { $current } else { 'an earlier version' })." 'Ask Claude to bring it in: it merges the release and keeps this game''s own docs (TEMPLATE.md).' ''
+	$item = Conn 'Project' 'Template' 'update' $current $short[0] "Template $($short[0]) is out; this game is on $(if ($current) { $current } else { 'an earlier version' })." "Ask $((Get-Agent).short) to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md)." ''
 	$item | Add-Member release ([pscustomobject]@{ tag = $releases[0]; notes = $notes })
-	Add-Action $item 'ask' 'Ask Claude to update' @{ note = "Update from template to $($releases[0]) (TEMPLATE.md `"Taking an update`")." }
+	Add-Action $item 'ask' "Ask $((Get-Agent).short) to update" @{ note = "Update from template to $($releases[0]) (TEMPLATE.md `"Taking an update`")." }
 }
 
 # The template, GitHub, the commit check, and this project's Lync servers.
@@ -166,11 +166,11 @@ function Get-LibraryConnections([bool]$refresh) {
 		$patched = if ($l.patches -and $l.patches -notmatch '^(none|no|-)$') { "local patches: $($l.patches)" } else { 'no local patches' }
 		$detail = "$(if ($repo) { "github.com/$repo" } else { $l.source }) $Dot $patched"
 		if (-not $l.recorded) {
-			Add-Action (Conn 'Libraries' $l.name 'warn' $version $latest "In $($l.found.path), but not in ARCHITECTURE.md." 'Record its version, source and local patches in ARCHITECTURE.md "Vendored libraries" (CODING.md).' '') 'ask' 'Ask Claude' @{ note = "Record $($l.name) in ARCHITECTURE.md `"Vendored libraries`": its version, source and local patches (CODING.md `"Third-party code`")." }
+			Add-Action (Conn 'Libraries' $l.name 'warn' $version $latest "In $($l.found.path), but not in ARCHITECTURE.md." 'Record its version, source and local patches in ARCHITECTURE.md "Vendored libraries" (CODING.md).' '') 'ask' "Ask $((Get-Agent).short)" @{ note = "Record $($l.name) in ARCHITECTURE.md `"Vendored libraries`": its version, source and local patches (CODING.md `"Third-party code`")." }
 		} elseif ($l.found -and $l.found.version -and $l.version -and (Get-VersionText $l.found.version) -ne (Get-VersionText $l.version)) {
-			Add-Action (Conn 'Libraries' $l.name 'warn' $l.found.version $latest "ARCHITECTURE.md says $($l.version), but src has $($l.found.version)." 'Correct the version in ARCHITECTURE.md "Vendored libraries".' '') 'ask' 'Ask Claude' @{ note = "Correct $($l.name)'s version in ARCHITECTURE.md `"Vendored libraries`": src has $($l.found.version)." }
+			Add-Action (Conn 'Libraries' $l.name 'warn' $l.found.version $latest "ARCHITECTURE.md says $($l.version), but src has $($l.found.version)." 'Correct the version in ARCHITECTURE.md "Vendored libraries".' '') 'ask' "Ask $((Get-Agent).short)" @{ note = "Correct $($l.name)'s version in ARCHITECTURE.md `"Vendored libraries`": src has $($l.found.version)." }
 		} elseif ($latest -and (Test-Newer $latest $version)) {
-			Add-Action (Conn 'Libraries' $l.name 'update' $version $latest $detail 'Claude updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md "Third-party code").' '') 'ask' 'Ask Claude to update' @{ note = "Update $($l.name) from $version to $latest (CODING.md `"Third-party code`")." }
+			Add-Action (Conn 'Libraries' $l.name 'update' $version $latest $detail "$((Get-Agent).short) updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md `"Third-party code`")." '') 'ask' "Ask $((Get-Agent).short) to update" @{ note = "Update $($l.name) from $version to $latest (CODING.md `"Third-party code`")." }
 		} else {
 			Conn 'Libraries' $l.name 'ok' $version $latest $detail '' ''
 		}
@@ -182,7 +182,7 @@ function Get-LibraryConnections([bool]$refresh) {
 # Everything installed on this PC, against the latest versions online. Runs as a job, so it can't
 # use anything defined outside this block.
 $CheckPc = {
-	param([string]$roDev, [string]$roccoDir)
+	param([string]$roDev, [string]$roccoDir, [string]$agentId)
 	$ErrorActionPreference = 'SilentlyContinue'
 	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 	$net = @{ up = $true }
@@ -226,6 +226,12 @@ $CheckPc = {
 	$claudeText = if (Test-Path $claudeConfig) { [IO.File]::ReadAllText($claudeConfig) } else { '' }
 
 	$items = @()
+	# The coding agents (the template's MODELS.md "Your agent"). The one this PC picked must be here; the others are optional.
+	function Agent($item, [string]$id) {
+		if ($id -eq $agentId) { $item.detail = "Your agent $([char]0x00B7) $($item.detail)" }
+		elseif ($item.status -eq 'missing') { $item.status = 'off'; $item.detail = 'Optional, not installed.'; $item.update = ''; $item.command = '' }
+		$item
+	}
 
 	# Claude Code: on PATH, or the copy the Claude desktop app keeps.
 	$version = ''; $how = ''; $cmd = ''
@@ -238,8 +244,15 @@ $CheckPc = {
 	$latest = (Latest 'https://registry.npmjs.org/@anthropic-ai/claude-code/latest').version
 	$account = if ($claudeText -match '"oauthAccount"\s*:\s*\{[^}]*?"emailAddress"\s*:\s*"([^"]+)"') { $Matches[1] } else { '' }
 	$status = Status $version $latest
-	$item = Item 'AI' 'Claude Code' $status $version $latest $(if ($account) { "Signed in as $account" } else { 'Not signed in' }) $how $cmd
+	$item = Agent (Item 'AI' 'Claude Code' $status $version $latest $(if ($account) { "Signed in as $account" } elseif ($version) { 'Not signed in' } else { 'Not installed' }) $(if ($version) { $how } else { 'Install it (WORKSTATION.md).' }) $cmd) 'claude'
 	$items += if ($cmd -and $status -eq 'update') { Act $item 'window' 'Update' @{ id = 'claude-update' } } else { $item }
+
+	# Gemini CLI.
+	$version = if (Get-Command gemini) { Ver (Run 'cmd.exe' '/d /c gemini --version') } else { '' }
+	$latest = (Latest 'https://registry.npmjs.org/@google/gemini-cli/latest').version
+	$status = Status $version $latest
+	$item = Agent (Item 'AI' 'Gemini CLI' $status $version $latest $(if ($version) { 'gemini' } else { 'Not installed' }) $(if ($version) { 'Update it:' } else { 'Install it (WORKSTATION.md):' }) $(if ($version) { 'npm install -g @google/gemini-cli@latest' } else { 'npm install -g @google/gemini-cli' })) 'gemini'
+	$items += if ($status -in 'update', 'missing') { Act $item 'window' $(if ($version) { 'Update' } else { 'Install' }) @{ id = 'gemini-update' } } else { $item }
 
 	# Codex: makes the images (tools\imagegen.ps1).
 	$codex = (Get-Command codex | Select-Object -First 1).Source; $how = 'Update it:'; $cmd = 'npm install -g @openai/codex@latest'
@@ -253,6 +266,7 @@ $CheckPc = {
 	$detail = if (-not $codex) { 'Not installed: images can''t be made on this PC.' } elseif ($signedIn) { "Signed in $([char]0x00B7) makes images" } else { 'Not signed in: open the Codex app and sign in.' }
 	$status = Status $version $latest
 	$item = Item 'AI' 'Codex' $status $version $latest $detail $(if ($codex) { $how } else { 'Install the Codex app and sign in (WORKSTATION.md).' }) $cmd
+	if ($agentId -eq 'codex') { $item.detail = "Your agent $([char]0x00B7) $($item.detail)" }
 	$items += if ($codex -and $cmd -and $status -eq 'update') { Act $item 'window' 'Update' @{ id = 'codex-update' } } else { $item }
 
 	# Roblox Studio: up to date when the current release is among the installed versions.
@@ -263,13 +277,6 @@ $CheckPc = {
 	$status = if (-not $studio) { 'missing' } elseif ($current -and -not ($studio.Name -contains $current.clientVersionUpload)) { 'update' } else { 'ok' }
 	$open = @(Get-Process RobloxStudioBeta).Count
 	$items += Item 'Roblox' 'Roblox Studio' $status $version $(if ($current) { $current.version -replace '^(\d+\.\d+\.\d+).*', '$1' }) "$(if ($open) { "$open open" } else { 'Not open' })" 'Studio updates itself the next time it opens.' ''
-
-	# The Studio MCP: workers only get Studio tools under this exact name.
-	if ($claudeText -match '"Roblox_Studio"\s*:\s*\{') { $items += Item 'Roblox' 'Studio MCP' 'ok' '' '' 'Registered as Roblox_Studio' '' '' }
-	else {
-		$item = Item 'Roblox' 'Studio MCP' 'warn' '' '' 'Not registered as Roblox_Studio, so workers get no Studio tools.' 'Register it under that exact name (WORKSTATION.md).' ''
-		$items += Act $item 'ask' 'Ask Claude' @{ note = 'Register the Roblox Studio MCP in Claude Code as Roblox_Studio (WORKSTATION.md "Setting up a PC", step 2).' }
-	}
 
 	# Lync: the RoDev folder's copy. It reports only its major version ("Alpha 30"); releases are 0.<major>.<patch>.
 	$lync = Join-Path $roDev '_tools\lync\lync.exe'
@@ -353,11 +360,19 @@ $CheckPc = {
 		$item = Item 'Tools' 'GitHub CLI' $status $version (Ver $tag) 'gh' 'Update it:' 'winget upgrade --id GitHub.cli --exact'
 		$items += if ($status -eq 'update') { Act $item 'window' 'Update' @{ id = 'gh-update' } } else { $item }
 	} else {
-		$item = Item 'Tools' 'GitHub CLI' 'off' '' '' 'Optional, not installed.' 'Install it if you want Claude to handle GitHub for you:' 'winget install --id GitHub.cli --exact'
+		$item = Item 'Tools' 'GitHub CLI' 'off' '' '' 'Optional, not installed.' 'Install it if you want your agent to handle GitHub for you:' 'winget install --id GitHub.cli --exact'
 		$items += Act $item 'window' 'Install' @{ id = 'gh-install' }
 	}
 
 	ConvertTo-Json -InputObject ([pscustomobject]@{ online = $net.up; items = $items; eleven = [pscustomobject]$eleven }) -Depth 4 -Compress
+}
+
+# The Studio MCP, in this PC's agent's settings (agents.ps1): workers only get Studio tools under this exact name.
+function Get-StudioMcpItem {
+	$m = Test-StudioMcp
+	if ($m.registered) { return Conn 'Roblox' 'Studio MCP' 'ok' '' '' "Registered as Roblox_Studio in $($m.agent.name)" '' '' }
+	$item = Conn 'Roblox' 'Studio MCP' 'warn' '' '' "Not registered as Roblox_Studio in $($m.agent.name), so workers get no Studio tools." "Register it under that exact name, in $($m.file) (WORKSTATION.md)." ''
+	Add-Action $item 'ask' "Ask $($m.agent.short)" @{ note = "Register the Roblox Studio MCP in $($m.agent.name) as Roblox_Studio (WORKSTATION.md `"Setting up a PC`", step 2)." }
 }
 
 # ---- ElevenLabs: linked by the user in Connections, kept as ELEVENLABS_API_KEY in their environment ----
@@ -457,9 +472,9 @@ function Get-Connections([bool]$refresh) {
 		}
 	}
 	$stale = -not $script:PcResult -or ((Get-Date) - [datetime]$script:PcResult.At).TotalMinutes -gt 30
-	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev, $AppDir }
+	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev, $AppDir, (Get-Agent).id }
 	$checkedAt = $null; $online = $true; $pcItems = @()
 	if ($script:PcResult) { $checkedAt = $script:PcResult.At; $online = $script:PcResult.Value.online; $pcItems = @($script:PcResult.Value.items) }
-	$items = @(@(Get-ProjectConnections $refresh) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-ElevenLabsItem))
+	$items = @(@(Get-ProjectConnections $refresh) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-StudioMcpItem) + @(Get-ElevenLabsItem))
 	[pscustomobject]@{ checking = [bool]$script:PcJob -or [bool]$script:LibJob -or (Test-TemplateFetching); checkedAt = $checkedAt; online = $online; items = $items }
 }

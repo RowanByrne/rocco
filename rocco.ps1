@@ -1,4 +1,4 @@
-# Rocco (README.md): serves the app for every project in this RoDev folder, and gives Claude the commands that
+# Rocco (README.md): serves the app for every project in this RoDev folder, and gives the agent the commands that
 # keep a project's Workboard current. Installed once, in <RoDev>\_tools\rocco. Tasks live outside git, in
 # <Game>\rocco\tasks\T-NNN\. Commands act on the project the current folder is in (a game's repo\ or a lane), or on
 # -Project <folder name>; from a game's repo\, run them as ..\..\_tools\rocco\rocco.ps1.
@@ -28,7 +28,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-foreach ($part in 'core', 'tasks', 'projects', 'connections', 'history', 'docs', 'actions', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
+foreach ($part in 'core', 'agents', 'tasks', 'projects', 'connections', 'history', 'docs', 'actions', 'onboarding', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
 
 function Format-Time($iso) { if ($iso) { ([datetime]$iso).ToString('HH:mm') } else { '' } }
 

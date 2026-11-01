@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="styles/docs.css">
 <link rel="stylesheet" href="styles/settings.css">
 <link rel="stylesheet" href="styles/dialogs.css">
+<link rel="stylesheet" href="styles/onboarding.css">
 <link rel="stylesheet" href="styles/mascot.css">
 <script type="module" src="src/main.js"></script>
 </head>
@@ -80,6 +81,10 @@
 
   <main class="main">
     <section class="view" data-view="workboard">
+      <div class="first-game" id="firstGame" hidden>
+        <div class="first-text"><b>Start your first game</b><span>A new one, or one you've already made: a few questions, and your agent writes the first docs.</span></div>
+        <button class="btn accent" id="firstGameBtn">New project</button>
+      </div>
       <div class="head">
         <h1>Workboard</h1><span class="sub" id="boardSub"></span>
         <span class="sp"></span>
@@ -140,6 +145,7 @@
       <div class="head">
         <h1>Docs</h1><span class="sub" id="docsSub"></span>
         <span class="sp"></span>
+        <button class="ghost" id="docsDetails" hidden>Add game details</button>
         <a class="ghost" id="docsRepo" target="_blank" rel="noreferrer" hidden>
           Open on GitHub
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
@@ -188,21 +194,7 @@
   <div class="s-body" id="sBody"></div>
   <div class="s-foot" id="sFoot"></div>
 </aside>
-<div class="modal" id="newModal" role="dialog" aria-labelledby="newTitle">
-  <form class="modal-card" id="newForm" autocomplete="off">
-    <h2 id="newTitle">New project</h2>
-    <p class="m-sub">Copies the template into a new folder in this RoDev folder (NEW-PROJECT.md).</p>
-    <div class="fields">
-      <div class="two">
-        <label class="lbl">Name<input class="input" id="npName" placeholder="SkyFarm" required></label>
-        <label class="lbl">Code<input class="input" id="npCode" placeholder="SF" maxlength="4" required></label>
-      </div>
-      <label class="lbl"><span>GitHub repo <small>optional, a new empty repo</small></span><input class="input" id="npRepo" placeholder="https://github.com/you/skyfarm.git"></label>
-    </div>
-    <pre class="m-log" id="npLog" hidden></pre>
-    <div class="m-actions"><button type="button" class="btn" id="npCancel">Cancel</button><button type="submit" class="btn accent" id="npCreate">Create project</button></div>
-  </form>
-</div>
+<div class="ob" id="onboarding" role="dialog" aria-label="New project"></div>
 <div class="modal" id="markupModal" role="dialog" aria-label="Draw on the screenshot">
   <div class="modal-card markup-card">
     <div class="markup-tools" id="markupTools"></div>

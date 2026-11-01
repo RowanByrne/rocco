@@ -1,4 +1,4 @@
-// The Workboard. Top: the note box, then what needs the user's OK: feature plans to approve, and what Claude
+// The Workboard. Top: the note box, then what needs the user's OK: feature plans to approve, and what the agent
 // spotted (the inbox). Middle: features in progress, then three columns: To test, Stuck and Working.
 // Bottom: Up next, the queue in order, which the user can reorder (never ahead of what a task waits on).
 import { state, byId, of, approvedToday } from '../state.js';
@@ -11,6 +11,7 @@ import { settings } from '../settings.js';
 import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
+import { agentShort } from '../agent.js';
 
 const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
@@ -38,7 +39,7 @@ const answers = new Map(); // task id -> picked answers, kept across re-renders
 // Where a queued task came from, for its tag in Up next.
 const source = t => t.pending === 'reopen' ? ['Reopened', 'var(--amber)']
   : t.pending === 'answer' ? ['Answered', 'var(--amber)']
-  : t.kind === 'suggestion' ? ['From Claude', 'var(--claude)']
+  : t.kind === 'suggestion' ? [`From ${agentShort()}`, 'var(--claude)']
   : t.kind === 'note' ? ['Your note', 'var(--violet)'] : null;
 
 const typeTag = t => TYPES[t.type] && t.type !== 'feature' ? `<span class="ttag t-${t.type}">${TYPES[t.type]}</span>` : '';
@@ -76,7 +77,7 @@ function questionCardHTML(t) {
   const i = picked.length, q = qs[i];
   return `<div class="ask-card"><div class="ask-q"><span>${esc(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
     + `<div class="opts">${(q.options || []).map(o => optionHTML(o, i, '')).join('')}</div>`
-    + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let Claude decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
+    + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let ${esc(agentShort())} decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
 }
 
 function workingHTML(t) {
@@ -156,13 +157,13 @@ function questionHTML(t) {
 
 const questionsHTML = () => openQuestions().sort((a, b) => a.id.localeCompare(b.id)).map(questionHTML).join('');
 
-// ---- Inbox: what Claude spotted ----
+// ---- Inbox: what the agent spotted ----
 
 function inboxHTML() {
   const list = work('inbox');
   if (!list.length) return '';
   const why = t => t.summary || (t.note && t.note !== t.title ? t.note : '');
-  return `<div class="inbox-head">${icon.sparkle}Claude spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>`
+  return `<div class="inbox-head">${icon.sparkle}${esc(agentShort())} spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>`
     + `${list.length > 1 ? '<button class="btn-sm" data-queue-all>Queue all</button>' : ''}</div>`
     + `<div class="inbox-items">${list.map(t => `<div class="sug${t.fresh ? ' fresh' : ''}" data-id="${t.id}"><div class="sug-title">${esc(t.title)}</div>`
       + `${why(t) ? `<div class="sug-why">${esc(why(t))}</div>` : ''}`
@@ -229,7 +230,7 @@ function whereLine(t) {
     case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
     case 'working': return `Lane ${t.lane} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
     case 'queued': return esc(t.waiting || 'Queued');
-    case 'inbox': return 'Claude spotted this. Queue it to have it done.';
+    case 'inbox': return `${agentShort()} spotted this. Queue it to have it done.`;
     case 'done': return `Approved at ${hhmm(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
   }
   return '';
@@ -238,7 +239,7 @@ function whereLine(t) {
 function questionsSheetHTML(t) {
   const picked = answers.get(t.id) || [];
   return questionsOf(t).map((q, i) => `<div class="s-q">${esc(q.text)}</div><div class="opts">${(q.options || []).map(o => optionHTML(o, i, picked[i])).join('')}`
-    + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Claude decide</button></div>`).join('');
+    + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let ${esc(agentShort())} decide</button></div>`).join('');
 }
 
 function sheetBody(t) {

@@ -16,7 +16,9 @@ import { initHistory, renderHistory, loadHistory } from './views/history.js';
 import { initDocs, renderDocs, loadDocs, resetDocs, hasDrafts } from './views/docs.js';
 import { toast } from './ui/toast.js';
 import { initSettings, renderSettings } from './views/settings.js';
-import { initNewProject, newProjectOpen, closeNewProject } from './dialogs/new-project.js';
+import { initOnboarding, onboardingOpen, closeOnboarding, openOnboarding, openDetails, renderFirstGame } from './dialogs/onboarding.js';
+import { loadAgent } from './agent.js';
+import { $ } from './lib/dom.js';
 import { openPalette, paletteOpen, closePalette } from './dialogs/palette.js';
 import { markupOpen, closeMarkup } from './dialogs/markup.js';
 import { closeSheet, openSheetKey } from './ui/sheet.js';
@@ -38,6 +40,8 @@ on('connections', renderConnections);
 on('history', renderHistory);
 on('docs', renderDocs);
 on('settings', () => { renderSettings(); renderWorkboard(); });
+// This PC's agent changed (Settings), or loaded: everything that names it.
+on('agent', () => { renderSettings(); renderWorkboard(); renderDocs(); renderConnections(); renderMe(); loadConnections(true); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
 // Rocco updated itself: load the new app, unless that would lose an edit in Docs.
 on('rocco-updated', version => {
@@ -85,7 +89,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (markupOpen()) closeMarkup();
   else if (paletteOpen()) closePalette();
-  else if (newProjectOpen()) closeNewProject();
+  else if (onboardingOpen()) closeOnboarding();
   else if (menuOpen()) closeMenus();
   else closeSheet();
 });
@@ -100,7 +104,9 @@ document.addEventListener('keydown', e => {
   initHistory();
   initDocs();
   initSettings();
-  initNewProject();
+  initOnboarding();
+  $('#firstGameBtn').addEventListener('click', () => openOnboarding());
+  $('#docsDetails').addEventListener('click', () => openDetails());
   showView(location.hash.slice(1));
   syncUrl();
   renderMe();
@@ -109,6 +115,8 @@ document.addEventListener('keydown', e => {
   renderConnections();
   sync.start();
   loadMe();
+  await loadAgent();
+  renderFirstGame(); // no games yet: offer the onboarding (it opens once by itself)
   loadConnections(false); // for the sidebar badge
   if (state.view !== 'docs') loadDocs(); // for the palette; opening Docs loads them anyway
   setInterval(() => loadConnections(false), 5 * 60000);
