@@ -80,6 +80,7 @@
   border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 22%, transparent); }
 .cd-fix small { display: block; font-size: 11px; font-weight: 600; color: var(--c); letter-spacing: .02em; }
 .cd-fix .attn-fix { margin-top: 6px; }
+.cd-notes { margin: 6px 0 0; white-space: pre-wrap; font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
 
 /* Linking an account (ElevenLabs): the key goes in once and is never shown again */
 .cd-link { margin-top: 16px; padding: 13px 14px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--stroke); }

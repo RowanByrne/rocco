@@ -34,6 +34,9 @@ export function start() {
 const fileUrl = (t, name) => !name || /^(data|blob|https?):/.test(name) ? name : api.file(t.id, name);
 
 function apply(s) {
+  // A different Rocco answering: it updated itself and restarted.
+  if (state.rocco && s.rocco && s.rocco !== state.rocco) emit('rocco-updated', s.rocco);
+  state.rocco = s.rocco || state.rocco;
   const before = new Map(state.tasks.map(t => [t.id, t.status]));
   state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, main: s.main || {} };
   state.tasks = (s.tasks || []).map(t => ({

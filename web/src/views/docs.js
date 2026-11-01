@@ -1,5 +1,5 @@
 // Docs: every Markdown file in the repo, by folder; hover one for a preview. Open one to read it, ask Claude to
-// change it (a note in Up next), or edit it here and push the change to GitHub (rocco/server/docs.ps1).
+// change it (a note in Up next), or edit it here and push the change to GitHub (server/docs.ps1).
 import { state, emit } from '../state.js';
 import { $, esc } from '../lib/dom.js';
 import { agoText } from '../lib/format.js';
@@ -29,7 +29,8 @@ const key = path => `${state.project}/${path}`;
 const nameOf = path => path.split('/').pop();
 const docOf = path => state.docs?.docs.find(d => d.path === path);
 const lf = text => String(text).replace(/\r\n?/g, '\n');
-const LOCKED = 'Owned by the template: in a game it changes through the template, so ask Claude to change it.';
+export const hasDrafts = () => drafts.size > 0;
+const LOCKED ='Owned by the template: in a game it changes through the template, so ask Claude to change it.';
 
 // Folders the user closed, kept in this browser. .claude (agent definitions) starts closed.
 let closed;
@@ -44,7 +45,7 @@ export async function loadDocs() {
     emit('docs');
   } catch (e) {
     // A server started before Docs existed answers Not found.
-    loadError = /not found/i.test(e.message) ? 'Restart Rocco to see Docs: this server started before Docs existed (close its window, then run rocco\\Rocco.bat).' : '';
+    loadError = /not found/i.test(e.message) ? 'Restart Rocco to see Docs: this server started before Docs existed (close its window, then run tools\\rocco.bat in any project).' : '';
     if (loadError) emit('docs');
   }
   if (state.view === 'docs') timer = setTimeout(loadDocs, 15000);

@@ -2,15 +2,8 @@
 # user's own edit to a doc, committed on main as the user and pushed to GitHub.
 
 # Files the template owns (CLAUDE.md "Template-owned files"). In a game they change only through the template.
-$TemplateOwned = '^(CLAUDE\.md|AGENTS\.md|\.claude/|docs/workflow/|tools/|rocco/)'
+$TemplateOwned = '^(CLAUDE\.md|AGENTS\.md|\.claude/|docs/workflow/|tools/)'
 function Test-TemplateOwned([string]$path, [bool]$template) { (-not $template) -and $path -match $TemplateOwned }
-
-# Git, keeping what it says, to show the user when something fails.
-function Invoke-GitText([string]$dir) {
-	$ErrorActionPreference = 'Continue'
-	$text = @(git -C $dir @args 2>&1 | ForEach-Object { "$_" }) -join "`n"
-	[pscustomobject]@{ ok = ($LASTEXITCODE -eq 0); text = $text.Trim() }
-}
 
 # Line endings don't count: the app edits with LF, and a doc may be stored with CRLF.
 function Get-TextHash([string]$text) {

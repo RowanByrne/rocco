@@ -1,4 +1,4 @@
-// Every call to the Rocco server (rocco/server/http.ps1). With ?demo in the address, src/demo.js answers instead.
+// Every call to the Rocco server (server/http.ps1). With ?demo in the address, src/demo.js answers instead.
 import { state } from './state.js';
 import * as demo from './demo.js';
 
@@ -40,7 +40,9 @@ export const api = {
   // Accounts linked on this PC; the key is only ever sent, never read back.
   link: (service, key) => DEMO ? demo.link(service, key) : post(withProject(`/api/links/${service}`), { key }),
   unlink: service => DEMO ? demo.unlink(service) : post(withProject(`/api/links/${service}/remove`)),
-  send: () => DEMO ? demo.send() : post(withProject('/api/send')),
+  // Rocco moves to a newer release and restarts; the page reloads when the new version answers.
+  updateRocco: tag => DEMO ? demo.updateRocco(tag) : post(withProject('/api/rocco/update'), { tag }),
+  send: () =>DEMO ? demo.send() : post(withProject('/api/send')),
   newProject: details => DEMO ? demo.newProject() : post('/api/projects/new', details),
   job: id => getJson(`/api/jobs/${id}`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),

@@ -13,7 +13,8 @@ import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType 
 import { initMascot } from './mascot.js';
 import { initConnections, renderConnections, loadConnections } from './views/connections.js';
 import { initHistory, renderHistory, loadHistory } from './views/history.js';
-import { initDocs, renderDocs, loadDocs, resetDocs } from './views/docs.js';
+import { initDocs, renderDocs, loadDocs, resetDocs, hasDrafts } from './views/docs.js';
+import { toast } from './ui/toast.js';
 import { initSettings, renderSettings } from './views/settings.js';
 import { initNewProject, newProjectOpen, closeNewProject } from './dialogs/new-project.js';
 import { openPalette, paletteOpen, closePalette } from './dialogs/palette.js';
@@ -38,6 +39,11 @@ on('history', renderHistory);
 on('docs', renderDocs);
 on('settings', () => { renderSettings(); renderWorkboard(); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
+// Rocco updated itself: load the new app, unless that would lose an edit in Docs.
+on('rocco-updated', version => {
+  if (!hasDrafts()) { location.reload(); return; }
+  toast(`Rocco updated to ${version}. Push or discard your doc edit, then reload`, 'var(--update)', { label: 'Reload', run: () => location.reload() });
+});
 on('view', () => {
   closeSheet();
   closeMenus();

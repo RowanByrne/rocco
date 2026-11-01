@@ -79,6 +79,12 @@ function Invoke-Request($ctx) {
 		return
 	}
 	if ($path -eq '/api/links/elevenlabs/remove') { Disconnect-ElevenLabs; Send-Json $ctx @{ ok = $true }; return }
+	# Rocco moves to a newer release, then restarts on it once this answer is sent (README.md "Updating").
+	if ($path -eq '/api/rocco/update') {
+		try { Update-Rocco ([string](Read-Json $req).tag) } catch { Send-Text $ctx 400 $_.Exception.Message; return }
+		$script:Restarting = $true
+		Send-Json $ctx @{ ok = $true }; return
+	}
 	# The user's note goes straight to the queue, for the conductor to plan. A question goes to the conductor to answer (rocco.ps1 reply).
 	if ($path -eq '/api/note') {
 		$body = Read-Json $req
@@ -127,22 +133,31 @@ function Invoke-Request($ctx) {
 	Send-Text $ctx 404 'Not found'
 }
 
+# Serves until stopped. Returns $true when it stopped to hand over to an updated Rocco in a new window.
 function Start-Rocco {
 	$url = "http://localhost:$Port/"
-	$here = "$url`?p=$([uri]::EscapeDataString((Split-Path $HomeProject -Leaf)))"
-	$listener = New-Object Net.HttpListener
-	$listener.Prefixes.Add($url)
-	try { $listener.Start() } catch {
-		# Already running for this RoDev folder (started from any project): just open it on this project.
-		Write-Host "Rocco is already running at $url (or the port is taken: $($_.Exception.Message))."
-		if ($Open) { Start-Process $here }
-		return
+	$homeId = Split-Path $HomeProject -Leaf
+	$here = "$url`?p=$([uri]::EscapeDataString($homeId))"
+	# After an update, the Rocco that started this one may still be letting go of the port.
+	$deadline = (Get-Date).AddSeconds($(if ($Restart) { 15 } else { 0 }))
+	while ($true) {
+		$listener = New-Object Net.HttpListener
+		$listener.Prefixes.Add($url)
+		try { $listener.Start(); break } catch {
+			$listener.Close()
+			if ((Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 300; continue }
+			# Already running for this RoDev folder (started from any project): just open it on this project.
+			Write-Host "Rocco is already running at $url (or the port is taken: $($_.Exception.Message))."
+			if ($Open -and -not $Restart) { Start-Process $here }
+			return $false
+		}
 	}
 	try { $Host.UI.RawUI.WindowTitle = "Rocco - $url" } catch { }
-	Write-Host "Rocco: $url"
+	Write-Host "Rocco $RoccoVersion at $url"
 	Write-Host "Projects in $RoDev"
 	Write-Host 'Leave this window open while you use it. Ctrl+C stops it.'
-	if ($Open) { Start-Process $here }
+	# A restart keeps the tab that's open: it reconnects, and reloads for the new version.
+	if ($Open -and -not $Restart) { Start-Process $here }
 	try {
 		while ($listener.IsListening) {
 			$next = $listener.GetContextAsync()
@@ -153,9 +168,16 @@ function Start-Rocco {
 				try { Send-Text $ctx 500 $_.Exception.Message } catch { }
 			}
 			Use-Project $HomeProject
+			# Updated: the new version starts in its own window and waits for this one to let go of the port.
+			if ($script:Restarting) {
+				Write-Host 'Updated. Rocco restarts in a new window.'
+				Start-Process (Join-Path $AppDir 'Rocco.bat') -ArgumentList '-Restart', '-Port', $Port, '-Project', "`"$homeId`""
+				break
+			}
 		}
 	} finally {
 		$listener.Close()
 		Get-Job | Remove-Job -Force
 	}
+	[bool]$script:Restarting
 }

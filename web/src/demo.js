@@ -1,5 +1,5 @@
 // Sample data for working on the design without real tasks: open http://localhost:34860/?demo.
-// It answers the same calls as the server, and its actions mirror rocco/server/tasks.ps1 Invoke-TaskAction.
+// It answers the same calls as the server, and its actions mirror server/tasks.ps1 Invoke-TaskAction.
 import { state } from './state.js';
 
 const ago = minutes => new Date(Date.now() - minutes * 60000).toISOString();
@@ -149,6 +149,10 @@ export async function connections() {
     { group: 'Roblox', name: 'Studio MCP', status: 'ok', detail: 'Registered as Roblox_Studio' },
     { group: 'Roblox', name: 'Lync', status: 'ok', version: 'Alpha 30', latest: '0.30.14', detail: "In the RoDev folder's _tools\\lync" },
     { group: 'Roblox', name: 'Lync plugin', status: 'ok', detail: 'Lync installs and updates it.' },
+    roccoUpdated ? { group: 'Tools', name: 'Rocco', status: 'ok', version: 'v0.3.0', latest: 'v0.3.0', detail: "In the RoDev folder's _tools\\rocco" }
+      : { group: 'Tools', name: 'Rocco', status: 'update', version: 'v0.2.0', latest: 'v0.3.0', detail: "In the RoDev folder's _tools\\rocco",
+        update: 'Update it from here, or in _tools\\rocco check out v0.3.0 and restart Rocco.',
+        release: { tag: 'v0.3.0', notes: 'Docs: every doc in the repo, with previews, an ask box, and edit and push.\nConnections: Rocco tells you when a new release is out, and updates itself.' } },
     { group: 'Tools', name: 'Git', status: 'update', version: '2.55.0', latest: '2.56.0', detail: 'Git for Windows', update: 'Update it:', command: 'git update-git-for-windows' },
     { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', update: 'Install it if you want Claude to handle GitHub for you:', command: 'winget install GitHub.cli' },
     elevenLabs(),
@@ -265,7 +269,15 @@ export async function bookmark(hash) {
   return { ok: true };
 }
 
-export async function newProject() { throw new Error('Start Rocco with rocco\\Rocco.bat to create projects.'); }
+export async function newProject() { throw new Error('Start Rocco with tools\\rocco.bat in a project to create projects.'); }
+
+// The demo "updates" at once: the Rocco row turns up to date, with no restart.
+let roccoUpdated = false;
+export async function updateRocco() {
+  await new Promise(resolve => setTimeout(resolve, 700));
+  roccoUpdated = true;
+  return { ok: true };
+}
 
 export async function history() {
   if (state.project !== 'sample-game') return { repo: '', main: { remote: false, unpushed: 0, total: 1, live: null, commits: [
@@ -312,12 +324,12 @@ export async function history() {
   };
 }
 
-// ---- Docs: a few sample docs per project; saves mirror rocco/server/docs.ps1 Save-Doc ----
+// ---- Docs: a few sample docs per project; saves mirror server/docs.ps1 Save-Doc ----
 
 const md = (...lines) => lines.join('\n') + '\n';
 const lf = text => String(text).replace(/\r\n?/g, '\n');
 const hashOf = text => [...lf(text)].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261).toString(16);
-const TEMPLATE_OWNED = /^(CLAUDE\.md|AGENTS\.md|\.claude\/|docs\/workflow\/|tools\/|rocco\/)/;
+const TEMPLATE_OWNED = /^(CLAUDE\.md|AGENTS\.md|\.claude\/|docs\/workflow\/|tools\/)/;
 const docData = {};
 
 function sampleDocs() {
@@ -360,7 +372,7 @@ function sampleDocs() {
   };
 }
 
-// What the hover shows, as rocco/server/docs.ps1 Get-DocSummary finds it.
+// What the hover shows, as server/docs.ps1 Get-DocSummary finds it.
 function summarize(text) {
   let title = '', inCode = false, inFront = false, done = false;
   const sections = [], para = [];

@@ -13,27 +13,55 @@ Rocco himself lives on top of the note box: a little pixel guy who does odd jobs
 
 Ctrl+K opens a palette to find any task, view, project or action. Hotkeys work while Rocco's window has focus.
 
-For now it runs on this PC: a small PowerShell server, with nothing to install, serves the app and reads and writes the project folders.
+For now it runs on this PC: a small PowerShell server, with nothing else to install, serves the app and reads and writes the project folders. Its own repo is `RowanByrne/rocco`; games made from the template (`RowanByrne/rodev_template`) don't carry a copy.
+
+## Install
+
+Once per RoDev folder, into `_tools\rocco` next to Lync, on the newest release. You need Git, and access to the repo (it's private: ask its owner). In the RoDev folder, in PowerShell:
+
+```
+git clone https://github.com/RowanByrne/rocco.git _tools\rocco
+git -C _tools\rocco checkout (git -C _tools\rocco tag -l "v*" --sort=-v:refname | Select-Object -First 1)
+```
+
+Rocco only runs from a RoDev folder's `_tools\rocco`: it finds the projects next to `_tools`.
 
 ## Run it
 
-Double-click `rocco\Rocco.bat` in any project. It serves Rocco on <http://localhost:34860/> and opens it on that project; if Rocco is already running, it just opens it. Leave its window open while you use it.
+Double-click `tools\rocco.bat` in any project (it's in the template, so every game has it). It serves Rocco on <http://localhost:34860/> and opens it on that project; if Rocco is already running, it just opens it. Leave its window open while you use it. `_tools\rocco\Rocco.bat` starts it too, on the template.
 
 To work on the design without real tasks, open <http://localhost:34860/?demo>: sample data, and nothing is saved.
+
+## Updating
+
+Connections checks for a newer release (a `v*` tag) every half hour, and **Check now** checks at once. When there is one, Rocco shows it under Needs attention with what's new, and **Update** switches `_tools\rocco` to it and restarts Rocco in a new window; the open tab reloads by itself. It won't update over changes made in `_tools\rocco`.
+
+By hand: close Rocco, then `git -C _tools\rocco fetch --tags` and `git -C _tools\rocco checkout v0.2.0`, and start it again.
+
+## Releasing
+
+Rocco is developed on `main`. A copy on a branch is a development copy: it shows `main @ abc1234` as its version, and is never offered an update (it's ahead of every release). To release, tag `main` with what's new as the tag's message (it shows in everyone's Connections), and push the tag:
+
+```
+git tag -a v0.2.0 -m "Docs: edit and push from the app"
+git push origin v0.2.0
+```
+
+Use `vMAJOR.MINOR.PATCH`. Every install on an older release offers the update within half an hour.
 
 **Voice notes** are off until turned on in Settings, because the browser sends the audio to its maker's speech service (Google for Chrome, Microsoft for Edge) to turn it into text. **Notifications** need the browser's permission, asked when they're turned on, and only show while Rocco is in the background.
 
 ## Where things are
 
 ```
-rocco/
-  Rocco.bat              starts the server and opens the app
+_tools\rocco\
+  Rocco.bat              starts the server and opens the app (a project's tools\rocco.bat calls it)
   rocco.ps1              the server, and the commands Claude uses (below)
   server/                the server's parts
-    core.ps1             paths, the open project, small helpers
+    core.ps1             the RoDev folder, the open project, Rocco's version, small helpers
     tasks.ps1            Workboard tasks on disk
     projects.ps1         projects, lanes, Main, the user, new projects
-    connections.ps1      project links and this PC's tools
+    connections.ps1      project links, this PC's tools, and Rocco's own updates
     history.ps1          main's commits, open branches, each lane's reflog
     docs.ps1             the repo's Markdown, one doc, saving and pushing the user's edit
     http.ps1             static files, the API, the server loop
@@ -66,7 +94,7 @@ A project's Rocco data lives outside git, next to its `repo\`: `<Game>\rocco\tas
 
 ## Commands
 
-Claude keeps the Workboard current with `rocco\rocco.ps1`, run from the project's `repo\` (its header lists every option):
+Claude keeps the Workboard current with `rocco.ps1`. Run from a project's `repo\` or a lane, it acts on that project (`-Project <folder>` names another); from `repo\` that's `..\..\_tools\rocco\rocco.ps1`, and from a lane `..\..\..\_tools\rocco\rocco.ps1`. Its header lists every option:
 
 | | |
 |---|---|
@@ -105,6 +133,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/links/elevenlabs?p=` | Link ElevenLabs (`{ key }`): checked with ElevenLabs, then kept as `ELEVENLABS_API_KEY` in the user's environment. The key is never sent back |
 | `POST /api/links/elevenlabs/remove?p=` | Unlink it: removes the key from the user's environment |
 | `POST /api/docs/save?p=` | The user's edit to a doc (`{ path, text, base, message }`): committed on main and pushed. `{ conflict, hash }` instead if the doc's hash isn't `base` any more; refused for template-owned docs in a game |
+| `POST /api/rocco/update?p=` | Switch to a newer release (`{ tag }`), then restart on it. Refused for a development copy, an older release, or local changes in `_tools\rocco`. `/api/state` and `/api/me` carry the running version as `rocco` |
 | `POST /api/send?p=` | Queue everything in the inbox |
 | `POST /api/projects/new` | Start a new project: `{ name, code, repo }` |
 

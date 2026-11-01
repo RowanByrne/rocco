@@ -29,7 +29,7 @@ export function renderSidebar() {
   const lanes = state.meta.lanes || { count: 0, open: [], main: false };
   $('#liveDot').className = 'live' + (!state.online ? ' off' : lanes.main ? '' : ' idle');
   $('#mainAgo').textContent = state.online ? agoText(state.meta.main.at) : 'Rocco offline';
-  $('#mainStat').title = !state.online ? 'The Rocco server stopped. Run rocco\\Rocco.bat.'
+  $('#mainStat').title = !state.online ? 'The Rocco server stopped. Run tools\\rocco.bat in any project.'
     : `${lanes.main ? 'Lync is serving Main.' : 'Lync isn\'t serving Main.'}${state.meta.main.subject ? ` Last change: ${state.meta.main.subject}` : ''}`;
 
   // Lanes: one bar per lane this PC opens, outlined while its Lync isn't serving.

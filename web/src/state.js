@@ -12,6 +12,7 @@ export const state = {
   docs: null,           // Docs: { repo, template, docs }, every Markdown file in the repo
   doc: '',              // the doc open in Docs: its path in the repo
   online: true,         // false while the Rocco server can't be reached
+  rocco: '',            // the running Rocco's version, like v0.2.0 (or main @ abc1234 for a development copy)
   view: 'workboard',
 };
 

@@ -1,7 +1,9 @@
-# Rocco (rocco\README.md): serves the app for every project in this RoDev folder, and gives Claude the
-# commands that keep a project's Workboard current. Tasks live outside git, in <Game>\rocco\tasks\T-NNN\.
+# Rocco (README.md): serves the app for every project in this RoDev folder, and gives Claude the commands that
+# keep a project's Workboard current. Installed once, in <RoDev>\_tools\rocco. Tasks live outside git, in
+# <Game>\rocco\tasks\T-NNN\. Commands act on the project the current folder is in (a game's repo\ or a lane), or on
+# -Project <folder name>; from a game's repo\, run them as ..\..\_tools\rocco\rocco.ps1.
 #
-#   rocco.ps1 [serve] [-Open]          serve Rocco on http://localhost:34860/
+#   rocco.ps1 [serve] [-Open] [-Project Game]   serve Rocco on http://localhost:34860/ (opening that project)
 #   rocco.ps1 list [-Pending]          this project's open tasks; -Pending: only what waits on the conductor
 #   rocco.ps1 show T-012               one task in full: note, screenshots, questions, follow-ups, history
 #   rocco.ps1 new -Title "..." [-Type bug] [-Plan T-020] [-After T-011,T-012]   add a task to Up next; prints its id
@@ -19,7 +21,9 @@ param(
 	[string]$Title, [string]$Note, [string]$Status, [int]$Lane = -1, [string]$Branch, [string]$Where,
 	[string]$Step, [string]$Summary, [string]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string]$Waiting,
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
-	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [int]$Port = 34860
+	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [int]$Port = 34860,
+	[string]$Project,
+	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
@@ -39,7 +43,8 @@ function Set-Common($t) {
 }
 
 switch ($Command) {
-	'serve' { Start-Rocco }
+	# 3 tells Rocco.bat this Rocco updated itself and carries on in a new window.
+	'serve' { if (Start-Rocco) { exit 3 } }
 
 	'list' {
 		$rows = @(Get-Tasks | Where-Object { ($_.status -notin 'done', 'removed') -or $_.pending })

@@ -10,6 +10,7 @@ const BRANDS = {
   'ElevenLabs':   { logo: 'elevenlabs', glyph: 'speaker', color: '#24262d' },
   'Roblox Studio':{ logo: 'robloxstudio', glyph: 'plug', color: '#00A2FF' },
   'Studio MCP':   { logo: 'modelcontextprotocol', glyph: 'plug', color: '#2a2b33' },
+  'Rocco':        { img: 'assets/rocco.svg', glyph: 'sparkle', color: '#2a2b33' },
   'Lync':         { glyph: 'sync', color: '#6d4aff' },
   'Lync plugin':  { glyph: 'package', color: '#6d4aff' },
   'Git':          { logo: 'git', glyph: 'branch', color: '#F03C2E' },
@@ -26,7 +27,8 @@ const brandOf = item => BRANDS[item.name] || { glyph: / plugin$/.test(item.name)
 // size: '' (40px), 'sm' (30px) or 'lg' (52px).
 export function logoHTML(item, size = '') {
   const b = brandOf(item);
-  const mark = b.logo ? `<img src="${SIMPLE_ICONS}${b.logo}.svg" alt="" data-glyph="${b.glyph}">` : icon[b.glyph];
+  const src = b.img || (b.logo ? `${SIMPLE_ICONS}${b.logo}.svg` : '');
+  const mark = src ? `<img src="${src}" alt="" data-glyph="${b.glyph}">` : icon[b.glyph];
   return `<span class="brand${size ? ' ' + size : ''}" style="--brand:${b.color}">${mark}</span>`;
 }
 

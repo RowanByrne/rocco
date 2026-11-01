@@ -32,7 +32,8 @@ const versionsHTML = c => (c.version ? `<span class="ver">${esc(c.version)}</spa
   + (c.status === 'update' && c.latest ? `${c.version ? '<span class="arrow">→</span>' : ''}<span class="ver new">${esc(c.latest)}</span>` : '');
 
 const fixHTML = c => (c.update ? `<span>${esc(c.update)}</span>` : '')
-  + (c.command ? `<code>${esc(c.command)}</code><button class="copy" data-copy="${esc(c.command)}">${icon.copy}Copy</button>` : '');
+  + (c.command ? `<code>${esc(c.command)}</code><button class="copy" data-copy="${esc(c.command)}">${icon.copy}Copy</button>` : '')
+  + (c.release ? `<button class="btn-sm go" data-update-rocco="${esc(c.release.tag)}">Update to ${esc(c.release.tag)}</button>` : '');
 
 function healthHTML(items) {
   const n = status => items.filter(c => c.status === status).length;
@@ -129,6 +130,7 @@ function openConnection(i) {
     + `<div class="cd-rows">${row('Status', stateLabel(c))}${row(c.group === 'Libraries' ? 'In the game' : 'Installed', c.version)}${row('Latest', c.latest)}${row('Checked on', ofProject(c) ? currentProject().name : state.me?.pc || 'This PC')}</div>`
     + (c.status !== 'ok' && !c.link && (c.update || c.command) ? `<div class="cd-fix"><small>${c.status === 'update' ? 'How to update' : 'How to fix'}</small><div class="attn-fix">${fixHTML(c)}</div></div>` : '')
     + (c.link && c.status === 'warn' && c.update ? `<div class="cd-fix"><small>Heads up</small><div class="attn-fix"><span>${esc(c.update)}</span></div></div>` : '')
+    + (c.release?.notes ? `<div class="cd-fix"><small>What's new in ${esc(c.release.tag)}</small><p class="cd-notes">${esc(c.release.notes)}</p></div>` : '')
     + linkHTML(c);
   showSheet(`conn:${i}`, { color: COLOR[c.status], chip: stateLabel(c), id: ofProject(c) ? 'This project' : 'This PC', body });
 }
@@ -155,6 +157,22 @@ async function link(button) {
     button.disabled = false;
     button.textContent = 'Link';
     field.select();
+  }
+}
+
+// Rocco switches to the release and restarts; when the new version answers, the page reloads (main.js).
+async function updateRocco(button) {
+  const tag = button.dataset.updateRocco;
+  button.disabled = true;
+  button.innerHTML = '<span class="spin"></span>Updating';
+  try {
+    await api.updateRocco(tag);
+    toast(`Updating Rocco to ${tag}. It restarts in a moment`, 'var(--update)');
+    loadConnections(false);
+  } catch (e) {
+    toast(`Couldn't update Rocco: ${e.message}`, 'var(--red)');
+    button.disabled = false;
+    button.textContent = `Update to ${tag}`;
   }
 }
 
@@ -187,6 +205,8 @@ export function initConnections() {
       navigator.clipboard?.writeText(copy.dataset.copy).then(() => toast('Copied'), () => toast("Couldn't copy", 'var(--red)'));
       return;
     }
+    const update = e.target.closest('[data-update-rocco]');
+    if (update) { updateRocco(update); return; }
     const item = e.target.closest('.view[data-view="connections"] [data-conn]');
     if (item) openConnection(+item.dataset.conn);
   });

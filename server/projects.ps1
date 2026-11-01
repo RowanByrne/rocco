@@ -94,6 +94,7 @@ function Get-State([string]$projectId) {
 	$p = Find-Project $projectId
 	$cutoff = (Get-Date).AddDays(-3)
 	[pscustomobject]@{
+		rocco = $RoccoVersion # the app reloads when this changes: Rocco updated itself
 		project = [pscustomobject]@{ id = $p.id; name = $p.name; phase = $p.phase; template = $p.template }
 		lanes = Get-Lanes
 		main = Get-Main
@@ -106,14 +107,14 @@ function Get-State([string]$projectId) {
 $script:Me = $null
 function Get-Me {
 	if (-not $script:Me) {
-		$name = "$(Invoke-Git $HomeProject config --global user.name)"
-		$email = "$(Invoke-Git $HomeProject config --global user.email)"
+		$name = "$(Invoke-Git $AppDir config --global user.name)"
+		$email = "$(Invoke-Git $AppDir config --global user.email)"
 		$login = ''; $avatar = ''
 		if ($email -match '^(\d+)\+([^@]+)@users\.noreply\.github\.com$') { $avatar = "https://avatars.githubusercontent.com/u/$($Matches[1])?s=80"; $login = $Matches[2] }
 		$claude = ''
 		$config = Join-Path $env:USERPROFILE '.claude.json'
 		if ((Test-Path $config) -and ([IO.File]::ReadAllText($config) -match '"oauthAccount"\s*:\s*\{[^}]*?"emailAddress"\s*:\s*"([^"]+)"')) { $claude = $Matches[1] }
-		$script:Me = [pscustomobject]@{ name = $name; email = $email; login = $login; avatar = $avatar; claude = $claude; pc = $env:COMPUTERNAME }
+		$script:Me = [pscustomobject]@{ name = $name; email = $email; login = $login; avatar = $avatar; claude = $claude; pc = $env:COMPUTERNAME; rocco = $RoccoVersion }
 	}
 	$script:Me
 }
