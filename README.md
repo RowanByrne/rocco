@@ -16,13 +16,14 @@ Rocco is the web app for making games from this template. One Rocco serves every
   - **A Studio plugin** opens its releases page.
 
   What each button runs is defined in `server/actions.ps1`; the app only names it. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use are linked here: ElevenLabs for sound, and the user's Roblox Open Cloud key for the game page.
-- **Settings:** your agent (kept per PC), then desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, and hotkeys (kept per browser).
+- **Settings:** your agent (kept per PC), then desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, the sidebar's order, and hotkeys (kept per browser).
 - **Live ops**, for a game on Roblox (its universe id in PROJECT.md):
   - **Updates:** the game's calendar. The user writes a card for each upcoming update on a month view; the cards live in the game's `live/CALENDAR.md`, where the agent reads them too. Above it, the events on the game page: live, upcoming, and, with the Roblox key, private drafts, which the user publishes in one click. Each update's game page event is the agent's job. Rocco queues it as a Workboard task a set number of days before the update (14 by default, kept in CALENDAR.md), or when the user clicks. The agent drafts the event, and its card images show on the card for the user to pick.
   - **Thumbnails:** the game page's thumbnails and, with the key, each one's impressions and qualified play-through over the last 7 days, plus what the numbers say. Below are directions to try: the agent's, from the game page doc, or Rocco's starters until there are some. One click makes concepts from a direction with Codex (the template's image tool). The user picks one, and the agent puts it on the game page.
   - **Metrics** and **Ads:** coming soon.
 
   What Roblox makes public needs no key; the rest uses the key linked in Connections. Most of these Roblox APIs are experimental, so a part that fails is just left out.
+- **The sidebar:** the views in categories (Project, Live ops, System). Click a category's name to fold it; a folded one still lights up when its open view or a badge is inside. Drag a category, or a tab within its category, to reorder them. The order is kept in this browser, and Settings resets it. At the bottom are Main and this PC's lanes, each labeled, with a key to their colors: free, working, stuck, holding a finished branch until it's tested and merged, and not open (Lync isn't serving it).
 
 **Your agent.** Rocco isn't tied to one coding agent: Settings picks Claude Code, Codex or Gemini CLI for this PC (the first one installed until you pick). Rocco names it wherever it asks for something ("Ask Codex…"), checks it and its Studio MCP registration in Connections, and opens it for onboarding. The choice is kept in `%APPDATA%\Rocco\settings.json`. Another agent is a row in `server/agents.ps1`: how it starts with a prompt, and where it keeps MCP servers.
 
@@ -100,7 +101,7 @@ _tools\rocco\
       sync.js            polls the open project's tasks, and toasts or notifies what changed
       projects.js        the project list and switching
       router.js          which view shows, kept in the address
-      sidebar.js         project picker, navigation, Main and lanes, the user
+      sidebar.js         project picker, navigation (folding and reordering), Main and lanes, the user
       settings.js        the user's settings, kept in this browser
       hotkeys.js         every hotkey action, its default and the user's binding
       capture.js         Studio window capture (the browser's screen share)
@@ -109,7 +110,7 @@ _tools\rocco\
       mascot.js          Rocco, the little guy on the note box
       demo.js            sample data
       lib/               dom, format, icons, brands (logos), storage, markdown (for reading docs)
-      ui/                menu, popover, sheet, toast
+      ui/                menu, popover, sheet, toast, sortable (drag to reorder)
       views/             workboard, composer, history, docs, updates, thumbnails, connections, settings
       dialogs/           onboarding (new projects, detail tiles), markup (draw on a screenshot), palette (Ctrl+K)
 ```

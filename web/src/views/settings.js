@@ -1,4 +1,4 @@
-// Settings: notifications, the Workboard's Working cards, voice notes, and hotkeys. Kept in this browser.
+// Settings: your agent, notifications, the Workboard's Working cards, voice notes, the sidebar, and hotkeys. Kept in this browser.
 import { $, esc } from '../lib/dom.js';
 import { settings, setSetting } from '../settings.js';
 import { ACTIONS, keyFor, comboOf, bind, resetKeys, pause } from '../hotkeys.js';
@@ -7,6 +7,7 @@ import { voiceSupported } from '../voice.js';
 import { toast } from '../ui/toast.js';
 import { state } from '../state.js';
 import { chooseAgent } from '../agent.js';
+import { resetNav } from '../sidebar.js';
 
 let recording = null; // the action whose new hotkey is being pressed
 
@@ -39,6 +40,8 @@ export function renderSettings() {
       ? 'Talk instead of typing. Your browser turns speech into text by sending the audio to Google (Chrome) or Microsoft (Edge). Nothing is sent until this is on and you press the mic.'
       : 'This browser has no speech recognition. Use Chrome or Edge.', voiceSupported() ? toggle('voice', s.voice) : '')
     + (s.voice && voiceSupported() ? row('Language', 'The language you speak in.', `<select class="input set-select" data-setting="voiceLang">${['en-US', 'en-GB', 'en-AU', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR'].map(l => `<option${l === s.voiceLang ? ' selected' : ''}>${l}</option>`).join('')}</select>`) : '')
+    + `</div><div class="set-group"><div class="set-head">Sidebar<span class="set-note">in this browser</span></div>`
+    + row('Order and folded categories', "Drag a category or a tab in the sidebar to move it, and click a category's name to fold it.", '<button class="mini" data-reset-nav>Reset</button>')
     + `</div><div class="set-group"><div class="set-head">Hotkeys<span class="set-note">while Rocco's window has focus</span><span class="sp"></span><button class="mini" data-reset-keys>Reset all</button></div>`
     + ACTIONS.map(a => `<div class="set-row key-row"><div class="set-title">${esc(a.label)}</div>`
       + `<button class="keybind${recording === a.id ? ' recording' : ''}" data-bind="${a.id}" title="Change">${recording === a.id ? 'Press keys… (Esc cancels, Backspace clears)' : keyHTML(keyFor(a.id))}</button>`
@@ -72,6 +75,7 @@ export function initSettings() {
     if (b) { recording = b.dataset.bind; pause(true); renderSettings(); return; }
     const r = e.target.closest('[data-reset-key]');
     if (r) { resetKeys(r.dataset.resetKey); return; }
+    if (e.target.closest('[data-reset-nav]')) { resetNav(); toast('The sidebar is back in its usual order'); return; }
     if (e.target.closest('[data-reset-keys]')) resetKeys();
   });
   body.addEventListener('change', e => {
