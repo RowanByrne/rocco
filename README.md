@@ -15,9 +15,14 @@ Rocco is the web app for making games from this template. One Rocco serves every
   - **Changes to the game** (a library, the template, registering the Studio MCP) are your agent's: their button adds a note to Up next.
   - **A Studio plugin** opens its releases page.
 
-  What each button runs is defined in `server/actions.ps1`; the app only names it. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use, like ElevenLabs for sound, are linked here.
+  What each button runs is defined in `server/actions.ps1`; the app only names it. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use are linked here: ElevenLabs for sound, and the user's Roblox Open Cloud key for the game page.
 - **Settings:** your agent (kept per PC), then desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, and hotkeys (kept per browser).
-- **Metrics:** not built yet.
+- **Live ops**, for a game on Roblox (its universe id in PROJECT.md):
+  - **Updates:** the game's calendar. The user writes a card for each upcoming update on a month view; the cards live in the game's `live/CALENDAR.md`, where the agent reads them too. Above it, the events on the game page: live, upcoming, and, with the Roblox key, private drafts, which the user publishes in one click. Each update's game page event is the agent's job. Rocco queues it as a Workboard task a set number of days before the update (14 by default, kept in CALENDAR.md), or when the user clicks. The agent drafts the event, and its card images show on the card for the user to pick.
+  - **Thumbnails:** the game page's thumbnails and, with the key, each one's impressions and qualified play-through over the last 7 days, plus what the numbers say. Below are directions to try: the agent's, from the game page doc, or Rocco's starters until there are some. One click makes concepts from a direction with Codex (the template's image tool). The user picks one, and the agent puts it on the game page.
+  - **Metrics** and **Ads:** coming soon.
+
+  What Roblox makes public needs no key; the rest uses the key linked in Connections. Most of these Roblox APIs are experimental, so a part that fails is just left out.
 
 **Your agent.** Rocco isn't tied to one coding agent: Settings picks Claude Code, Codex or Gemini CLI for this PC (the first one installed until you pick). Rocco names it wherever it asks for something ("Ask Codex…"), checks it and its Studio MCP registration in Connections, and opens it for onboarding. The choice is kept in `%APPDATA%\Rocco\settings.json`. Another agent is a row in `server/agents.ps1`: how it starts with a prompt, and where it keeps MCP servers.
 
@@ -79,6 +84,9 @@ _tools\rocco\
     docs.ps1             the repo's Markdown, one doc, saving and pushing the user's edit
     actions.ps1          what each Connections button does, and pushing main
     onboarding.ps1       the survey, the answers in ONBOARDING.md, handing them to the agent
+    roblox.ps1           the game page from Roblox: events, thumbnails and their numbers; the Roblox key
+    updates.ps1          the calendar's cards in CALENDAR.md, and queueing their game page events
+    thumbnails.ps1       thumbnail directions, concepts made with Codex, and the user's pick
     http.ps1             static files, the API, the server loop
   web/                   the app
     index.html
@@ -102,7 +110,7 @@ _tools\rocco\
       demo.js            sample data
       lib/               dom, format, icons, brands (logos), storage, markdown (for reading docs)
       ui/                menu, popover, sheet, toast
-      views/             workboard, composer, history, docs, connections, settings
+      views/             workboard, composer, history, docs, updates, thumbnails, connections, settings
       dialogs/           onboarding (new projects, detail tiles), markup (draw on a screenshot), palette (Ctrl+K)
 ```
 
@@ -136,6 +144,9 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /api/agent` | This PC's agent (`{ id, name, short, installed, chosen }`) and every agent Rocco knows, installed or not |
 | `GET /api/onboarding/survey` | The onboarding survey, from the template (for a game that doesn't exist yet) |
 | `GET /api/onboarding?p=` | The project's survey, and the answers in its `docs/game/ONBOARDING.md` (`{ flow, source, started, answers }`) |
+| `GET /api/updates?p=[&refresh=1]` | The calendar's cards (each with its game page event as Roblox has it, and card images to pick), the lead, and the game page's events. Queues due events first. Roblox is asked in the background: `roblox.loading` until it answers |
+| `GET /api/thumbnails?p=[&refresh=1]` | The game page's thumbnails and their numbers, hints, directions, concepts, and the concepts being made |
+| `GET /files/art/<thumbnails or events>/<folder>/<file>?p=` | A concept or a card image, from `..\art\generated` |
 | `GET /api/state?p=` | The project's tasks, lanes (how many, which are open) and Main's last change |
 | `GET /api/connections?p=[&refresh=1]` | Project links and this PC's tools; the PC part is re-checked in the background |
 | `GET /api/history?p=` | Main's last 40 commits, branches other than main, and each lane's state and recent reflog |
@@ -160,6 +171,9 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/agent` | Pick this PC's agent (`{ id }`) |
 | `POST /api/onboarding/answers?p=` | Save answers (`{ flow, source, answers }`; an empty answer clears one) into `docs/game/ONBOARDING.md`: committed as the user, only that file, and pushed when it can be. Returns `{ committed, pushed, note }` |
 | `POST /api/onboarding/setup?p=` | Hand the answers to the agent (`{ part: new, existing or more, tiles }`): a Workboard card, and the agent opened in its own window when it's installed. Returns `{ task, opened, agent, prompt }` |
+| `POST /api/updates/<action>?p=` | A card: `save` (`{ id, title, date, time, kind, notes, announce }`; no id for a new one), `remove` (`{ id }`), `queue` its game page event now (`{ id }`), `image`: the user's pick of its card image (`{ id, image }`). `lead` (`{ days }`, 0 for never) and `publish` a draft event (`{ eventId }`, with the Roblox key). Card changes are committed as the user and pushed |
+| `POST /api/thumbnails/<action>?p=` | `generate` concepts from a direction with Codex (`{ direction, count }`), `use` a concept (`{ file }`: a task for the agent), `directions`: ask the agent for new ones |
+| `POST /api/links/roblox?p=` | Link the Roblox Open Cloud key (`{ key }`): checked on the game's events when it has a universe id, then kept as `ROBLOX_API_KEY` in the user's environment. `/api/links/roblox/remove` unlinks it |
 
 Writes need the header `X-Rocco: 1`, so other websites can't write to it.
 

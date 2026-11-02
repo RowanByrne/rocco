@@ -28,7 +28,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-foreach ($part in 'core', 'agents', 'tasks', 'projects', 'connections', 'history', 'docs', 'actions', 'onboarding', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
+foreach ($part in 'core', 'agents', 'tasks', 'projects', 'connections', 'history', 'docs', 'actions', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
 
 function Format-Time($iso) { if ($iso) { ([datetime]$iso).ToString('HH:mm') } else { '' } }
 

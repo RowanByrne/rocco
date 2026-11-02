@@ -58,7 +58,18 @@ function Invoke-Request($ctx) {
 	$project = Find-Project $req.QueryString['p']
 	Use-Project $project.path
 	if ($get) {
-		if ($path -eq '/api/state') { Send-Json $ctx (Get-State $req.QueryString['p']); return }
+		if ($path -eq '/api/state') {
+			Invoke-UpdateAuto $false | Out-Null # due game page events get queued even when Updates isn't open (updates.ps1)
+			Send-Json $ctx (Get-State $req.QueryString['p']); return
+		}
+		if ($path -eq '/api/updates') { Send-Json $ctx (Get-Updates ($req.QueryString['refresh'] -eq '1')); return }
+		if ($path -eq '/api/thumbnails') { Send-Json $ctx (Get-Thumbnails ($req.QueryString['refresh'] -eq '1')); return }
+		# A thumbnail concept or an event's card image: candidates in ..\art\generated (thumbnails.ps1, updates.ps1).
+		$decoded = [uri]::UnescapeDataString($path)
+		if ($decoded -match '^/files/art/((thumbnails|events)/[\w .-]+/[\w .-]+\.(png|jpe?g|webp))$' -and $Matches[1] -notmatch '\.\.') {
+			$file = Join-Path $Root "art\generated\$($Matches[1] -replace '/', '\')"
+			if (Test-Path -LiteralPath $file -PathType Leaf) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
+		}
 		if ($path -eq '/api/connections') { Send-Json $ctx (Get-Connections ($req.QueryString['refresh'] -eq '1')); return }
 		if ($path -eq '/api/history') { Send-Json $ctx (Get-History); return }
 		if ($path -eq '/api/docs') { Send-Json $ctx (Get-Docs $project.template); return }
@@ -98,7 +109,39 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Start-Setup ([string]$body.part) @($body.tiles | Where-Object { $_ })) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	# Updates (updates.ps1): the user's cards on the game's calendar, and their game page events.
+	if ($path -match '^/api/updates/(save|remove|queue|lead|image|publish)$') {
+		$body = Read-Json $req
+		try {
+			Send-Json $ctx $(switch ($Matches[1]) {
+				'save' { Save-UpdateCard $body }
+				'remove' { Remove-UpdateCard ([string]$body.id) }
+				'queue' { Add-EventTasks @([string]$body.id) $false }
+				'lead' { Set-AutoLead ([int]$body.days) }
+				'image' { Set-CardImage ([string]$body.id) ([string]$body.image) }
+				'publish' { Publish-UpdateEvent ([string]$body.eventId) }
+			})
+		} catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	# Thumbnails (thumbnails.ps1): concepts from a direction, the user's pick, new directions from the agent.
+	if ($path -match '^/api/thumbnails/(generate|use|directions)$') {
+		$body = Read-Json $req
+		try {
+			Send-Json $ctx $(switch ($Matches[1]) {
+				'generate' { Start-ThumbConcepts ([string]$body.direction) ([int]$body.count) }
+				'use' { Use-ThumbConcept ([string]$body.file) }
+				'directions' { Request-ThumbDirections }
+			})
+		} catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
 	# Accounts linked on this PC (Connections). The key goes into the user's environment; it never comes back out.
+	if ($path -eq '/api/links/roblox') {
+		try { Send-Json $ctx (Connect-Roblox ([string](Read-Json $req).key)) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	if ($path -eq '/api/links/roblox/remove') { Disconnect-Roblox; Send-Json $ctx @{ ok = $true }; return }
 	if ($path -eq '/api/links/elevenlabs') {
 		try { Send-Json $ctx (Connect-ElevenLabs ([string](Read-Json $req).key)) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return

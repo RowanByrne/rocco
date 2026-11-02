@@ -3,7 +3,7 @@ import { state, emit } from './state.js';
 import { $$ } from './lib/dom.js';
 import { DEMO } from './api.js';
 
-const VIEWS = ['workboard', 'metrics', 'history', 'docs', 'connections', 'settings'];
+const VIEWS = ['workboard', 'history', 'docs', 'metrics', 'updates', 'thumbnails', 'ads', 'connections', 'settings'];
 
 export function showView(name) {
   const [view, ...doc] = String(name).split('/');

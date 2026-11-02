@@ -17,7 +17,7 @@ let items = [], shown = [], active = 0;
 export const paletteOpen = () => modal.classList.contains('open');
 
 function collect() {
-  const views = ['workboard', 'history', 'docs', 'connections', 'settings', 'metrics'];
+  const views = ['workboard', 'history', 'docs', 'updates', 'thumbnails', 'connections', 'settings', 'metrics', 'ads'];
   return [
     ...ACTIONS.filter(a => !a.id.startsWith('go-') && a.id !== 'palette').map(a => ({ group: 'Actions', label: a.label, hint: keyFor(a.id), run: () => run(a.id) })),
     { group: 'Actions', label: 'New project', run: () => openOnboarding() },

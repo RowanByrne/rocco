@@ -129,6 +129,12 @@ const LINKS = {
     why: 'Makes sound effects and music for the game (AUDIO-PIPELINE.md). Game audio needs a paid plan (Starter or above): the free plan doesn\'t allow commercial use.',
     where: 'Rocco checks the key with ElevenLabs, then keeps it on this PC as ELEVENLABS_API_KEY in your Windows account, where your agent\'s tools read it. It never shows the key again, and it never goes into git. Agent sessions that are already open need a restart to see it.',
   },
+  roblox: {
+    name: 'Roblox Open Cloud',
+    keys: 'https://create.roblox.com/dashboard/credentials?activeTab=ApiKeysTab',
+    why: 'Shows draft game page events and publishes them (Updates), shows how each thumbnail does (Thumbnails), and lets your agent put events and thumbnails on the game page. Give the key this game\'s experience, with: events read and write, analytics read, and for your agent\'s uploads, assets write and the game page\'s thumbnails (legacy universe manage). Keys stop working after 60 days unused.',
+    where: 'Rocco checks the key on this game\'s events, then keeps it on this PC as ROBLOX_API_KEY in your Windows account, where your agent\'s tools read it. It never shows the key again, and it never goes into git. Agent sessions that are already open need a restart to see it.',
+  },
 };
 
 function linkHTML(c) {
@@ -170,9 +176,9 @@ async function link(button) {
   button.disabled = true;
   button.innerHTML = '<span class="spin"></span>Checking';
   try {
-    const { tier } = await api.link(service, key);
+    const { tier, note } = await api.link(service, key);
     field.value = '';
-    toast(`${LINKS[service].name} linked${tier ? ` · ${tier[0].toUpperCase()}${tier.slice(1)} plan` : ''}`);
+    toast(note || `${LINKS[service].name} linked${tier ? ` · ${tier[0].toUpperCase()}${tier.slice(1)} plan` : ''}`, note && !note.startsWith('Linked.') ? 'var(--amber)' : undefined);
     await reopenLink(service);
   } catch (e) {
     toast(e.message, 'var(--red)');

@@ -58,4 +58,19 @@ export const api = {
   newProject: details => DEMO ? demo.newProject(details) : post('/api/projects/new', details),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
+  // Updates: the calendar's cards (live/CALENDAR.md) and the game page's events.
+  updates: force => DEMO ? demo.updates() : getJson(withProject('/api/updates', force ? '&refresh=1' : '')),
+  saveUpdate: card => DEMO ? demo.saveUpdate(card) : post(withProject('/api/updates/save'), card),
+  removeUpdate: id => DEMO ? demo.removeUpdate(id) : post(withProject('/api/updates/remove'), { id }),
+  queueUpdateEvent: id => DEMO ? demo.queueUpdateEvent(id) : post(withProject('/api/updates/queue'), { id }),
+  setUpdateLead: days => DEMO ? demo.setUpdateLead(days) : post(withProject('/api/updates/lead'), { days }),
+  pickCardImage: (id, image) => DEMO ? demo.pickCardImage(id, image) : post(withProject('/api/updates/image'), { id, image }),
+  publishEvent: eventId => DEMO ? demo.publishEvent(eventId) : post(withProject('/api/updates/publish'), { eventId }),
+  // Thumbnails: the game page's, directions, and concepts made with Codex.
+  thumbnails: force => DEMO ? demo.thumbnails() : getJson(withProject('/api/thumbnails', force ? '&refresh=1' : '')),
+  makeConcepts: (direction, count) => DEMO ? demo.makeConcepts(direction, count) : post(withProject('/api/thumbnails/generate'), { direction, count }),
+  useConcept: file => DEMO ? demo.useConcept(file) : post(withProject('/api/thumbnails/use'), { file }),
+  askDirections: () => DEMO ? demo.askDirections() : post(withProject('/api/thumbnails/directions')),
+  // A candidate image in ..\art\generated: 'thumbnails/<direction>/<file>' or 'events/<card>/<file>'.
+  artFile: rel => DEMO ? demo.artFile(rel) : withProject(`/files/art/${rel.split('/').map(encodeURIComponent).join('/')}`),
 };

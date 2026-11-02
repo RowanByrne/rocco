@@ -23,6 +23,33 @@ function Push-Main {
 	if ($push.ok) { '' } else { "the push failed: $($push.text)" }
 }
 
+# One file the app wrote (Updates, Thumbnails), committed as the user, only that file, and pushed when it can be.
+# Line endings follow the file already there. Returns { committed, pushed, note }.
+function Save-RepoFile([string]$relative, [string]$text, [string]$message) {
+	$path = Join-Path $RepoDir $relative
+	$old = if (Test-Path $path) { [IO.File]::ReadAllText($path, $Utf8) } else { '' }
+	$new = $text -replace "`r`n", "`n"
+	if ($old.Contains("`r`n")) { $new = $new -replace "`n", "`r`n" }
+	$result = [pscustomobject]@{ committed = $false; pushed = $false; note = '' }
+	if ($new -eq $old) { return $result }
+	New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+	[IO.File]::WriteAllText($path, $new, $Utf8)
+	$script:DocsCache = @{}
+	$messageFile = [IO.Path]::GetTempFileName()
+	try {
+		[IO.File]::WriteAllText($messageFile, $message.Trim(), $Utf8)
+		$add = Invoke-GitText $RepoDir add '--' $relative
+		$commit = if ($add.ok) { Invoke-GitText $RepoDir commit -F $messageFile --only '--' $relative } else { $add }
+	} finally { Remove-Item -LiteralPath $messageFile -ErrorAction SilentlyContinue }
+	if (-not $commit.ok) { throw "Saved $relative, but git couldn't commit it: $($commit.text)" }
+	$result.committed = $true
+	$script:HistoryCache = @{}; $script:MainCache = @{}
+	if (-not (Invoke-Git $RepoDir remote get-url origin)) { $result.note = 'Committed. No GitHub repo yet, so not pushed.'; return $result }
+	$problem = Push-Main
+	if ($problem) { $result.note = "Committed, but $problem" } else { $result.pushed = $true }
+	$result
+}
+
 function Assert-OnMain {
 	if ("$(Invoke-Git $RepoDir rev-parse --abbrev-ref HEAD)" -ne 'main') { throw 'repo\ isn''t on main. Ask your agent to put it back first.' }
 	if (Test-Path "$(Invoke-Git $RepoDir rev-parse --path-format=absolute --git-path MERGE_HEAD)") { throw 'repo\ is in the middle of a merge. Ask your agent to finish it first.' }

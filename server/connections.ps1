@@ -479,6 +479,6 @@ function Get-Connections([bool]$refresh) {
 	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev, $AppDir, (Get-Agent).id }
 	$checkedAt = $null; $online = $true; $pcItems = @()
 	if ($script:PcResult) { $checkedAt = $script:PcResult.At; $online = $script:PcResult.Value.online; $pcItems = @($script:PcResult.Value.items) }
-	$items = @(@(Get-ProjectConnections $refresh) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-StudioMcpItem) + @(Get-ElevenLabsItem))
+	$items = @(@(Get-ProjectConnections $refresh) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-StudioMcpItem) + @(Get-RobloxItem) + @(Get-ElevenLabsItem))
 	[pscustomobject]@{ checking = [bool]$script:PcJob -or [bool]$script:LibJob -or (Test-TemplateFetching); checkedAt = $checkedAt; online = $online; items = $items }
 }

@@ -13,6 +13,8 @@ export const ACTIONS = [
   { id: 'go-docs',        label: 'Go to Docs',            key: 'Alt+5' },
   { id: 'go-connections', label: 'Go to Connections',     key: 'Alt+3' },
   { id: 'go-settings',    label: 'Go to Settings',        key: 'Alt+4' },
+  { id: 'go-updates',     label: 'Go to Updates',         key: 'Alt+6' },
+  { id: 'go-thumbnails',  label: 'Go to Thumbnails',      key: 'Alt+7' },
 ];
 
 const runners = {};

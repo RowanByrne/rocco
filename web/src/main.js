@@ -16,6 +16,8 @@ import { initHistory, renderHistory, loadHistory } from './views/history.js';
 import { initDocs, renderDocs, loadDocs, resetDocs, hasDrafts } from './views/docs.js';
 import { toast } from './ui/toast.js';
 import { initSettings, renderSettings } from './views/settings.js';
+import { initUpdates, renderUpdates, loadUpdates, resetUpdates, updateEditorOpen, closeUpdateEditor } from './views/updates.js';
+import { initThumbnails, renderThumbnails, loadThumbnails, resetThumbnails, thumbViewOpen, closeThumbView } from './views/thumbnails.js';
 import { initOnboarding, onboardingOpen, closeOnboarding, openOnboarding, openDetails, renderFirstGame } from './dialogs/onboarding.js';
 import { loadAgent } from './agent.js';
 import { $ } from './lib/dom.js';
@@ -39,9 +41,11 @@ on('me', () => { renderMe(); renderConnections(); });
 on('connections', renderConnections);
 on('history', renderHistory);
 on('docs', renderDocs);
+on('updates', renderUpdates);
+on('thumbs', renderThumbnails);
 on('settings', () => { renderSettings(); renderWorkboard(); });
 // This PC's agent changed (Settings), or loaded: everything that names it.
-on('agent', () => { renderSettings(); renderWorkboard(); renderDocs(); renderConnections(); renderMe(); loadConnections(true); });
+on('agent', () => { renderSettings(); renderWorkboard(); renderDocs(); renderUpdates(); renderThumbnails(); renderConnections(); renderMe(); loadConnections(true); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
 // Rocco updated itself: load the new app, unless that would lose an edit in Docs.
 on('rocco-updated', version => {
@@ -54,6 +58,8 @@ on('view', () => {
   if (state.view === 'connections') loadConnections(false);
   if (state.view === 'history') { renderHistory(); loadHistory(); }
   if (state.view === 'docs') { renderDocs(); loadDocs(); }
+  if (state.view === 'updates') { renderUpdates(); loadUpdates(); }
+  if (state.view === 'thumbnails') { renderThumbnails(); loadThumbnails(); }
   if (state.view === 'settings') renderSettings();
 });
 on('project', () => {
@@ -62,6 +68,8 @@ on('project', () => {
   syncUrl();
   sync.reset();
   resetDocs();
+  resetUpdates();
+  resetThumbnails();
   renderSidebar();
   renderWorkboard();
   renderConnections();
@@ -71,6 +79,8 @@ on('project', () => {
   loadConnections(false);
   loadHistory();
   loadDocs();
+  if (state.view === 'updates') { renderUpdates(); loadUpdates(); }
+  if (state.view === 'thumbnails') { renderThumbnails(); loadThumbnails(); }
 });
 
 // What each hotkey does (the keys themselves are in hotkeys.js, and the user's own in Settings).
@@ -79,7 +89,7 @@ register('voice', toggleVoiceNote);
 register('capture', captureStudio);
 register('type', cycleType);
 register('palette', openPalette);
-for (const view of ['workboard', 'history', 'docs', 'connections', 'settings']) register(`go-${view}`, () => go(view));
+for (const view of ['workboard', 'history', 'docs', 'updates', 'thumbnails', 'connections', 'settings']) register(`go-${view}`, () => go(view));
 
 // A view or doc typed or pasted into the address.
 addEventListener('hashchange', () => showView(location.hash.slice(1)));
@@ -90,6 +100,8 @@ document.addEventListener('keydown', e => {
   if (markupOpen()) closeMarkup();
   else if (paletteOpen()) closePalette();
   else if (onboardingOpen()) closeOnboarding();
+  else if (updateEditorOpen()) closeUpdateEditor();
+  else if (thumbViewOpen()) closeThumbView();
   else if (menuOpen()) closeMenus();
   else closeSheet();
 });
@@ -105,6 +117,8 @@ document.addEventListener('keydown', e => {
   initDocs();
   initSettings();
   initOnboarding();
+  initUpdates();
+  initThumbnails();
   $('#firstGameBtn').addEventListener('click', () => openOnboarding());
   $('#docsDetails').addEventListener('click', () => openDetails());
   showView(location.hash.slice(1));

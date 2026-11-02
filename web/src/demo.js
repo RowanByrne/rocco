@@ -173,6 +173,7 @@ export async function connections() {
       action: { kind: 'window', label: 'Update', id: 'git-update' } },
     { group: 'Tools', name: 'GitHub CLI', status: 'off', detail: 'Optional, not installed.', fixedDetail: 'gh', update: 'Install it if you want your agent to handle GitHub for you:',
       command: 'winget install --id GitHub.cli --exact', action: { kind: 'window', label: 'Install', id: 'gh-install' } },
+    robloxRow(),
     elevenLabs(),
   ].map(done) };
 }
@@ -204,12 +205,19 @@ const elevenLabs = () => ({
   ...(eleven ? { status: 'ok', detail: 'Linked · Starter plan · 4,200 of 30,000 credits used' }
     : { status: 'off', detail: "Not linked: sound effects and music can't be generated on this PC.", update: 'Link your ElevenLabs account in its details, to make sound effects and music (AUDIO-PIPELINE.md).' }),
 });
+let robloxKey = 'x9Qa';
+const robloxRow = () => ({
+  group: 'Roblox', name: 'Roblox Open Cloud', link: 'roblox', linked: !!robloxKey, hint: robloxKey || '',
+  ...(robloxKey ? { status: 'ok', detail: 'Linked.' }
+    : { status: 'off', detail: 'Not linked: Updates and Thumbnails show only what Roblox makes public.', update: 'Link your Roblox Open Cloud key in its details.' }),
+});
 export async function link(service, key) {
-  if (!key.trim()) throw new Error("That doesn't look like an ElevenLabs API key.");
+  if (!key.trim()) throw new Error("That doesn't look like an API key.");
+  if (service === 'roblox') { robloxKey = key.trim().slice(-4); return { note: '' }; }
   eleven = key.trim().slice(-4);
   return { tier: 'starter' };
 }
-export async function unlink() { eleven = null; return { ok: true }; }
+export async function unlink(service) { if (service === 'roblox') robloxKey = null; else eleven = null; return { ok: true }; }
 
 export async function note(text, type) {
   const title = (text || 'Screenshot').split('\n')[0], question = type === 'question';
@@ -520,4 +528,128 @@ export function start() {
     t.log.push({ who: 'worker', at: ago(0), text: 'Pulls in on wall hits. Checked 6 hallway spots: no clipping.' });
     data['sample-game'].main.at = ago(0);
   }, 15000);
+}
+
+// ---- Live ops: Updates and Thumbnails ----
+
+const day = n => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const at = (n, h) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); d.setUTCHours(h, 0, 0, 0); return d.toISOString(); };
+// A sample image: a 16:9 scene in one hue, with a "character" and a "prize", so concepts look like thumbnails.
+const scene = h => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='480' height='270'>
+  <defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='hsl(${h},70%,64%)'/><stop offset='1' stop-color='hsl(${h + 40},60%,38%)'/></linearGradient></defs>
+  <rect width='480' height='270' fill='url(#g)'/><ellipse cx='240' cy='250' rx='300' ry='60' fill='hsl(${h + 90},40%,32%)'/>
+  <circle cx='330' cy='120' r='54' fill='hsl(${h + 180},85%,62%)' stroke='white' stroke-width='6'/><rect x='120' y='110' width='70' height='110' rx='18' fill='hsl(${h + 200},40%,28%)'/>
+  <circle cx='155' cy='92' r='30' fill='hsl(${h + 20},50%,80%)'/></svg>`);
+
+const liveOps = {};
+const ops = () => (liveOps[state.project] ??= {
+  lead: 14,
+  cards: [
+    { id: 'pet-evolution', title: 'Pet evolution', date: day(5), time: '17:00', kind: 'Update', notes: 'Pets earn XP while equipped and evolve at level 10 and 25, with a new look each time.', event: 'drafted', eventId: '9001', task: '', image: '', candidates: ['events/pet-evolution/card-01.png', 'events/pet-evolution/card-02.png', 'events/pet-evolution/card-03.png'] },
+    { id: 'halloween-hunt', title: 'Halloween egg hunt', date: day(12), time: '', kind: 'Live event', notes: 'Hidden pumpkins across the islands for a week; a spooky pet for finding all 20.', event: 'queued', task: 'T-047', candidates: [] },
+    { id: 'trading-plaza', title: 'Trading plaza', date: day(26), time: '', kind: 'Update', notes: 'A plaza where players trade pets safely, with a confirm step and a countdown.', event: 'notyet', candidates: [] },
+    { id: 'summer-sale', title: 'Summer sale', date: day(-20), time: '', kind: 'Timed release', notes: '', event: 'over', candidates: [] },
+  ],
+  events: [
+    { id: '9000', title: 'Double coins weekend!', subtitle: '', start: at(-1, 15), end: at(2, 15), visibility: 'public', image: scene(42), interested: 1840, url: '#' },
+    { id: '9001', title: 'Your pets can EVOLVE!', subtitle: 'Level them up', start: at(5, 17), end: at(12, 17), visibility: 'private', image: scene(280), url: '#' },
+  ],
+});
+const cardState = c => {
+  const e = ops().events.find(x => x.id === c.eventId);
+  if (!e) return c.event;
+  return e.visibility !== 'public' ? 'drafted' : new Date(e.start) > new Date() ? 'scheduled' : 'live';
+};
+export async function updates() {
+  const o = ops();
+  return { file: 'live/CALENDAR.md', exists: true, lead: o.lead, cards: o.cards.map(c => ({ ...c, event: cardState(c), onRoblox: !!o.events.find(x => x.id === c.eventId) })),
+    roblox: { universe: '4790265012', linked: !!robloxKey, loading: false, source: robloxKey ? 'cloud' : 'public', access: robloxKey ? 'ok' : '', error: '',
+      events: o.events.filter(e => robloxKey || e.visibility === 'public') }, auto: null };
+}
+export async function saveUpdate(card) {
+  const o = ops();
+  if (!card.title.trim()) throw new Error('Give the update a name.');
+  if (!card.date) throw new Error('Give the update a date.');
+  let c = o.cards.find(x => x.id === card.id);
+  if (!c) { c = { id: card.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'update', event: 'notyet', candidates: [] }; o.cards.push(c); }
+  Object.assign(c, { title: card.title.trim(), date: card.date, time: card.time, kind: card.kind, notes: card.notes.trim() });
+  if (!card.announce) c.event = 'none'; else if (c.event === 'none') c.event = 'notyet';
+  o.cards.sort((a, b) => a.date.localeCompare(b.date));
+  return { id: c.id, saved: { committed: true, pushed: true, note: '' } };
+}
+export async function removeUpdate(id) { const o = ops(); o.cards = o.cards.filter(c => c.id !== id); return { saved: {} }; }
+export async function queueUpdateEvent(id) {
+  const c = ops().cards.find(x => x.id === id);
+  const t = { id: `T-${next++}`, kind: 'task', type: '', attempt: 1, where: 'main', title: `Game page event: ${c.title}`, note: `Make the game page event for ${c.title}.`, shots: [], options: [], log: [] };
+  toConductor(t, 'plan');
+  current().tasks.push(t);
+  Object.assign(c, { event: 'queued', task: t.id });
+  return { queued: [{ id, title: c.title, task: t.id }] };
+}
+export async function setUpdateLead(days) { ops().lead = days; return { saved: {} }; }
+export async function pickCardImage(id, image) { ops().cards.find(x => x.id === id).image = '../art/generated/' + image; return { saved: {} }; }
+export async function publishEvent(eventId) {
+  const e = ops().events.find(x => x.id === eventId);
+  if (!e) throw new Error('Not an event id.');
+  e.visibility = 'public';
+  return { published: true };
+}
+
+const DIRECTIONS = [
+  { id: 'evolution-moment', name: 'The evolution moment', why: 'Thumbnail 2 (a pet mid-glow) gets the best play-through: lean into the transformation, the game\'s newest hook.', prompt: 'Roblox game thumbnail for Pet Islands: a small pet bursting into its evolved form in a swirl of light, a delighted player character beside it. Bright pastel colours, chunky low-poly style, no text. Wide 16:9, subject centred.' },
+  { id: 'island-overview', name: 'Islands from above', why: 'Players ask where they can go: show the floating islands and their variety in one shot.', prompt: 'Roblox game thumbnail for Pet Islands: a sweeping view of colourful floating islands linked by bridges, pets everywhere, a player character waving in the foreground. Bright pastel colours, chunky low-poly style, no text. Wide 16:9.' },
+  { id: 'rare-pet', name: 'The rarest pet', why: 'The legendary pet is the most shared screenshot in the community: make it huge.', prompt: 'Roblox game thumbnail for Pet Islands: a giant glowing legendary dragon pet in the centre, sparkles around it, an amazed player character looking up. Bright pastel colours, chunky low-poly style, no text. Wide 16:9.' },
+];
+const thumbOps = {};
+const thumbs = () => (thumbOps[state.project] ??= {
+  run: null,
+  concepts: [
+    { file: 'thumbnails/rare-pet/rare-pet-01.png', direction: 'The rarest pet', created: ago(60 * 26), prompt: DIRECTIONS[2].prompt, status: 'candidate', task: '' },
+    { file: 'thumbnails/rare-pet/rare-pet-02.png', direction: 'The rarest pet', created: ago(60 * 26), prompt: DIRECTIONS[2].prompt, status: 'picked', task: 'T-044' },
+  ],
+});
+export async function thumbnails() {
+  const t = thumbs();
+  // Codex "finishes" a few seconds after the click.
+  if (t.run?.running && Date.now() - t.run.at > 4000) {
+    const d = DIRECTIONS.find(x => x.name === t.run.direction);
+    for (let i = 1; i <= t.run.count; i++) t.concepts.unshift({ file: `thumbnails/${d.id}/${d.id}-0${i}.png`, direction: d.name, created: ago(0), prompt: d.prompt, status: 'candidate', task: '' });
+    t.run = { ...t.run, running: false, done: t.run.count };
+  }
+  const linked = !!robloxKey;
+  const shots = [
+    { id: '1501', rank: 1, approved: true, image: scene(200), stats: { impressions: 48200, plays: 1350, ptr: 0.028 } },
+    { id: '1502', rank: 2, approved: true, image: scene(300), stats: { impressions: 47100, plays: 2120, ptr: 0.045 } },
+    { id: '1503', rank: 3, approved: true, image: scene(120), stats: { impressions: 46400, plays: 1490, ptr: 0.032 } },
+  ].map(s => linked ? s : { ...s, stats: undefined });
+  return {
+    page: { universe: '4790265012', linked, loading: false, error: '', statsError: '', access: linked ? 'ok' : '', days: 7, thumbnails: shots, other: [] },
+    hints: linked ? ['Thumbnail 2 turns 4.5% of impressions into qualified plays; thumbnail 1 only 2.8%. Try a new direction in place of 1, and put 2 first.']
+      : ['Link your Roblox Open Cloud key in Connections to see how each thumbnail does: impressions and qualified play-through.'],
+    directions: DIRECTIONS.map(d => ({ ...d, starter: false })), ownDirections: true, concepts: t.concepts, run: t.run, codex: true,
+  };
+}
+export async function makeConcepts(direction, count) {
+  const t = thumbs();
+  const d = DIRECTIONS.find(x => x.id === direction);
+  t.run = { running: true, direction: d.name, count, done: 0, started: ago(0), error: '', at: Date.now() };
+  return t.run;
+}
+export async function useConcept(file) {
+  const c = thumbs().concepts.find(x => x.file === file);
+  const t = { id: `T-${next++}`, kind: 'task', type: '', attempt: 1, where: 'main', title: `Thumbnail: put ${file.split('/').pop()} on the game page`, note: 'The user picked it.', shots: [], options: [], log: [] };
+  toConductor(t, 'plan');
+  current().tasks.push(t);
+  Object.assign(c, { status: 'picked', task: t.id });
+  return { task: t.id };
+}
+export async function askDirections() {
+  const t = { id: `T-${next++}`, kind: 'task', type: '', attempt: 1, where: 'main', title: 'Thumbnail directions', note: 'Suggest directions.', shots: [], options: [], log: [] };
+  toConductor(t, 'plan');
+  current().tasks.push(t);
+  return { task: t.id };
+}
+// Sample images for concepts and event cards: one hue per name.
+export function artFile(rel) {
+  return scene([...rel].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 360, 7));
 }

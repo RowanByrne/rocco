@@ -9,6 +9,7 @@ const BRANDS = {
   'Codex':        { glyph: 'terminal', color: '#2a2b33' },
   'ElevenLabs':   { logo: 'elevenlabs', glyph: 'speaker', color: '#24262d' },
   'Roblox Studio':{ logo: 'robloxstudio', glyph: 'plug', color: '#00A2FF' },
+  'Roblox Open Cloud': { logo: 'roblox', glyph: 'plug', color: '#2a2b33' },
   'Studio MCP':   { logo: 'modelcontextprotocol', glyph: 'plug', color: '#2a2b33' },
   'Rocco':        { img: 'assets/rocco.svg', glyph: 'sparkle', color: '#2a2b33' },
   'Lync':         { glyph: 'sync', color: '#6d4aff' },
