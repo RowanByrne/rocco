@@ -50,6 +50,8 @@ function Invoke-Request($ctx) {
 	if ($get -and $path -match '^/api/jobs/(\w+)$') { Send-Json $ctx (Get-JobStatus $Matches[1]); return }
 	if ($get -and $path -match '^/api/actions/runs/(\w+)$') { Send-Json $ctx (Get-ActionRun $Matches[1]); return }
 	if ($get -and $path -eq '/api/agent') { Send-Json $ctx (Get-Agent); return }
+	# The user's own accounts on this PC (accounts.ps1): onboarding's first screen.
+	if ($get -and $path -eq '/api/accounts') { Send-Json $ctx (Get-Accounts ($req.QueryString['refresh'] -eq '1')); return }
 	# The onboarding survey for a game that doesn't exist yet: the template's.
 	if ($get -and $path -eq '/api/onboarding/survey') { Send-Json $ctx (Get-Survey); return }
 	if ($get -and $path -notmatch '^/(api|files)/') { Send-Static $ctx $path; return }

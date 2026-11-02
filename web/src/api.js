@@ -49,6 +49,8 @@ export const api = {
   // This PC's coding agent (server/agents.ps1).
   agent: () => DEMO ? demo.agent() : getJson('/api/agent'),
   setAgent: id => DEMO ? demo.setAgent(id) : post(withProject('/api/agent'), { id }),
+  // The user's own accounts on this PC: each agent's sign-in, Codex for images, GitHub, and the linked keys (server/accounts.ps1).
+  accounts: refresh => DEMO ? demo.accounts() : getJson(`/api/accounts${refresh ? '?refresh=1' : ''}`),
   // Onboarding (server/onboarding.ps1). A game being made isn't the open project yet, so these name theirs.
   survey: () => DEMO ? demo.survey() : getJson('/api/onboarding/survey'),
   onboarding: () => DEMO ? demo.onboarding() : getJson(withProject('/api/onboarding')),

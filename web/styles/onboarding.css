@@ -93,3 +93,42 @@
 .first-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .first-text b { font-size: 15px; }
 .first-text span { color: var(--text-2); font-size: 13px; }
+
+/* Your accounts (accounts.js): what each tool needs, whether it's ready on this PC, and the one click that fixes it.
+   The same rows make the Vital section in Connections. Tones: ok, update, warn, bad, off. */
+.ob-status.warn { color: #fde68a; border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.06); }
+.ob-status.warn > svg { flex: none; color: var(--amber); }
+.ob-status.warn > span { flex: 1; }
+.acc-sec { margin-top: 18px; }
+.acc-sec-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 6px; }
+.acc-sec-head b { font-size: 14px; font-weight: 600; }
+.acc-sec-head span { font-size: 12.5px; color: var(--text-3); }
+.acc-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 10px 12px; border-radius: 12px;
+  background: var(--glass); border: 1px solid var(--stroke); }
+.acc-row + .acc-row { margin-top: 6px; }
+.acc-text { display: grid; gap: 2px; min-width: 0; }
+.acc-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.acc-chip { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--accent-text); background: rgba(124,108,255,.14); }
+.acc-need { font-size: 12.5px; color: var(--text-3); }
+.acc-state { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.acc-state i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--gray); }
+.acc-row.k-ok .acc-state i { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.acc-row.k-update .acc-state i { background: var(--update); box-shadow: 0 0 6px var(--update); }
+.acc-row.k-warn .acc-state i { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.acc-row.k-warn .acc-state { color: #fde68a; }
+.acc-row.k-bad .acc-state i { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.acc-row.k-bad .acc-state { color: #fecaca; }
+.acc-row[data-conn] { cursor: pointer; transition: border-color .15s, background .15s; }
+.acc-row[data-conn]:hover { border-color: var(--stroke-2); background: var(--glass-2); }
+.vital { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 6px; margin-bottom: 22px; }
+.vital .acc-row + .acc-row { margin-top: 0; }
+.acc-state span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acc-btns { display: flex; align-items: center; gap: 6px; }
+.acc-btns .btn-sm { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.btn-sm.go { color: #c6f6e2; border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.12); }
+.btn-sm.go:hover:not(:disabled) { color: #fff; background: rgba(52,211,153,.22); border-color: rgba(52,211,153,.6); }
+.acc-form { grid-column: 1 / -1; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--stroke); }
+.acc-why { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.acc-form .link-form { margin-top: 10px; }
+@media (max-width: 560px) { .acc-row { grid-template-columns: auto minmax(0, 1fr); } .acc-btns { grid-column: 2; } }
+.ob-status .btn-sm { flex: none; }

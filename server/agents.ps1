@@ -1,11 +1,15 @@
 # The coding agents Rocco can open (the template's docs/workflow/MODELS.md "Your agent"). Each PC picks one in Settings:
 # Rocco opens it for onboarding, says its name where it asks it for something, and checks it in Connections.
-# Supporting another agent is a row here: how it's started with a prompt, and where it keeps MCP servers.
+# Supporting another agent is a row here: how it's started with a prompt, where it keeps MCP servers, the plan it runs on
+# (onboarding's accounts screen: the user brings their own), and how to install it and sign in (actions.ps1).
 
 $Agents = [ordered]@{
-	claude = @{ name = 'Claude Code'; short = 'Claude'; exe = 'claude'; prompt = @(); mcp = '.claude.json'; studio = '"Roblox_Studio"\s*:\s*\{' }
-	codex  = @{ name = 'Codex'; short = 'Codex'; exe = 'codex'; prompt = @(); mcp = '.codex\config.toml'; studio = '\[mcp_servers\.Roblox_Studio\]' }
-	gemini = @{ name = 'Gemini CLI'; short = 'Gemini'; exe = 'gemini'; prompt = @('-i'); mcp = '.gemini\settings.json'; studio = '"Roblox_Studio"\s*:\s*\{' }
+	claude = @{ name = 'Claude Code'; short = 'Claude'; exe = 'claude'; prompt = @(); mcp = '.claude.json'; studio = '"Roblox_Studio"\s*:\s*\{'
+		plan = 'A Claude Pro or Max plan, or Anthropic API credit'; install = 'claude-install'; login = 'claude-login' }
+	codex  = @{ name = 'Codex'; short = 'Codex'; exe = 'codex'; prompt = @(); mcp = '.codex\config.toml'; studio = '\[mcp_servers\.Roblox_Studio\]'
+		plan = 'A ChatGPT plan, or OpenAI API credit'; install = 'codex-update'; login = 'codex-login' }
+	gemini = @{ name = 'Gemini CLI'; short = 'Gemini'; exe = 'gemini'; prompt = @('-i'); mcp = '.gemini\settings.json'; studio = '"Roblox_Studio"\s*:\s*\{'
+		plan = 'A Google account (free to start), or a Gemini API key'; install = 'gemini-update'; login = 'gemini-login' }
 }
 
 # This PC's Rocco settings, kept with the user (not in a project, not in the RoDev folder, which can move between PCs).

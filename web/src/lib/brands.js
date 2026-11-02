@@ -7,6 +7,7 @@ const SIMPLE_ICONS = 'https://cdn.jsdelivr.net/npm/simple-icons@16.33.0/icons/';
 const BRANDS = {
   'Claude Code':  { logo: 'claude', glyph: 'terminal', color: '#D97757' },
   'Codex':        { glyph: 'terminal', color: '#2a2b33' },
+  'Gemini CLI':   { logo: 'googlegemini', glyph: 'terminal', color: '#8E75B2' },
   'ElevenLabs':   { logo: 'elevenlabs', glyph: 'speaker', color: '#24262d' },
   'Roblox Studio':{ logo: 'robloxstudio', glyph: 'plug', color: '#00A2FF' },
   'Roblox Open Cloud': { logo: 'roblox', glyph: 'plug', color: '#2a2b33' },

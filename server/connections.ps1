@@ -247,6 +247,10 @@ $CheckPc = {
 	}
 	$latest = (Latest 'https://registry.npmjs.org/@anthropic-ai/claude-code/latest').version
 	$account = if ($claudeText -match '"oauthAccount"\s*:\s*\{[^}]*?"emailAddress"\s*:\s*"([^"]+)"') { $Matches[1] } else { '' }
+	# Claude Code's own answer when it has one: a saved account can have a sign-in that expired.
+	$auth = $null
+	if ($cmd) { try { $auth = (Run 'cmd.exe' '/d /c claude auth status --json') | ConvertFrom-Json } catch { } }
+	if ($auth -and $null -ne $auth.loggedIn -and -not $auth.loggedIn) { $account = '' }
 	$status = Status $version $latest
 	$item = Agent (Item 'AI' 'Claude Code' $status $version $latest $(if ($account) { "Signed in as $account" } elseif ($version) { 'Not signed in' } else { 'Not installed' }) $(if ($version) { $how } else { 'Install it (WORKSTATION.md).' }) $cmd) 'claude'
 	$items += if ($cmd -and $status -eq 'update') { Act $item 'window' 'Update' @{ id = 'claude-update' } } else { $item }

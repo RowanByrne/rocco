@@ -6,17 +6,23 @@ Rocco is the web app for making games from this template. One Rocco serves every
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
 - **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask your agent to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (AGENTS.md "Template-owned files", and `rocco/`) can't be edited here; your agent changes them through the template. **Add game details** opens the onboarding's detail tiles for the open game.
 - **Onboarding:** New project is a short survey, and it opens by itself the first time Rocco runs in a RoDev folder with no games yet. The first choice is a new game, or one already made: on GitHub, in a folder, in a place file, or only in Studio. Then come the name and code, and questions one at a time; every answer is free text and optional. The questions are the template's `tools/onboarding.json`, so they change with the docs they fill. The project is made in the background while you answer (`new-project.ps1`, with `-Existing` for a game already made). A survey left half-way is kept in the browser.
+  - **Your accounts** comes first, once per browser. No AI plan comes with RoDev, so it lists what each tool runs on: a coding agent (one is enough), Codex for images, and GitHub, ElevenLabs and the Roblox key for later. It checks each one on this PC, asking the tool itself where it can (`claude auth status`, `codex login status`). Installing or signing in is one click: the tool's own command, in a window of its own. Rocco checks again when you come back. After that, the survey's first screen warns when your agent isn't ready, with a button to it; Settings and Connections open it any time.
   - **On finishing,** the answers are committed as the game's `docs/game/ONBOARDING.md` and pushed.
   - **Your agent then opens** in a window of its own, on the template's `docs/workflow/SETUP.md`, with a Workboard card to follow it. Without an agent installed, the card waits in Up next, with the prompt to copy.
   - **Detail tiles** (monetization, economy, progression, and more) add answers then or later, and **Send** hands them to the agent the same way.
-- **Connections:** a health summary, what needs attention, then this project's links (template, GitHub, the commit check, Studio sync) and the tools on this PC, with their versions and how to update them. The Template row shows which template release the game is on; when a newer one is out, it shows what's new and asks your agent to bring it in (the template's TEMPLATE.md). Rocco's own row does the same for Rocco, and updates it in one click ("Updating"). Every fix is one click, its command still shown in the details for doing it by hand:
+- **Connections:** what the open project needs, not every tool on the PC (Rocco isn't a plugin manager).
+  - **Needs attention** lists only what affects this project: its own links and libraries, the vital things below, and a linked account that stopped working. Updates count only for the template, the game's libraries and Rocco; other tools show theirs on their rows. With nothing to do, one line says so.
+  - **Vital** is what Rocco and the template can't work without, in the order they're set up: your agent and Codex (for images), signed in or not (the same check as onboarding's accounts screen), then Git, GitHub, the template, the commit check, Roblox Studio, Lync, Studio sync, the Studio MCP and Rocco. Each row says what it's for, and has its fix.
+  - **Everything**, vital or not, follows by kind, as tiles with the full picture of each: this project, AI, Roblox, Roblox plugins (listed, never flagged), the game's libraries, and developer tools.
+
+  The Template row shows which template release the game is on; when a newer one is out, it shows what's new and asks your agent to bring it in (the template's TEMPLATE.md). Rocco's own row does the same for Rocco, and updates it in one click ("Updating"). Every fix is one click, its command still shown in the details for doing it by hand:
   - **Quick fixes** Rocco does at once: turning on the commit check, adding the template remote, connecting an empty GitHub repo and pushing main, pushing main, starting Lync.
   - **Updates to this PC's tools** (Claude Code, Codex, Gemini CLI, Git, the GitHub CLI, Lync) run in a window of their own, so you see them and can answer an installer's prompts. Rocco waits for the window, then checks again; a window that failed stays open until you've read it.
   - **Changes to the game** (a library, the template, registering the Studio MCP) are your agent's: their button adds a note to Up next.
   - **A Studio plugin** opens its releases page.
 
   What each button runs is defined in `server/actions.ps1`; the app only names it. The libraries the game vendors (from ARCHITECTURE.md, and TopbarPlus and Cmdr found in `src/`) show with their latest releases. Accounts the tools use are linked here: ElevenLabs for sound, and the user's Roblox Open Cloud key for the game page.
-- **Settings:** your agent (kept per PC), then desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, the sidebar's order, and hotkeys (kept per browser).
+- **Settings:** your agent (kept per PC, with **Your accounts** a click away), then desktop notifications, live steps on Working cards (or just a progress bar), Rocco on the note box, voice notes, the sidebar's order, and hotkeys (kept per browser).
 - **Live ops**, for a game on Roblox (its universe id in PROJECT.md):
   - **Updates:** the game's calendar. The user writes a card for each upcoming update on a month view; the cards live in the game's `live/CALENDAR.md`, where the agent reads them too. Above it, the events on the game page: live, upcoming, and, with the Roblox key, private drafts, which the user publishes in one click. Each update's game page event is the agent's job. Rocco queues it as a Workboard task a set number of days before the update (14 by default, kept in CALENDAR.md), or when the user clicks. The agent drafts the event, and its card images show on the card for the user to pick.
   - **Thumbnails:** the game page's thumbnails and, with the key, each one's impressions and qualified play-through over the last 7 days, plus what the numbers say. Below are directions to try: the agent's, from the game page doc, or Rocco's starters until there are some. One click makes concepts from a direction with Codex (the template's image tool). The user picks one, and the agent puts it on the game page.
@@ -83,7 +89,8 @@ _tools\rocco\
     connections.ps1      project links, this PC's tools, and Rocco's own updates
     history.ps1          main's commits, open branches, each lane's reflog
     docs.ps1             the repo's Markdown, one doc, saving and pushing the user's edit
-    actions.ps1          what each Connections button does, and pushing main
+    actions.ps1          what each Connections button does (installs and sign-ins too), and pushing main
+    accounts.ps1         the user's own accounts on this PC: each agent's sign-in, Codex, GitHub, the linked keys
     onboarding.ps1       the survey, the answers in ONBOARDING.md, handing them to the agent
     roblox.ps1           the game page from Roblox: events, thumbnails and their numbers; the Roblox key
     updates.ps1          the calendar's cards in CALENDAR.md, and queueing their game page events
@@ -98,6 +105,7 @@ _tools\rocco\
       api.js             every server call (demo.js answers them with ?demo)
       state.js           shared state and change events
       agent.js           this PC's agent, and its name for the app's wording
+      accounts.js        the user's own accounts: the checks, and the rows onboarding and Connections share
       sync.js            polls the open project's tasks, and toasts or notifies what changed
       projects.js        the project list and switching
       router.js          which view shows, kept in the address
@@ -143,6 +151,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /api/projects` | Every project, and the one Rocco was started from |
 | `GET /api/me` | The user: git name and email, GitHub avatar, Claude account, this PC |
 | `GET /api/agent` | This PC's agent (`{ id, name, short, installed, chosen }`) and every agent Rocco knows, installed or not |
+| `GET /api/accounts[?refresh=1]` | The user's own accounts on this PC: each agent (`state`: ok, signin, expired or missing; its plan, install and sign-in actions), Codex for images, GitHub, and whether ElevenLabs and Roblox are linked. Kept for 15 seconds |
 | `GET /api/onboarding/survey` | The onboarding survey, from the template (for a game that doesn't exist yet) |
 | `GET /api/onboarding?p=` | The project's survey, and the answers in its `docs/game/ONBOARDING.md` (`{ flow, source, started, answers }`) |
 | `GET /api/updates?p=[&refresh=1]` | The calendar's cards (each with its game page event as Roblox has it, and card images to pick), the lead, and the game page's events. Queues due events first. Roblox is asked in the background: `roblox.loading` until it answers |

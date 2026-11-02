@@ -39,6 +39,7 @@ on('side', renderSidebar);
 on('sheet-closed', renderWorkboard);
 on('me', () => { renderMe(); renderConnections(); });
 on('connections', renderConnections);
+on('accounts', renderConnections); // your agent and Codex, signed in or not (accounts.js)
 on('history', renderHistory);
 on('docs', renderDocs);
 on('updates', renderUpdates);

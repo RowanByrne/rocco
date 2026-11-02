@@ -2,6 +2,8 @@
 // docs/game/ONBOARDING.md and the user's agent turns them into the first docs (the template's SETUP.md). Tiles add more
 // detail, now or later (Docs, "Add game details"). The questions are the template's tools/onboarding.json, so they
 // change with the docs they fill. A survey in progress is kept in this browser until it's finished.
+// Before the first one, the accounts screen: RoDev runs on the user's own AI plans, so it checks each one on this PC and
+// signs in from there.
 import { state, currentProject } from '../state.js';
 import { $, esc } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
@@ -11,9 +13,12 @@ import { toast } from '../ui/toast.js';
 import { loadProjects, switchProject } from '../projects.js';
 import { go } from '../router.js';
 import { agentName, agentShort } from '../agent.js';
+import { LINKS } from '../views/connections.js';
+import { loadAccounts, yourAgent, notReady, runAccountAction, useAgent, accRowHTML, agentRowHTML, fixButtons, windowButton, imagesNeed } from '../accounts.js';
 
 const root = $('#onboarding');
 const DRAFT = 'rocco.onboarding';
+const SEEN = 'rocco.accounts'; // the accounts screen was shown in this browser: after that, the survey starts at its first choice
 const KINDS = [
   ['github', 'On GitHub', 'https://github.com/you/game.git', 'Its repo comes along with its history; the template is merged into it.'],
   ['folder', 'In a folder', 'D:\\Games\\MyGame', 'A git folder comes along with its history; any other folder is copied in for your agent to sort.'],
@@ -23,6 +28,9 @@ const KINDS = [
 let ob = null;     // the survey in progress: { mode, screen, flow, basics, answers, index, tile, job, project, setup, saved, unsent, error }
 let survey = null; // tools/onboarding.json
 let busy = false;
+let checking = false;      // the accounts are being checked (state.accounts, accounts.js)
+let linking = '';          // the account whose key field is open: elevenlabs or roblox
+let keyDraft = '';         // what's typed in it, kept across re-renders
 
 export const onboardingOpen = () => root.classList.contains('open');
 
@@ -38,10 +46,19 @@ function readDraft() { try { return JSON.parse(storage.get(DRAFT) || 'null'); } 
 export async function openOnboarding({ fresh = false } = {}) {
   try { survey = await api.survey(); } catch (e) { toast(`Couldn't load the onboarding: ${e.message}`, 'var(--red)'); return; }
   const draft = fresh ? null : readDraft();
-  ob = draft ? { ...draft, unsent: new Set() } : { mode: 'start', screen: 'start', flow: 'new', basics: { name: '', code: '', repo: '', kind: 'github', from: '' }, answers: {}, index: 0, unsent: new Set() };
+  ob = draft ? { ...draft, unsent: new Set() } : { mode: 'start', screen: storage.get(SEEN) ? 'start' : 'accounts', flow: 'new', basics: { name: '', code: '', repo: '', kind: 'github', from: '' }, answers: {}, index: 0, unsent: new Set() };
   root.classList.add('open');
   render();
   if (ob.job?.state === 'making') poll();
+  checkAccounts(false);
+}
+
+// The accounts screen on its own (Settings, "Your accounts").
+export function openAccounts() {
+  ob = { mode: 'accounts', screen: 'accounts', unsent: new Set() };
+  root.classList.add('open');
+  render();
+  checkAccounts(true);
 }
 
 // More detail for the open project: just the tiles, with what's been answered so far.
@@ -57,7 +74,8 @@ export async function openDetails() {
 
 export function closeOnboarding() {
   root.classList.remove('open');
-  if (ob?.mode === 'start' && ob.screen !== 'start') toast('Your answers are kept: New project picks up where you left off', 'var(--gray)');
+  linking = ''; keyDraft = '';
+  if (ob?.mode === 'start' && !['start', 'accounts'].includes(ob.screen)) toast('Your answers are kept: New project picks up where you left off', 'var(--gray)');
 }
 
 // First run: no games in the RoDev folder yet. The Workboard offers the onboarding, and it opens once by itself.
@@ -72,19 +90,89 @@ export function renderFirstGame() {
 function topHTML(label, progress) {
   return `<div class="ob-top"><span class="ob-label">${label}</span>`
     + (progress !== undefined ? `<span class="ob-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : '<span class="sp"></span>')
-    + (ob.mode === 'start' && ob.screen !== 'start' && !ob.setup ? '<button class="mini" data-ob="restart">Start over</button>' : '')
+    + (ob.mode === 'start' && !['start', 'accounts'].includes(ob.screen) && !ob.setup ? '<button class="mini" data-ob="restart">Start over</button>' : '')
     + `<button class="icon-btn" data-ob="close" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
 }
 
 const foot = (left, right) => `<div class="ob-foot">${left || ''}<span class="sp"></span>${right || ''}</div>`;
 const button = (action, label, cls = 'btn', disabled = false) => `<button class="${cls}" data-ob="${action}"${disabled ? ' disabled' : ''}>${label}</button>`;
 
+// ---- Your accounts ----
+
+// Nothing is included: each AI tool runs on the user's own plan, signed in on this PC. Each row says what it needs and
+// whether it's ready, with the tool's own install or sign-in one click away (accounts.js).
+async function checkAccounts(refresh) {
+  checking = true;
+  if (ob?.screen === 'accounts') render();
+  await loadAccounts(refresh);
+  checking = false;
+  rerenderAccounts();
+}
+
+function rerenderAccounts() { if (onboardingOpen() && ['accounts', 'start', 'review'].includes(ob?.screen)) render(); }
+
+// ElevenLabs and Roblox: a key the user makes on the service's site and pastes here (the same link as in Connections).
+function keyRowHTML(service, need) {
+  const l = LINKS[service], k = state.accounts[service];
+  const form = linking === service ? `<div class="acc-form"><p class="acc-why">${esc(l.why)}</p>`
+    + `<div class="link-form"><input class="input" id="accKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your ${esc(l.name)} API key">`
+    + `<button class="btn accent" data-ob="acc-save:${service}">${busy ? '<span class="spin"></span>Checking' : 'Link'}</button></div>`
+    + `<div class="link-help">Make a key at <a href="${esc(l.keys)}" target="_blank" rel="noreferrer">${esc(new URL(l.keys).host)}</a>. ${esc(l.where)}</div></div>` : '';
+  return accRowHTML({ name: l.name, need, tone: k.linked ? 'ok' : 'off', detail: k.linked ? `Linked, with the key ending ${k.hint}` : 'Not linked',
+    buttons: k.linked ? '' : `<button class="btn-sm" data-ob="acc-link:${service}">${linking === service ? 'Cancel' : 'Link'}</button>`, form });
+}
+
+function accountsHTML() {
+  const alone = ob.mode === 'accounts', a = state.accounts;
+  const section = (title, sub, rows) => `<div class="acc-sec"><div class="acc-sec-head"><b>${title}</b><span>${sub}</span></div>${rows}</div>`;
+  const intro = '<h2 class="ob-title">Your accounts</h2><p class="ob-lede">RoDev runs on your own accounts: no AI plan comes with it, and nothing is shared. '
+    + 'Each tool below uses your own plan, signed in on this PC, and what it does counts against that plan. Sign in here; Rocco checks again when you come back.</p>';
+  const next = button('acc-continue', alone ? 'Done' : !a || a.ready ? 'Continue' : 'Continue anyway', 'btn accent');
+  if (!a) return topHTML(alone ? 'Your accounts' : 'Before you start')
+    + `<div class="ob-body">${intro}<div class="ob-status"><span class="spin"></span><span>Checking this PC…</span></div></div>` + foot('', next);
+  const mine = yourAgent(), images = { ...a.images, name: 'Codex' };
+  return topHTML(alone ? 'Your accounts' : 'Before you start')
+    + `<div class="ob-body">${intro}`
+    + section('A coding agent', 'Needed. One is enough: it plans, builds and keeps the docs, in your name.', a.agents.map(agentRowHTML).join(''))
+    + (mine && !a.ready ? `<div class="ob-status warn">${icon.alert}<span>${esc(mine.name)} ${notReady(mine)} yet. You can still go on: the game is made, and its setup waits in Up next until your agent is ready.</span></div>` : '')
+    + section('Images', 'Recommended. Without it, this PC can\'t make art.',
+      accRowHTML({ name: 'Codex', need: imagesNeed(), tone: images.state === 'ok' ? 'ok' : 'warn', detail: images.detail, buttons: fixButtons(images) }))
+    + section('Later, when you need them', 'Optional. Each can be linked any time in Connections.',
+      accRowHTML({ name: 'GitHub', need: 'Your own account: where each game\'s code is kept, and how your PCs share it.', tone: a.github.state === 'ok' ? 'ok' : 'off', detail: a.github.detail,
+        buttons: a.github.login ? windowButton(a.github.login, 'Sign in', 'btn-sm go') : '' })
+      + keyRowHTML('elevenlabs', 'Sound effects and music. Game audio needs a paid plan (Starter or above).')
+      + keyRowHTML('roblox', 'The game page: events, thumbnails and how each one does. Once the game is on Roblox.'))
+    + '</div>'
+    + foot(button('acc-check', checking ? '<span class="spin"></span>Checking' : 'Check again', 'btn ghost-btn', checking), next);
+}
+
+async function linkKey(service) {
+  const key = keyDraft.trim();
+  if (!key) { root.querySelector('#accKey')?.focus(); return; }
+  busy = true;
+  render();
+  try {
+    const { tier, note } = await api.link(service, key);
+    toast(note || `${LINKS[service].name} linked${tier ? ` · ${tier[0].toUpperCase()}${tier.slice(1)} plan` : ''}`, note && !note.startsWith('Linked.') ? 'var(--amber)' : undefined);
+    linking = ''; keyDraft = '';
+    busy = false;
+    await checkAccounts(true);
+  } catch (e) {
+    busy = false;
+    render();
+    toast(e.message, 'var(--red)');
+  }
+}
+
 function startHTML() {
   const choice = (flow, title, text) => `<button class="ob-choice" data-ob="flow:${flow}"><b>${title}</b><span>${text}</span></button>`;
+  const mine = yourAgent();
   return topHTML('New project')
     + `<div class="ob-body"><h2 class="ob-title">What are you starting?</h2>`
     + `<p class="ob-lede">A few questions about the game, one at a time. Answer as much or as little as you like: your agent (${esc(agentName())}) turns the answers into the first docs.</p>`
-    + `<div class="ob-choices">${choice('new', 'A new game', esc(survey.flows.new.blurb))}${choice('existing', 'A game I&#39;ve already made', esc(survey.flows.existing.blurb))}</div></div>`;
+    + `<div class="ob-choices">${choice('new', 'A new game', esc(survey.flows.new.blurb))}${choice('existing', 'A game I&#39;ve already made', esc(survey.flows.existing.blurb))}</div>`
+    + (mine && !state.accounts.ready ? `<div class="ob-status warn">${icon.alert}<span>${esc(mine.name)} ${notReady(mine)} on this PC, so it can't write the docs yet.</span>${button('accounts', 'Sort it out', 'btn-sm go')}</div>` : '')
+    + '</div>' + foot(button('accounts', 'Your accounts', 'btn ghost-btn'), '');
 }
 
 function basicsHTML() {
@@ -128,7 +216,9 @@ function reviewHTML() {
   const list = questions();
   const filled = list.filter(q => answered(q.id)).length;
   const agent = state.agent;
-  const handoff = agent?.installed ? `${esc(agent.name)} opens in its own window and writes the docs from your answers.` : `${esc(agentName())} isn't installed on this PC, so the job waits in Up next for whichever agent you open.`;
+  const handoff = !agent?.installed ? `${esc(agentName())} isn't installed on this PC, so the job waits in Up next for whichever agent you open.`
+    : state.accounts && !state.accounts.ready ? `${esc(agent.name)} opens in its own window. It isn't signed in yet, so it asks you to first, then writes the docs from your answers.`
+    : `${esc(agent.name)} opens in its own window and writes the docs from your answers.`;
   return topHTML('Ready', 1)
     + `<div class="ob-body"><h2 class="ob-title">Ready to save?</h2><p class="ob-lede">${filled} of ${list.length} answered. ${handoff} Click any answer to change it.</p>`
     + `<div class="ob-review">${list.map((q, i) => `<button class="ob-rev" data-ob="goto:${i}"><small>${esc(q.step)}</small><span class="q">${esc(q.prompt)}</span>`
@@ -173,9 +263,17 @@ function tileHTML() {
 
 function render() {
   if (!ob) return;
-  const html = { start: startHTML, basics: basicsHTML, question: questionHTML, review: reviewHTML, tiles: tilesHTML, tile: tileHTML }[ob.screen] || startHTML;
+  const html = { accounts: accountsHTML, start: startHTML, basics: basicsHTML, question: questionHTML, review: reviewHTML, tiles: tilesHTML, tile: tileHTML }[ob.screen] || startHTML;
+  const scroll = root.querySelector('.ob-body')?.scrollTop || 0, typing = document.activeElement?.id === 'accKey';
   root.innerHTML = `<div class="ob-card">${html()}</div>`;
   root.querySelectorAll('textarea').forEach(fit);
+  // The accounts screen re-renders as checks come back: keep its place, and a key being typed.
+  if (ob.screen === 'accounts') {
+    root.querySelector('.ob-body').scrollTop = scroll;
+    const key = root.querySelector('#accKey');
+    if (key) { key.value = keyDraft; if (typing) key.focus(); }
+    return;
+  }
   const focus = root.querySelector('#obText') || root.querySelector('[data-field="name"]:placeholder-shown') || root.querySelector('textarea');
   // At once, so a quick Ctrl+Enter or keystroke after the last one lands here.
   if (focus && ob.screen !== 'tiles') focus.focus({ preventScroll: true });
@@ -313,10 +411,22 @@ function step(delta) {
 
 export function initOnboarding() {
   root.addEventListener('click', e => {
+    const run = e.target.closest('[data-acc-run]'), use = e.target.closest('[data-acc-use]');
+    if (run) { runAccountAction(run.dataset.accRun, rerenderAccounts); return; }
+    if (use) { useAgent(use.dataset.accUse).then(rerenderAccounts); return; }
     const el = e.target.closest('[data-ob]');
     if (!el || el.disabled) return;
     const [action, arg] = el.dataset.ob.split(':');
     if (action === 'close') closeOnboarding();
+    else if (action === 'accounts') { show('accounts'); checkAccounts(true); }
+    else if (action === 'acc-continue') { storage.set(SEEN, 'shown'); linking = ''; keyDraft = ''; ob.mode === 'accounts' ? closeOnboarding() : show('start'); }
+    else if (action === 'acc-check') checkAccounts(true);
+    else if (action === 'acc-link') {
+      linking = linking === arg ? '' : arg; keyDraft = '';
+      render();
+      root.querySelector('#accKey')?.focus();
+    }
+    else if (action === 'acc-save') linkKey(arg);
     else if (action === 'restart') { storage.set(DRAFT, ''); openOnboarding({ fresh: true }); }
     else if (action === 'flow') show('basics', { flow: arg });
     else if (action === 'kind') { ob.basics.kind = arg; ob.basics.from = ''; show('basics'); }
@@ -352,9 +462,13 @@ export function initOnboarding() {
       // Skip turns into nothing once there's an answer.
       const skip = root.querySelector('[data-ob="skip"]');
       if (skip) skip.hidden = !!el.value.trim();
-    } else if (el.matches('textarea')) fit(el);
+    } else if (el.id === 'accKey') keyDraft = el.value;
+    else if (el.matches('textarea')) fit(el);
   });
+  // Back from a sign-in in the browser: check again.
+  addEventListener('focus', () => { if (onboardingOpen() && ob?.screen === 'accounts' && !checking) checkAccounts(true); });
   root.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.id === 'accKey') { e.preventDefault(); linkKey(linking); }
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && ob?.screen === 'question') { e.preventDefault(); step(1); }
     if (e.key === 'Enter' && ob?.screen === 'basics' && e.target.matches('input')) { e.preventDefault(); root.querySelector('[data-ob="basics-next"]')?.click(); }
   });

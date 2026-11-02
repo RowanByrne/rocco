@@ -97,6 +97,12 @@ $WindowActions = @{
 	'gh-update'     = @('Updating the GitHub CLI', 'winget upgrade --id GitHub.cli --exact; $code = $LASTEXITCODE')
 	'gh-install'    = @('Installing the GitHub CLI', 'winget install --id GitHub.cli --exact; $code = $LASTEXITCODE')
 	'lync-update'   = @('Updating Lync', $LyncUpdate)
+	# Installing an agent, and signing in to the user's own accounts (onboarding's accounts screen, accounts.ps1).
+	'claude-install' = @('Installing Claude Code', 'winget install --id Anthropic.ClaudeCode --exact; $code = $LASTEXITCODE')
+	'claude-login'   = @('Signing in to Claude Code', 'claude auth login; $code = $LASTEXITCODE')
+	'codex-login'    = @('Signing in to Codex', '& ''__CODEX__'' login; $code = $LASTEXITCODE')
+	'gemini-login'   = @('Signing in to Gemini CLI', 'Write-Host ''Choose to sign in with Google, and finish in your browser. Then type /quit to close this window.''; Write-Host ''''; gemini; $code = $LASTEXITCODE')
+	'gh-login'       = @('Signing in to GitHub', 'gh auth login --hostname github.com --git-protocol https --web; $code = $LASTEXITCODE')
 }
 
 $script:ActionRuns = @{}   # run id -> @{ Process; Action; Label }
@@ -108,6 +114,11 @@ function Start-ActionWindow([string]$action) {
 	}
 	$label, $steps = $WindowActions[$action]
 	$steps = $steps.Replace('__LYNC__', (Join-Path $RoDev '_tools\lync').Replace("'", "''"))
+	if ($steps.Contains('__CODEX__')) {
+		$codex = Find-AgentExe 'codex'
+		if (-not $codex) { throw 'Codex isn''t installed on this PC.' }
+		$steps = $steps.Replace('__CODEX__', $codex.Replace("'", "''"))
+	}
 	# A missing program counts as failing too. The window stays open only when something failed, so the user can read why.
 	$text = "`$Host.UI.RawUI.WindowTitle = 'Rocco: $label'`nWrite-Host 'Rocco: $label'`nWrite-Host ''`n`$code = 0`n`$ErrorActionPreference = 'Stop'`n" +
 		"try {`n$steps`n} catch { Write-Host `$_.Exception.Message; `$code = 1 }`n" +
@@ -117,7 +128,7 @@ function Start-ActionWindow([string]$action) {
 	$null = $process.Handle # without holding the handle, ExitCode reads as empty once it exits
 	$id = [guid]::NewGuid().ToString('N').Substring(0, 8)
 	$script:ActionRuns[$id] = @{ Process = $process; Action = $action; Label = $label }
-	$script:PcResult = $null # what the next check sees is what counts
+	$script:PcResult = $null; $script:AccountsCache = $null # what the next check sees is what counts
 	[pscustomobject]@{ run = $id; label = $label }
 }
 

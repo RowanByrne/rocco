@@ -1,5 +1,7 @@
-// Connections: how everything is hooked up. A health summary first, then only what needs attention,
-// then every connection as a tile: this project's links, and this PC's tools by kind. A tile opens its details.
+// Connections: how everything is hooked up, for the project being worked on. Rocco isn't a manager for every tool and
+// plugin on the PC, so it leads with what matters to this project: what needs attention, then the vital things Rocco and
+// the template can't work without, each one click from connected. Then everything, vital or not, by kind, as tiles. A row or
+// tile opens its details.
 import { state, emit, currentProject } from '../state.js';
 import { $, esc } from '../lib/dom.js';
 import { agoText } from '../lib/format.js';
@@ -8,19 +10,50 @@ import { logoHTML, useGlyphFallback } from '../lib/brands.js';
 import { api } from '../api.js';
 import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet } from '../ui/sheet.js';
+import { loadAccounts, yourAgent, notReady, runAccountAction, waitForRun, accRowHTML, fixButtons, chip, imagesNeed } from '../accounts.js';
+import { openAccounts } from '../dialogs/onboarding.js';
 
-const PC_GROUPS = [['AI', 'AI'], ['Roblox', 'Roblox'], ['Tools', 'Developer tools']];
 const LABEL = { ok: 'Up to date', update: 'Update available', warn: 'Needs attention', missing: 'Missing', off: 'Off' };
 const COLOR = { ok: 'var(--green)', update: 'var(--update)', warn: 'var(--amber)', missing: 'var(--red)', off: 'var(--gray)' };
-const needsAttention = c => c.status === 'update' || c.status === 'warn' || c.status === 'missing';
+const TONE = { ok: 'ok', update: 'update', warn: 'warn', missing: 'bad', off: 'off' };
 const ofProject = c => c.group === 'Project' || c.group === 'Libraries'; // the rest are this PC's
 const stateLabel = c => c.status === 'ok' ? (c.group === 'Project' || !c.version ? 'Connected' : LABEL.ok) : (LABEL[c.status] || c.status);
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 let timer = null;
 
-// The server checks this PC in the background; while it does, ask again every two seconds.
+// Vital, in the order they're set up: what each is for. Your agent and Codex (images) lead the list, from the accounts check.
+const VITAL = [
+  ['Git', 'Keeps every change, and syncs the game with GitHub.'],
+  ['GitHub', 'This game\'s repo: where every PC and agent gets the code.'],
+  ['Template', 'Where this game\'s workflow and docs get their updates.'],
+  ['Commit check', 'Stops files too big for git going in.'],
+  ['Roblox Studio', 'Where the game is built and played.'],
+  ['Lync', 'Syncs the code from git into Studio.'],
+  ['Studio sync', 'Lync serving this game\'s places now.'],
+  ['Studio MCP', 'Lets your agent and its workers use Studio.'],
+  ['Rocco', 'This app.'],
+];
+const VITAL_NAMES = new Set(VITAL.map(([name]) => name));
+const agentItem = c => c.group === 'AI' && c.name === state.agent?.name;
+const isVital = c => VITAL_NAMES.has(c.name) || agentItem(c) || c.name === 'Codex';
+const isPlugin = c => / plugin$/.test(c.name);
+// What affects this project: its own links and libraries, the vital things, and a linked account that stopped working.
+// Tools' own updates show on their rows; only this project's (the template, a library) and Rocco's ask for attention.
+const counts = c => c.group === 'Project' || c.group === 'Libraries' || isVital(c) || !!c.link;
+const needsAttention = c => counts(c) && (c.status === 'warn' || c.status === 'missing'
+  || (c.status === 'update' && (c.group === 'Project' || c.group === 'Libraries' || c.name === 'Rocco')));
+// Your agent and Codex, when they aren't ready to work (accounts.js).
+const accountProblems = () => {
+  const a = state.accounts;
+  if (!a) return [];
+  const mine = yourAgent();
+  return [mine && mine.state !== 'ok' ? { ...mine, label: 'Your agent', text: `${mine.name} ${notReady(mine)}, so nothing can be planned or built on this PC.` } : null,
+    a.images.state !== 'ok' ? { ...a.images, name: 'Codex', label: 'Images', text: `Codex ${notReady(a.images)}, so this PC can't make art.` } : null].filter(Boolean);
+};
+
+// The server checks this PC in the background; while it does, ask again every two seconds. The accounts come with it.
 export async function loadConnections(force) {
   clearTimeout(timer);
+  loadAccounts(force);
   try {
     state.conn = await api.connections(force);
     emit('connections');
@@ -57,26 +90,17 @@ const fixHTML = (c, i, inSheet = false) => (c.update && (inSheet || !c.action ||
   + (c.command && (inSheet || !c.action) ? `<code>${esc(c.command)}</code><button class="copy" data-copy="${esc(c.command)}">${icon.copy}Copy</button>` : '')
   + actionHTML(c, i, inSheet);
 
-function healthHTML(items) {
-  const n = status => items.filter(c => c.status === status).length;
-  const problems = n('warn') + n('missing'), updates = n('update');
-  const kind = problems ? 'warn' : updates ? 'update' : 'ok';
-  const title = problems ? `${plural(problems, 'thing')} need${problems === 1 ? 's' : ''} attention`
-    : updates ? `${plural(updates, 'update')} available` : 'Everything is connected and up to date';
-  const parts = [`${n('ok')} of ${items.length} up to date`];
-  if (problems && updates) parts.push(plural(updates, 'update'));
-  if (n('off')) parts.push(`${n('off')} off`);
-  const pills = [['ok', 'connected'], ['update', 'updates'], ['warn', 'need attention'], ['missing', 'missing']]
-    .filter(([s]) => n(s)).map(([s, label]) => `<span class="pill" style="--c:${COLOR[s]}"><i></i><b>${n(s)}</b>${label}</span>`).join('');
-  return `<div class="health k-${kind}"><span class="health-mark">${kind === 'ok' ? icon.checkSm : kind === 'update' ? icon.up : icon.alert}</span>`
-    + `<div class="health-text"><div class="health-title">${title}</div><div class="health-sub">${parts.join(' · ')}</div></div>`
-    + `<div class="health-pills">${pills}</div></div>`;
-}
+// With nothing to do, one line says so; otherwise Needs attention leads the page.
+const allGoodHTML = () => `<div class="health k-ok"><span class="health-mark">${icon.checkSm}</span><div class="health-text">`
+  + `<div class="health-title">Everything ${esc(currentProject().name)} needs is connected</div><div class="health-sub">Updates to this PC's tools show on their rows.</div></div></div>`;
 
 function attentionHTML(items) {
-  const rows = items.map((c, i) => [c, i]).filter(([c]) => needsAttention(c));
-  if (!rows.length) return '';
+  const rows = items.map((c, i) => [c, i]).filter(([c]) => needsAttention(c) && !agentItem(c) && c.name !== 'Codex');
+  const accounts = accountProblems();
+  if (!rows.length && !accounts.length) return '';
   return `<div class="section">Needs attention</div><div class="attn">`
+    + accounts.map(x => `<div class="attn-row k-warn">${logoHTML(x, 'sm')}<div class="attn-main"><div class="attn-title">${esc(x.label)}</div>`
+      + `<div class="attn-fix"><span>${esc(x.text)}</span>${fixButtons(x)}</div></div><span class="state-pill">${x.state === 'missing' ? 'Not installed' : x.state === 'expired' ? 'Sign-in expired' : 'Not signed in'}</span></div>`).join('')
     + rows.map(([c, i]) => `<div class="attn-row k-${esc(c.status)}" data-conn="${i}">${logoHTML(c, 'sm')}`
       + `<div class="attn-main"><div class="attn-title">${esc(c.name)}<span class="attn-ver">${versionsHTML(c)}</span></div>`
       + `<div class="attn-fix">${c.update || c.command || c.action ? fixHTML(c, i) : esc(c.detail)}</div></div>`
@@ -84,26 +108,54 @@ function attentionHTML(items) {
     + `</div>`;
 }
 
+// Your agent or Codex: signed in or not (the accounts check), with this PC's version and any update from the tools check.
+function accountVitalHTML(x, label, need, found, extra = '') {
+  const [c, i] = found || [];
+  const ready = x.state === 'ok', update = ready && c?.status === 'update';
+  return accRowHTML({ name: x.name, need, tone: ready ? (update ? 'update' : 'ok') : 'warn', chip: chip(label),
+    detail: x.detail + (c?.version ? ` · ${c.version}` : '') + (update ? ' · update available' : ''),
+    buttons: fixButtons(x) + (update ? actionHTML(c, i) : '') + extra, attrs: c ? ` data-conn="${i}"` : '' });
+}
+
+function vitalHTML(items) {
+  const indexed = items.map((c, i) => [c, i]);
+  const a = state.accounts, mine = yourAgent();
+  const accounts = a && mine ? accountVitalHTML(mine, 'Your agent', mine.plan, indexed.find(([c]) => agentItem(c)), '<button class="btn-sm" data-accounts>Change</button>')
+    + accountVitalHTML({ ...a.images, name: 'Codex' }, 'Images', imagesNeed(), indexed.find(([c]) => c.name === 'Codex')) : '';
+  const rows = VITAL.flatMap(([name, need]) => indexed.filter(([c]) => c.name === name).map(([c, i]) => accRowHTML({
+    name: c.name, need, tone: TONE[c.status] || 'off', detail: `${c.status === 'ok' ? '' : `${stateLabel(c)} · `}${c.detail}${c.version ? ` · ${c.version}` : ''}`,
+    buttons: c.status === 'ok' ? '' : actionHTML(c, i), attrs: ` data-conn="${i}"` }))).join('');
+  return `<div class="section">Vital<span class="sec-name">what Rocco and the template need, on this PC and in ${esc(currentProject().name)}</span></div>`
+    + `<div class="vital">${accounts}${rows}</div>`;
+}
+
 const tileHTML = (c, i) => `<button class="tile k-${esc(c.status)}" data-conn="${i}">`
   + `<span class="tile-top">${logoHTML(c)}<span class="tile-dot" title="${esc(stateLabel(c))}"></span></span>`
   + `<span class="tile-name">${esc(c.name)}</span><span class="tile-detail">${esc(c.detail)}</span>`
   + `<span class="tile-foot">${c.version ? `<span class="ver">${esc(c.version)}</span>` : ''}<span class="tile-state">${esc(stateLabel(c))}</span></span></button>`;
 
+// Everything, vital or not, by kind: the full picture of each.
+const KINDS = [
+  ['Project', 'This project', c => c.group === 'Project'],
+  ['AI', 'AI', c => c.group === 'AI'],
+  ['Roblox', 'Roblox', c => c.group === 'Roblox' && !isPlugin(c)],
+  ['Plugins', 'Roblox plugins', isPlugin],
+  ['Libraries', 'Roblox libraries in the game', c => c.group === 'Libraries'],
+  ['Tools', 'Developer tools', () => true],
+];
 function groupsHTML(items) {
-  const indexed = items.map((c, i) => [c, i]);
-  const tiles = group => indexed.filter(([c]) => c.group === group).map(([c, i]) => tileHTML(c, i)).join('');
-  const kind = (label, list) => list ? `<div class="kind"><div class="kind-head">${label}</div><div class="tiles">${list}</div></div>` : '';
-  const project = tiles('Project'), libraries = tiles('Libraries');
-  const pc = PC_GROUPS.map(([group, label]) => kind(label, tiles(group))).join('');
-  return (project ? `<div class="section">This project<span class="sec-name">${esc(currentProject().name)}</span></div><div class="tiles">${project}</div>`
-      + kind('Libraries in the game', libraries) : '')
-    + (pc ? `<div class="section">This PC<span class="sec-name">${esc(state.me?.pc || '')}</span></div>${pc}` : '');
+  const left = items.map((c, i) => [c, i]);
+  return KINDS.map(([, label, has]) => {
+    const mine = left.filter(([c]) => has(c));
+    mine.forEach(entry => left.splice(left.indexOf(entry), 1));
+    return mine.length ? `<div class="kind"><div class="kind-head">${label}</div><div class="tiles">${mine.map(([c, i]) => tileHTML(c, i)).join('')}</div></div>` : '';
+  }).join('');
 }
 
 export function renderConnections() {
   const conn = state.conn;
   const items = conn?.items || [];
-  const attention = items.filter(needsAttention).length;
+  const attention = items.filter(c => needsAttention(c) && !agentItem(c) && c.name !== 'Codex').length + accountProblems().length;
   $('#connBadge').textContent = attention;
   $('#connBadge').hidden = !attention;
 
@@ -117,12 +169,13 @@ export function renderConnections() {
       + `<div class="blank-title">Checking connections</div><div class="blank-sub">This takes a few seconds the first time.</div></div></div>`;
     return;
   }
-  $('#connHealth').innerHTML = healthHTML(items);
-  $('#connBody').innerHTML = attentionHTML(items) + groupsHTML(items);
+  $('#connHealth').innerHTML = attention ? '' : allGoodHTML();
+  $('#connBody').innerHTML = attentionHTML(items) + vitalHTML(items) + groupsHTML(items);
 }
 
-// Accounts the user links here. The key goes to the server, which checks it with the service before keeping it.
-const LINKS = {
+// Accounts the user links here, and on onboarding's accounts screen. The key goes to the server, which checks it with the
+// service before keeping it.
+export const LINKS = {
   elevenlabs: {
     name: 'ElevenLabs',
     keys: 'https://elevenlabs.io/app/settings/api-keys',
@@ -132,7 +185,7 @@ const LINKS = {
   roblox: {
     name: 'Roblox Open Cloud',
     keys: 'https://create.roblox.com/dashboard/credentials?activeTab=ApiKeysTab',
-    why: 'Shows draft game page events and publishes them (Updates), shows how each thumbnail does (Thumbnails), and lets your agent put events and thumbnails on the game page. Give the key this game\'s experience, with: events read and write, analytics read, and for your agent\'s uploads, assets write and the game page\'s thumbnails (legacy universe manage). Keys stop working after 60 days unused.',
+    why: 'Shows draft game page events and publishes them (Updates), shows how each thumbnail does (Thumbnails), and lets your agent put events and thumbnails on the game page. Give the key this game\'s experience, with: events read and write, analytics read, and for your agent\'s uploads, assets write and the game page\'s thumbnails (legacy universe manage). If you restrict the key by IP address, add 0.0.0.0/0, since a home connection\'s address changes. Keys stop working after 60 days unused.',
     where: 'Rocco checks the key on this game\'s events, then keeps it on this PC as ROBLOX_API_KEY in your Windows account, where your agent\'s tools read it. It never shows the key again, and it never goes into git. Agent sessions that are already open need a restart to see it.',
   },
 };
@@ -185,16 +238,6 @@ async function link(button) {
     button.disabled = false;
     button.textContent = 'Link';
     field.select();
-  }
-}
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// An update in its own window: done when the window closes. It stays open on failure, until the user has read it.
-async function waitForRun(run) {
-  for (;;) {
-    await sleep(1500);
-    try { const s = await api.actionRun(run); if (!s.running) return s; } catch { /* Rocco is busy or restarting: ask again */ }
   }
 }
 
@@ -281,6 +324,10 @@ export function initConnections() {
     }
     const act = e.target.closest('[data-conn-act]');
     if (act) { runAction(act); return; }
+    // Your agent and Codex: an install or sign-in (accounts.js), or the accounts screen to pick another agent.
+    const run = e.target.closest('.view[data-view="connections"] [data-acc-run]');
+    if (run) { runAccountAction(run.dataset.accRun, renderConnections).then(() => loadConnections(true)); return; }
+    if (e.target.closest('.view[data-view="connections"] [data-accounts]')) { openAccounts(); return; }
     const item = e.target.closest('.view[data-view="connections"] [data-conn]');
     if (item) openConnection(+item.dataset.conn);
   });

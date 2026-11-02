@@ -164,6 +164,9 @@ export async function connections() {
     { group: 'Roblox', name: 'Lync', status: 'update', version: '0.30.12', latest: '0.30.14', detail: "In the RoDev folder's _tools\\lync",
       update: 'Download the latest release into _tools\\lync (WORKSTATION.md).', action: { kind: 'window', label: 'Update', id: 'lync-update' } },
     { group: 'Roblox', name: 'Lync plugin', status: 'ok', detail: 'Lync installs and updates it.' },
+    // A plugin this PC has but the game doesn't need: listed, never flagged.
+    { group: 'Roblox', name: 'Moon Animator plugin', status: 'update', version: '2.4.0', latest: '2.5.1', detail: 'github.com/sample/moon-animator', update: 'Get the new version from github.com/sample/moon-animator/releases.',
+      action: { kind: 'link', label: 'Get it', url: 'https://github.com/sample/moon-animator/releases/latest' } },
     roccoUpdated ? { group: 'Tools', name: 'Rocco', status: 'ok', version: 'v0.3.0', latest: 'v0.3.0', detail: "In the RoDev folder's _tools\\rocco" }
       : { group: 'Tools', name: 'Rocco', status: 'update', version: 'v0.2.0', latest: 'v0.3.0', detail: "In the RoDev folder's _tools\\rocco",
         update: 'Update it from here, or in _tools\\rocco check out v0.3.0 and restart Rocco.',
@@ -189,7 +192,8 @@ export async function action(id, value = '') {
     return { message: 'Connected to GitHub, and main is pushed.' };
   }
   const run = `demo-${id}`;
-  runs[run] = { id, until: Date.now() + 3500, label: { 'lync-update': 'Updating Lync', 'git-update': 'Updating Git for Windows', 'gh-install': 'Installing the GitHub CLI' }[id] || 'Updating' };
+  runs[run] = { id, until: Date.now() + 3500, label: { 'lync-update': 'Updating Lync', 'git-update': 'Updating Git for Windows', 'gh-install': 'Installing the GitHub CLI',
+    'gemini-update': 'Installing the latest Gemini CLI', 'codex-login': 'Signing in to Codex', 'gemini-login': 'Signing in to Gemini CLI', 'claude-login': 'Signing in to Claude Code' }[id] || 'Updating' };
   return { run, label: runs[run].label };
 }
 export async function actionRun(run) {
@@ -319,12 +323,32 @@ export async function bookmark(hash) {
 
 const AGENTS = [{ id: 'claude', name: 'Claude Code', short: 'Claude' }, { id: 'codex', name: 'Codex', short: 'Codex' }, { id: 'gemini', name: 'Gemini CLI', short: 'Gemini' }];
 let agentId = 'claude';
+// Gemini CLI isn't on this sample PC until its Install window has run.
+const installed = id => id !== 'gemini' || fixed.has('gemini-update');
 export async function agent() {
-  const installed = id => id !== 'gemini';
   const a = AGENTS.find(x => x.id === agentId);
   return { ...a, installed: installed(a.id), chosen: true, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
 }
 export async function setAgent(id) { agentId = id; return agent(); }
+
+// Your accounts (server/accounts.ps1): Claude Code is signed in; Codex is installed but signed out until its sign-in window runs.
+const PLANS = { claude: 'A Claude Pro or Max plan, or Anthropic API credit', codex: 'A ChatGPT plan, or OpenAI API credit', gemini: 'A Google account (free to start), or a Gemini API key' };
+const SIGNED_IN = { claude: 'Signed in as you@example.com (max)', codex: 'Signed in with ChatGPT', gemini: 'Signed in with Google' };
+export async function accounts() {
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const of = id => !installed(id) ? ['missing', 'Not installed'] : id === 'claude' || fixed.has(`${id}-login`) ? ['ok', SIGNED_IN[id]] : ['signin', 'Not signed in'];
+  const agents = AGENTS.map(x => {
+    const [state, detail] = of(x.id);
+    return { ...x, plan: PLANS[x.id], state, detail, chosen: x.id === agentId, install: x.id === 'claude' ? 'claude-install' : `${x.id}-update`, login: `${x.id}-login` };
+  });
+  const [state, detail] = of('codex');
+  return {
+    agent: agentId, ready: agents.find(x => x.chosen).state === 'ok', agents,
+    images: { state, detail, login: 'codex-login', install: 'codex-update' },
+    github: { state: 'ok', detail: 'Signed in as sample-user', login: '' },
+    elevenlabs: { linked: !!eleven, hint: eleven || '' }, roblox: { linked: !!robloxKey, hint: robloxKey || '' },
+  };
+}
 
 // The survey is the template's own, from the Rocco serving the demo.
 export async function survey() {

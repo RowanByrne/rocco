@@ -8,6 +8,7 @@ import { toast } from '../ui/toast.js';
 import { state } from '../state.js';
 import { chooseAgent } from '../agent.js';
 import { resetNav } from '../sidebar.js';
+import { openAccounts } from '../dialogs/onboarding.js';
 
 let recording = null; // the action whose new hotkey is being pressed
 
@@ -19,7 +20,7 @@ const keyHTML = combo => combo ? combo.split('+').map(k => `<kbd>${esc(k)}</kbd>
 function agentHTML() {
   const a = state.agent;
   if (!a) return '';
-  return `<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span></div>`
+  return `<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span><span class="sp"></span><button class="mini" data-accounts>Your accounts</button></div>`
     + a.agents.map(x => `<button class="set-row agent-row${x.id === a.id ? ' on' : ''}" data-agent="${esc(x.id)}" role="radio" aria-checked="${x.id === a.id}">`
       + `<span class="radio"></span><span class="set-text"><span class="set-title">${esc(x.name)}</span>`
       + `<span class="set-sub">${x.installed ? 'Installed' : 'Not installed on this PC (Connections)'}</span></span></button>`).join('')
@@ -75,6 +76,7 @@ export function initSettings() {
     if (b) { recording = b.dataset.bind; pause(true); renderSettings(); return; }
     const r = e.target.closest('[data-reset-key]');
     if (r) { resetKeys(r.dataset.resetKey); return; }
+    if (e.target.closest('[data-accounts]')) { openAccounts(); return; }
     if (e.target.closest('[data-reset-nav]')) { resetNav(); toast('The sidebar is back in its usual order'); return; }
     if (e.target.closest('[data-reset-keys]')) resetKeys();
   });
