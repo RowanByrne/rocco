@@ -80,13 +80,24 @@ function Open-Conductor([string]$prompt) {
 # so this works whatever template release the game is on.
 $WatchBoard = 'Then keep watching the Workboard: ..\..\_tools\rocco\rocco.ps1 wait returns as soon as something new waits on you (..\..\_tools\rocco\README.md, Commands).'
 
-# The user handed something over (a note, an answer, a plan to approve). No conductor running: open one on it. Returns
-# the agent's name when one was opened, else ''.
+# Tasks left Working with no conductor running: a conductor that stopped mid-round (its window closed, the PC restarted),
+# and the workers it ran with it.
+function Get-CutOff { @(Get-Tasks | Where-Object { $_.status -eq 'working' }) }
+
+# The user handed something over (a note, an answer, a plan to approve), or work was cut off. No conductor running: open
+# one on it. Work that was cut off is picked up from the board and the lanes: an agent's old session may not have been
+# saved, so a new one starts from what's on disk. Returns the agent's name when one was opened, else ''.
 function Request-Conductor {
 	if ((Get-Conductor).state -ne 'none') { return '' }
 	$agent = Get-Agent
 	if (-not $agent.installed) { return '' }
-	try { Open-Conductor "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $WatchBoard" | Out-Null; $agent.name } catch { '' }
+	$cut = @(Get-CutOff)
+	$prompt = if ($cut.Count) {
+		"Your conductor session for this game stopped mid-round, and its workers with it: $(($cut | ForEach-Object { $_.id }) -join ', ') are still Working on the Workboard. " +
+		'Check each one''s lane (its branch, commits and uncommitted work), make sure its place is open and syncing (..\..\_tools\rocco\rocco.ps1 lanes opens whatever isn''t), and carry them on (docs/workflow/CONDUCTOR.md). ' +
+		"Handle anything else waiting on you too (rocco.ps1 list -Pending). $WatchBoard"
+	} else { "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $WatchBoard" }
+	try { Open-Conductor $prompt | Out-Null; $agent.name } catch { '' }
 }
 
 # rocco.ps1 wait: marks the conductor as listening while it waits, so Rocco shows it, and doesn't open another.

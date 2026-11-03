@@ -193,7 +193,10 @@ function conductorHTML() {
   const waiting = state.tasks.some(t => t.pending && t.status !== 'removed');
   if (c.state === 'listening') return `<span class="cond on" title="${esc(name)} is watching the Workboard: what you send is picked up at once"><i></i>${esc(name)} is listening</span>`;
   if (c.state === 'busy') return `<span class="cond busy" title="${esc(name)} is running as the conductor. It picks up what's waiting when it's done with what it's doing. Its window is in your taskbar, if it needs you"><i></i>${esc(name)} is working</span>`;
-  return waiting && state.agent?.installed ? `<button class="btn-sm go cond-open" data-open-conductor title="No conductor is running for this game">Start ${esc(name)}</button>`
+  // Work left Working with no conductor was cut off (its window closed): the button carries it on.
+  const cutOff = state.tasks.some(t => t.status === 'working');
+  return (waiting || cutOff) && state.agent?.installed
+    ? `<button class="btn-sm go cond-open" data-open-conductor title="${cutOff ? 'No conductor is running, and work was cut off: this carries it on' : 'No conductor is running for this game'}">${cutOff ? 'Carry on with' : 'Start'} ${esc(name)}</button>`
     : `<span class="cond" title="No conductor is running. Sending a note starts one"><i></i>No conductor</span>`;
 }
 

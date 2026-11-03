@@ -282,7 +282,7 @@ function Start-Rocco {
 			# Updated: the new version starts in the background and waits for this one to let go of the port.
 			if ($script:Restarting) {
 				Write-Host 'Updated. Rocco restarts in the background.'
-				Start-Process powershell -WindowStyle Hidden -ArgumentList (Get-ServeArguments $homeId $Port $true)
+				Start-Hidden "powershell.exe $((Get-ServeArguments $homeId $Port $true) -join ' ')" $AppDir | Out-Null
 				break
 			}
 		}

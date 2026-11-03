@@ -241,6 +241,8 @@ function Open-Lanes {
 	foreach ($c in $checkouts) {
 		if (Test-PlaceOpen $c.place) { continue }
 		Write-Output "$($c.name): opening $(Split-Path $c.place -Leaf) in Studio"
+		# A Studio that closed without warning leaves its lock behind, and the place would open read-only.
+		Remove-Item -LiteralPath "$($c.place).lock" -Force -ErrorAction SilentlyContinue
 		Start-Hidden "cmd.exe /d /c start `"`" `"$($c.place)`"" $Root | Out-Null
 		Start-Sleep -Seconds 2
 	}

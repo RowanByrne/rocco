@@ -79,9 +79,10 @@ switch ($Command) {
 	'serve' { if (Start-Rocco) { exit 3 } }
 
 	# Rocco.bat: the server in the background with no window, so nothing stays open on the user's screen. Settings
-	# has Quit. Started hidden, so Windows Terminal doesn't pick it up as a tab.
+	# has Quit. Started hidden, so Windows Terminal doesn't pick it up as a tab, and detached from whatever ran this:
+	# started from an agent's shell, Rocco (and the Lync, Studio and agent windows it opens) would close with that agent.
 	'start' {
-		Start-Process powershell -WindowStyle Hidden -ArgumentList (Get-ServeArguments $Project $Port $Restart)
+		Start-Hidden "powershell.exe $((Get-ServeArguments $Project $Port $Restart) -join ' ')" $AppDir | Out-Null
 	}
 
 	'list' {
