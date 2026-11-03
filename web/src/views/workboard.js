@@ -11,7 +11,7 @@ import { settings } from '../settings.js';
 import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
-import { agentShort } from '../agent.js';
+import { agentShort, agentName } from '../agent.js';
 
 const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
@@ -185,9 +185,29 @@ function queueHTML() {
       + (deps.length ? `<span class="q-dep" title="${esc(t.waiting || `Needs ${deps.join(', ')} done first`)}">${icon.lock}After ${deps.join(', ')}</span>`
         : `<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${esc(t.waiting || 'Queued')}</span></span>`) + '</div>';
   };
-  return `<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? '<span class="q-hint">Drag to reorder</span>' : ''}</div>`
+  return `<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? '<span class="q-hint">Drag to reorder</span>' : ''}${conductorHTML()}</div>`
     + (list.length ? `<div class="q-list">${list.map(row).join('')}</div>` : '<div class="empty">Nothing queued. Notes you add go here.</div>');
 }
+
+// Whether a conductor is there to pick things up (server/conductor.ps1). With none, Rocco opens one when the user hands
+// something over; the button opens one now, for work that's already waiting.
+function conductorHTML() {
+  const c = state.meta.conductor || { state: 'none' }, name = c.agent || agentName();
+  const waiting = state.tasks.some(t => t.pending && t.status !== 'removed');
+  if (c.state === 'listening') return `<span class="cond on" title="${esc(name)} is watching the Workboard: what you send is picked up at once"><i></i>${esc(name)} is listening</span>`;
+  if (c.state === 'busy') return `<span class="cond busy" title="${esc(name)} is running as the conductor. It picks up what's waiting when it's done with what it's doing"><i></i>${esc(name)} is working</span>`;
+  return waiting && state.agent?.installed ? `<button class="btn-sm go cond-open" data-open-conductor title="No conductor is running for this game">Start ${esc(name)}</button>`
+    : `<span class="cond" title="No conductor is running. Sending a note starts one"><i></i>No conductor</span>`;
+}
+
+const startConductor = () => attempt('start the conductor', async () => {
+  const r = await api.openConductor();
+  await refresh();
+  if (r.agent) toast(`${r.agent} opened in its own window, as the conductor`, 'var(--claude)');
+});
+
+// The server opened a conductor because none was running: say so.
+export function conductorOpened(agent) { if (agent) toast(`${agent} opened in its own window to pick it up`, 'var(--claude)'); }
 
 export function renderWorkboard() {
   const ready = work('ready').length, stuck = work('stuck').length, asks = work('inbox').length + plansToApprove().length, replies = answered().length;
@@ -321,8 +341,10 @@ async function attempt(what, fn) {
 }
 
 async function act(id, action, text) {
-  await api.act(id, action, text);
+  const { opened } = await api.act(id, action, text);
   await refresh();
+  // After the caller's own toast.
+  if (opened) setTimeout(() => conductorOpened(opened), 1600);
 }
 
 // Approve, queue and dismiss can be taken back for a few seconds.
@@ -358,9 +380,10 @@ const unask = id => attempt('take it back', async () => { await act(id, 'remove'
 const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); });
 const queueAll = () => attempt('queue them', async () => {
   const n = work('inbox').length;
-  await api.send();
+  const { opened } = await api.send();
   await refresh();
   toast(`Added ${n} to Up next`, 'var(--violet)');
+  if (opened) setTimeout(() => conductorOpened(opened), 1600);
 });
 
 function answerText(t, extra) {
@@ -403,6 +426,7 @@ function conflict(ids) {
 let dragId = null;
 function initReorder() {
   const box = $('#queue');
+  box.addEventListener('click', e => { if (e.target.closest('[data-open-conductor]')) startConductor(); });
   const clearMarks = () => box.querySelectorAll('.drop-before, .drop-after').forEach(r => r.classList.remove('drop-before', 'drop-after'));
   box.addEventListener('dragstart', e => {
     const row = e.target.closest('.q-row');

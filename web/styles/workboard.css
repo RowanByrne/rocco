@@ -156,6 +156,14 @@
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
 .queue .col-head svg { color: var(--text-3); }
 .q-hint { margin-left: auto; font-size: 11.5px; font-weight: 400; color: var(--text-3); }
+/* Whether a conductor is there to pick Up next up */
+.cond, .cond-open { margin-left: auto; }
+.q-hint ~ .cond, .q-hint ~ .cond-open { margin-left: 14px; }
+.cond { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 400; color: var(--text-3); white-space: nowrap; }
+.cond i { width: 6px; height: 6px; border-radius: 50%; background: var(--gray); }
+.cond.on { color: var(--text-2); }
+.cond.on i { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.cond.busy i { background: var(--blue); }
 .q-row { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 4px; border-radius: 10px; cursor: pointer; transition: background .15s, opacity .15s; }
 .q-row + .q-row { margin-top: 2px; }
 .q-row:hover { background: rgba(255,255,255,.04); }

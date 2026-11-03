@@ -3,12 +3,14 @@
 Rocco is the web app for making games from this template. One Rocco serves every project in the RoDev folder.
 
 - **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval; the inbox, where things the agent spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options; Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
+  - **The conductor** is your agent's session that handles the board. Up next says whether one is listening (watching the board with `rocco.ps1 wait`), working, or not running. When you hand something over (a note, an answer, an approved plan) and none is running, Rocco opens your agent in its own window as the conductor, on what's waiting; **Start** does the same for work already waiting.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
 - **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask your agent to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (AGENTS.md "Template-owned files", and `rocco/`) can't be edited here; your agent changes them through the template. **Add game details** opens the onboarding's detail tiles for the open game.
 - **Onboarding:** New project is a short survey, and it opens by itself the first time Rocco runs in a RoDev folder with no games yet. The first choice is a new game, or one already made: on GitHub, in a folder, in a place file, or only in Studio. Then come the name and code, and questions one at a time; every answer is free text and optional. The questions are the template's `tools/onboarding.json`, so they change with the docs they fill. The project is made in the background while you answer (`new-project.ps1`, with `-Existing` for a game already made). A survey left half-way is kept in the browser.
   - **Your accounts** comes first, once per browser. No AI plan comes with RoDev, so it lists what each tool runs on: a coding agent (one is enough), Codex for images, and GitHub, ElevenLabs and the Roblox key for later. It checks each one on this PC, asking the tool itself where it can (`claude auth status`, `codex login status`). Installing or signing in is one click: the tool's own command, in a window of its own. Rocco checks again when you come back. After that, the survey's first screen warns when your agent isn't ready, with a button to it; Settings and Connections open it any time.
-  - **On finishing,** the answers are committed as the game's `docs/game/ONBOARDING.md` and pushed.
-  - **Your agent then opens** in a window of its own, on the template's `docs/workflow/SETUP.md`, with a Workboard card to follow it. Without an agent installed, the card waits in Up next, with the prompt to copy.
+  - **Lanes:** a new game then asks how many lanes this PC can run, suggesting a number from its memory and threads (about 3 GB a lane, less the Main place and room for other apps, and no more than one per two threads).
+  - **On finishing,** the answers are committed as the game's `docs/game/ONBOARDING.md`, this PC's lanes as its row in PROJECT.md "Workstations", and both pushed. Then the lanes open in the background (`rocco.ps1 lanes`): the Main place and each lane's, in Studio, with Lync serving each.
+  - **Your agent then opens** in a window of its own, as the game's conductor, on the template's `docs/workflow/SETUP.md`: it writes the first docs, then builds the prototype. Its Workboard card needs no review: it approves itself when it's ready. A conductor already running gets the card instead. Without an agent installed, the card waits in Up next, with the prompt to copy.
   - **Detail tiles** (monetization, economy, progression, and more) add answers then or later, and **Send** hands them to the agent the same way.
 - **Connections:** what the open project needs, not every tool on the PC (Rocco isn't a plugin manager).
   - **Needs attention** lists only what affects this project: its own links and libraries, the vital things below, and a linked account that stopped working. Updates count only for the template, the game's libraries and Rocco; other tools show theirs on their rows. With nothing to do, one line says so.
@@ -29,7 +31,7 @@ Rocco is the web app for making games from this template. One Rocco serves every
   - **Metrics** and **Ads:** coming soon.
 
   What Roblox makes public needs no key; the rest uses the key linked in Connections. Most of these Roblox APIs are experimental, so a part that fails is just left out.
-- **The sidebar:** the views in categories (Project, Live ops, System). Click a category's name to fold it; a folded one still lights up when its open view or a badge is inside. Drag a category, or a tab within its category, to reorder them. The order is kept in this browser, and Settings resets it. At the bottom are Main and this PC's lanes, each labeled, with a key to their colors: free, working, stuck, holding a finished branch until it's tested and merged, and not open (Lync isn't serving it).
+- **The sidebar:** the views in categories (Project, Live ops, System). Click a category's name to fold it; a folded one still lights up when its open view or a badge is inside. Drag a category, or a tab within its category, to reorder them. The order is kept in this browser, and Settings resets it. At the bottom are Main and this PC's lanes, each labeled, with a key to their colors: free, working, stuck, holding a finished branch until it's tested and merged, and not open (Lync isn't serving it). Clicking Lanes says how many this PC runs and opens them (the onboarding's lanes screen); a PC with no row in PROJECT.md "Workstations" yet shows Set up there.
 
 **Your agent.** Rocco isn't tied to one coding agent: Settings picks Claude Code, Codex or Gemini CLI for this PC (the first one installed until you pick). Rocco names it wherever it asks for something ("Ask Codex…"), checks it and its Studio MCP registration in Connections, and opens it for onboarding. The choice is kept in `%APPDATA%\Rocco\settings.json`. Another agent is a row in `server/agents.ps1`: how it starts with a prompt, and where it keeps MCP servers.
 
@@ -85,7 +87,9 @@ _tools\rocco\
     core.ps1             the RoDev folder, the open project, Rocco's version, small helpers
     agents.ps1           the coding agents Rocco can open, this PC's choice, opening one in its own window
     tasks.ps1            Workboard tasks on disk
-    projects.ps1         projects, lanes, Main, the user, new projects
+    projects.ps1         projects, lanes, Main, the user, new projects, background jobs
+    conductor.ps1        whether a conductor is running for a project, and opening one
+    lanes.ps1            how many lanes this PC runs, recording it, and opening them: places, checkouts, Lync, Studio
     connections.ps1      project links, this PC's tools, and Rocco's own updates
     history.ps1          main's commits, open branches, each lane's reflog
     docs.ps1             the repo's Markdown, one doc, saving and pushing the user's edit
@@ -135,12 +139,14 @@ The agent keeps the Workboard current with `rocco.ps1`. Run from a project's `re
 | `show T-012` | One task in full |
 | `new -Title "..." [-Type bug] [-Plan T-020] [-After T-011]` | Add a task to Up next. `-Plan`: part of that feature. `-After`: it needs those done first, so the user can't drag it ahead of them |
 | `suggest -Title "..." [-Summary "why"]` | Put something the agent spotted in the inbox |
-| `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",...` | A feature plan for the user to approve or change. When they ask for changes, `set T-020 -Summary "..." -Steps ...` revises it, then `clear` |
+| `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",...` | A feature plan for the user to approve or change. When they ask for changes, `set T-020 -Summary "..." -Steps ...` revises it, then `clear`. `-Approved`: the user already said go (the template's SETUP.md prototype), so it starts at once |
 | `ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]` | Ask the user; more `ask`s while it's stuck add questions. `-Audio` files (one per option, in order) get play buttons |
 | `reply T-012 -Text "..."` | Answer a question the user asked from the note box (`list` marks them QUESTION). It shows under the note box until they click Got it, or Ask more, which sends it back |
 | `set T-012 -Status working -Lane 3 -Step "..." [-Progress 40]` | Where a task stands. A worker's `log` lines show live on its card |
 | `log T-012 -Text "..." [-Who worker]` | Add to a task's history |
 | `clear T-012` | What the user asked of it (a plan, answer, reopen, merge, follow-ups) is handled |
+| `wait [-Timeout 540]` | The conductor between jobs: returns as soon as something waits on it, listed as `list -Pending` lists it, or after `-Timeout` seconds. Rocco shows the conductor listening meanwhile, and opens no other. Claude Code runs it as a background command and is woken when it returns; an agent without background commands runs it with `-Timeout`, again and again |
+| `lanes [-Count 3]` | Open this PC's lanes: any missing lane (the game's `tools\add-lane.ps1`), any missing place (a plain baseplate with its `__lync_port` set), Lync for each checkout not served yet, and each place in Studio not open yet. `-Count` records this PC's row in PROJECT.md "Workstations" first, committed and pushed |
 
 ## API
 
@@ -153,11 +159,12 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /api/agent` | This PC's agent (`{ id, name, short, installed, chosen }`) and every agent Rocco knows, installed or not |
 | `GET /api/accounts[?refresh=1]` | The user's own accounts on this PC: each agent (`state`: ok, signin, expired or missing; its plan, install and sign-in actions), Codex for images, GitHub, and whether ElevenLabs and Roblox are linked. Kept for 15 seconds |
 | `GET /api/onboarding/survey` | The onboarding survey, from the template (for a game that doesn't exist yet) |
+| `GET /api/lanes[?p=]` | This PC (`{ pc, memory, threads, cpu }`), the lanes to suggest and the most to offer, and with `p`, this PC's row for that project (`mine`, `null` without one) |
 | `GET /api/onboarding?p=` | The project's survey, and the answers in its `docs/game/ONBOARDING.md` (`{ flow, source, started, answers }`) |
 | `GET /api/updates?p=[&refresh=1]` | The calendar's cards (each with its game page event as Roblox has it, and card images to pick), the lead, and the game page's events. Queues due events first. Roblox is asked in the background: `roblox.loading` until it answers |
 | `GET /api/thumbnails?p=[&refresh=1]` | The game page's thumbnails and their numbers, hints, directions, concepts, and the concepts being made |
 | `GET /files/art/<thumbnails or events>/<folder>/<file>?p=` | A concept or a card image, from `..\art\generated` |
-| `GET /api/state?p=` | The project's tasks, lanes (how many, which are open) and Main's last change |
+| `GET /api/state?p=` | The project's tasks, lanes (how many, which are open, this PC's row, lane jobs running), the conductor (`listening`, `busy` or `none`) and Main's last change |
 | `GET /api/connections?p=[&refresh=1]` | Project links and this PC's tools; the PC part is re-checked in the background |
 | `GET /api/history?p=` | Main's last 40 commits, branches other than main, and each lane's state and recent reflog |
 | `GET /api/docs?p=` | Every Markdown file in the repo: title, preview, sections, last change, uncommitted or not, template-owned or not |
@@ -166,7 +173,9 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /files/<task>/<file>?p=` | A screenshot or a sound option |
 | `GET /api/jobs/<id>` | A new project's progress |
 | `GET /api/actions/runs/<run>` | An update running in its own window: `{ running, ok, label }` |
-| `POST /api/note?p=` | Add the user's note (`{ text, type }`) to Up next, for the conductor to plan; returns its id |
+| `POST /api/note?p=` | Add the user's note (`{ text, type }`) to Up next, for the conductor to plan; returns its id, and `opened`: the agent opened as the conductor when none was running. Task actions and `/api/send` return `opened` too |
+| `POST /api/lanes?p=` | `{ count }` records this PC's lanes in PROJECT.md (committed and pushed), then opens them in the background; without it, the lanes it has are opened. Returns `{ job, saved }` |
+| `POST /api/conductor?p=` | Open the user's agent as the conductor, on what's waiting, when none is running. Returns `{ agent }` |
 | `POST /api/tasks/<id>/shot?p=` | Attach a screenshot (the image as the body) |
 | `POST /api/tasks/<id>/<action>?p=` | What the user does to a task: approve, reopen, answer, queue (an inbox item), remove, followup, undo (the last approve, queue or remove), approve-plan, revise (a plan). `{ text }` for reopen, answer, followup and revise |
 | `POST /api/order?p=` | Up next in a new order (`{ ids }`); refused if a task would go before one it waits on |
@@ -180,7 +189,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/projects/new` | Start a new project: `{ name, code, repo }`, plus `existing: { kind, from }` for a game already made (`github`, `folder` or `place` with where it is, or `studio`). Returns a job for `/api/jobs/<id>` |
 | `POST /api/agent` | Pick this PC's agent (`{ id }`) |
 | `POST /api/onboarding/answers?p=` | Save answers (`{ flow, source, answers }`; an empty answer clears one) into `docs/game/ONBOARDING.md`: committed as the user, only that file, and pushed when it can be. Returns `{ committed, pushed, note }` |
-| `POST /api/onboarding/setup?p=` | Hand the answers to the agent (`{ part: new, existing or more, tiles }`): a Workboard card, and the agent opened in its own window when it's installed. Returns `{ task, opened, agent, prompt }` |
+| `POST /api/onboarding/setup?p=` | Hand the answers to the agent (`{ part: new, existing or more, tiles }`): a Workboard card that approves itself when it's ready, and the agent opened in its own window as the conductor when it's installed and none is running. Returns `{ task, opened, running, agent, prompt }` |
 | `POST /api/updates/<action>?p=` | A card: `save` (`{ id, title, date, time, kind, notes, announce }`; no id for a new one), `remove` (`{ id }`), `queue` its game page event now (`{ id }`), `image`: the user's pick of its card image (`{ id, image }`). `lead` (`{ days }`, 0 for never) and `publish` a draft event (`{ eventId }`, with the Roblox key). Card changes are committed as the user and pushed |
 | `POST /api/thumbnails/<action>?p=` | `generate` concepts from a direction with Codex (`{ direction, count }`), `use` a concept (`{ file }`: a task for the agent), `directions`: ask the agent for new ones |
 | `POST /api/links/roblox?p=` | Link the Roblox Open Cloud key (`{ key }`): checked on the game's events when it has a universe id, then kept as `ROBLOX_API_KEY` in the user's environment. `/api/links/roblox/remove` unlinks it |

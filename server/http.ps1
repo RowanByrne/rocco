@@ -54,6 +54,12 @@ function Invoke-Request($ctx) {
 	if ($get -and $path -eq '/api/accounts') { Send-Json $ctx (Get-Accounts ($req.QueryString['refresh'] -eq '1')); return }
 	# The onboarding survey for a game that doesn't exist yet: the template's.
 	if ($get -and $path -eq '/api/onboarding/survey') { Send-Json $ctx (Get-Survey); return }
+	# This PC's memory and threads, and how many lanes to suggest (lanes.ps1): for a game being made too, so ?p= is optional.
+	if ($get -and $path -eq '/api/lanes') {
+		$named = $req.QueryString['p']
+		if ($named) { Use-Project (Find-Project $named).path }
+		Send-Json $ctx (Get-LaneAdvice ([bool]$named)); return
+	}
 	if ($get -and $path -notmatch '^/(api|files)/') { Send-Static $ctx $path; return }
 
 	# Everything else is about one project, named by ?p=.
@@ -109,6 +115,18 @@ function Invoke-Request($ctx) {
 	if ($path -eq '/api/onboarding/setup') {
 		$body = Read-Json $req
 		try { Send-Json $ctx (Start-Setup ([string]$body.part) @($body.tiles | Where-Object { $_ })) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	# This PC's lanes (lanes.ps1): { count } records how many it opens, then they're opened in the background.
+	if ($path -eq '/api/lanes') {
+		$count = (Read-Json $req).count
+		try { Send-Json $ctx (Start-OpenLanes $(if ($null -ne $count) { [int]$count } else { $null })) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	# The user's agent as this project's conductor, when none is running (conductor.ps1).
+	if ($path -eq '/api/conductor') {
+		if ((Get-Conductor).state -ne 'none') { Send-Json $ctx @{ agent = ''; running = $true }; return }
+		try { Send-Json $ctx @{ agent = (Request-Conductor) } } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
 	# Updates (updates.ps1): the user's cards on the game's calendar, and their game page events.
@@ -171,7 +189,8 @@ function Invoke-Request($ctx) {
 		$t = New-Task $title $text 'queued' $(if ($question) { 'question' } else { 'note' }) $type
 		Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
 		Save-Task $t
-		Send-Json $ctx @{ id = $t.id }; return
+		# opened: the agent Rocco opened as the conductor, because none was running.
+		Send-Json $ctx @{ id = $t.id; opened = (Request-Conductor) }; return
 	}
 	# The user's own edit to a doc: committed on main and pushed. { conflict } if it changed since the user opened it.
 	if ($path -eq '/api/docs/save') {
@@ -179,7 +198,7 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Save-Doc ([string]$body.path) ([string]$body.text) ([string]$body.base) ([string]$body.message) $project.template) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
-	if ($path -eq '/api/send') { Send-Json $ctx @{ sent = (Send-Inbox) }; return }
+	if ($path -eq '/api/send') { $sent = Send-Inbox; Send-Json $ctx @{ sent = $sent; opened = $(if ($sent) { Request-Conductor } else { '' }) }; return }
 	if ($path -eq '/api/order') {
 		$ids = @((Read-Json $req).ids | Where-Object { "$_" -match '^T-\d+$' })
 		Set-QueueOrder $ids
@@ -203,7 +222,8 @@ function Invoke-Request($ctx) {
 	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise)$') {
 		$id, $action = $Matches[1], $Matches[2]
 		Invoke-TaskAction $id $action ([string](Read-Json $req).text)
-		Send-Json $ctx @{ ok = $true }; return
+		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved).
+		Send-Json $ctx @{ ok = $true; opened = $(if ((Read-Task $id).pending) { Request-Conductor } else { '' }) }; return
 	}
 	Send-Text $ctx 404 'Not found'
 }

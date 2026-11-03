@@ -39,7 +39,7 @@ function apply(s) {
   if (state.rocco && s.rocco && s.rocco !== state.rocco) emit('rocco-updated', s.rocco);
   state.rocco = s.rocco || state.rocco;
   const before = new Map(state.tasks.map(t => [t.id, t.status]));
-  state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, main: s.main || {} };
+  state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, conductor: s.conductor || { state: 'none' }, main: s.main || {} };
   state.tasks = (s.tasks || []).map(t => ({
     ...t,
     options: t.options || [],

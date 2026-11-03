@@ -97,8 +97,9 @@ function Save-Answers([string]$flow, [string]$source, $posted) {
 	$result
 }
 
-# Hands the answers to the user's agent: a Workboard card, and the agent opened on SETUP.md in its own window. Without an
-# agent installed, the card waits in Up next for the conductor, and the prompt comes back for copying.
+# Hands the answers to the user's agent: a Workboard card that needs no review (it approves itself when it's ready), and
+# the agent opened on SETUP.md in its own window, as the project's conductor. A conductor already running gets the card
+# instead. Without an agent installed, the card waits in Up next, and the prompt comes back for copying.
 function Start-Setup([string]$part, [string[]]$tiles) {
 	$parts = @{ new = 'New game'; existing = 'Existing game'; more = 'More detail' }
 	if (-not $parts.Contains($part)) { throw "Not a setup part: '$part'." }
@@ -115,11 +116,13 @@ function Start-Setup([string]$part, [string[]]$tiles) {
 	}
 	$prompt = "Follow $brief, $which. The answers are in docs/game/ONBOARDING.md."
 	$t = New-Task $title $prompt 'queued' 'task'
+	Set-Field $t 'auto' $true
 	$prompt = "Follow $brief, $which, for Workboard task $($t.id). The answers are in docs/game/ONBOARDING.md."
 	$agent = Get-Agent
 	$opened = $false
-	if ($agent.installed) {
-		try { Start-AgentWindow $RepoDir $prompt "$($agent.name) on $(Split-Path $Root -Leaf)" | Out-Null; $opened = $true } catch { }
+	$running = (Get-Conductor).state -ne 'none'
+	if ($agent.installed -and -not $running) {
+		try { Open-Conductor "$prompt $WatchBoard" | Out-Null; $opened = $true } catch { }
 	}
 	if ($opened) {
 		Set-Status $t 'working'
@@ -129,5 +132,5 @@ function Start-Setup([string]$part, [string[]]$tiles) {
 		Send-ToConductor $t 'plan'
 	}
 	Save-Task $t
-	[pscustomobject]@{ task = $t.id; opened = $opened; agent = $agent.name; prompt = $prompt }
+	[pscustomobject]@{ task = $t.id; opened = $opened; running = $running; agent = $agent.name; prompt = $prompt }
 }

@@ -65,11 +65,13 @@ async function addNote() {
   renderComposerTools();
   grow();
   try {
-    const { id } = await api.note(note, noteType);
+    const { id, opened } = await api.note(note, noteType);
     for (const d of shots) await api.shot(id, d.file);
     await refresh();
     emit('note-sent', noteType);
-    toast(noteType === 'question' ? 'Asked. The answer shows here.' : 'Added to Up next', noteType === 'question' ? 'var(--claude)' : 'var(--violet)');
+    // opened: no conductor was running, so Rocco opened the user's agent to pick it up.
+    toast((noteType === 'question' ? 'Asked. The answer shows here.' : 'Added to Up next') + (opened ? ` ${opened} opened in its own window to pick it up.` : ''),
+      noteType === 'question' || opened ? 'var(--claude)' : 'var(--violet)');
   } catch (e) {
     // Put it all back so nothing is lost.
     text().value = note;

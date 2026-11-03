@@ -17,6 +17,11 @@ function Add-Log($t, [string]$who, [string]$text) {
 }
 
 function Set-Status($t, [string]$status) {
+	# A card that needs no review (onboarding's setup) is done as soon as it's ready.
+	if ($status -eq 'ready' -and $t.PSObject.Properties['auto'] -and $t.auto) {
+		$status = 'done'
+		if ($t.status -ne 'done') { Add-Log $t 'conductor' 'Done. It needs no review, so it approved itself.' }
+	}
 	if ($t.status -ne $status) {
 		if ($status -eq 'working') { Set-Field $t 'startedAt' (Now) }
 		if ($status -eq 'done') { Set-Field $t 'doneAt' (Now) }

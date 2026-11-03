@@ -54,6 +54,9 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; }
 .side-foot { margin-top: auto; display: grid; gap: 12px; padding: 12px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--stroke); }
 .stat { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-3); }
 .stat b { font-weight: 500; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+#laneStat[title]:not([title=""]) { cursor: pointer; }
+#laneStat[title]:not([title=""]):hover b { color: var(--text); }
+#laneStat.unset b { color: var(--accent-text); }
 .live { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .live.idle { background: var(--gray); box-shadow: none; }
 .live.off { background: var(--red); box-shadow: 0 0 8px var(--red); }

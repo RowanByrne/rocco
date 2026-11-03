@@ -75,7 +75,8 @@ function Get-Lanes {
 	$mine = Get-WorkstationLanes
 	$folders = @(Get-ChildItem (Join-Path $Root 'lanes') -Directory -Filter 'lane*' -ErrorAction SilentlyContinue).Count
 	$count = if ($null -ne $mine) { [Math]::Max($mine, $highest) } elseif ($highest) { $highest } else { $folders }
-	[pscustomobject]@{ count = $count; open = $served; main = [bool]($base -and $listening.Contains($base)) }
+	# mine: this PC's row, $null when it has none yet (lanes.ps1 asks how many).
+	[pscustomobject]@{ count = $count; open = $served; main = [bool]($base -and $listening.Contains($base)); mine = $mine; jobs = @(Get-LaneJobs) }
 }
 
 $script:MainCache = @{}
@@ -98,6 +99,7 @@ function Get-State([string]$projectId) {
 		rocco = $RoccoVersion # the app reloads when this changes: Rocco updated itself
 		project = [pscustomobject]@{ id = $p.id; name = $p.name; phase = $p.phase; template = $p.template }
 		lanes = Get-Lanes
+		conductor = Get-Conductor
 		main = Get-Main
 		tasks = @(Get-Tasks | Where-Object { $_.status -ne 'removed' -and ($_.status -ne 'done' -or -not $_.doneAt -or [datetime]$_.doneAt -gt $cutoff) })
 	}
@@ -141,14 +143,20 @@ function Start-NewProject([string]$name, [string]$code, [string]$repo, [string]$
 	}
 	$newProject = Join-Path $RoDev 'template\repo\tools\new-project.ps1'
 	if (-not (Test-Path $newProject)) { throw "There's no template in $RoDev to copy." }
-	$jobId = [guid]::NewGuid().ToString('N').Substring(0, 8)
-	$log = Join-Path ([IO.Path]::GetTempPath()) "rocco-new-$jobId.log"
-	$arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$newProject`"", '-Name', $name, '-Code', $code)
+	$arguments = @('-Name', $name, '-Code', $code)
 	if ($repo) { $arguments += '-GitHubRepo', $repo }
 	if ($kind -eq 'studio') { $arguments += '-StudioOnly' } elseif ($kind) { $arguments += '-Existing', "`"$from`"" }
-	$process = Start-Process powershell -ArgumentList $arguments -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Hidden -PassThru
+	Start-ScriptJob 'new' $newProject $arguments $name
+}
+
+# A script run hidden in the background, its output kept for Get-JobStatus. Returns the job's id.
+function Start-ScriptJob([string]$kind, [string]$script, [string[]]$arguments, [string]$name) {
+	$jobId = [guid]::NewGuid().ToString('N').Substring(0, 8)
+	$log = Join-Path ([IO.Path]::GetTempPath()) "rocco-$kind-$jobId.log"
+	$all = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"") + $arguments
+	$process = Start-Process powershell -ArgumentList $all -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Hidden -PassThru
 	$null = $process.Handle # without holding the handle, ExitCode reads as empty once it exits
-	$script:Jobs[$jobId] = @{ Process = $process; Log = $log; Name = $name }
+	$script:Jobs[$jobId] = @{ Process = $process; Log = $log; Name = $name; Kind = $kind }
 	$jobId
 }
 

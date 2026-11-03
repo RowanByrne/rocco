@@ -35,10 +35,10 @@ const PROJECTS = [
 
 function seed(id) {
   const base = { attempt: 1, where: 'main', options: [], shots: [], log: [], pending: '' };
-  if (id !== 'sample-game') return { id, tasks: [], lanes: { count: 4, open: [], main: false }, main: { at: ago(600), subject: 'Start from the template' } };
+  if (id !== 'sample-game') return { id, tasks: [], lanes: { count: 0, open: [], main: false, mine: null }, conductor: { state: 'none' }, main: { at: ago(600), subject: 'Start from the template' } };
   return {
     id,
-    lanes: { count: 8, open: [1, 2, 3, 4, 5, 6, 7], main: true },
+    lanes: { count: 8, open: [1, 2, 3, 4, 5, 6, 7], main: true, mine: 8 },
     main: { at: ago(4), subject: 'Merge agent/daily-reward' },
     tasks: [
       { ...base, id: 'T-038', status: 'ready', type: 'bug', lane: 2, attempt: 2, title: 'Daily reward claimable twice after rejoin', shots: [picture(200)],
@@ -127,7 +127,7 @@ export async function projects() { return { home: 'sample-game', projects: PROJE
 
 export async function snapshot() {
   const d = current();
-  return JSON.stringify({ project: PROJECTS.find(p => p.id === state.project), lanes: d.lanes, main: d.main, tasks: d.tasks.filter(t => t.status !== 'removed') });
+  return JSON.stringify({ project: PROJECTS.find(p => p.id === state.project), lanes: d.lanes, conductor: d.conductor || { state: 'listening', agent: 'Claude Code' }, main: d.main, tasks: d.tasks.filter(t => t.status !== 'removed') });
 }
 
 export async function me() {
@@ -380,8 +380,21 @@ export async function newProject({ name }) {
   jobs[id] = { until: Date.now() + 4000, name };
   return { job: id };
 }
+export async function laneAdvice() { return { pc: 'THIS-PC', memory: 32, threads: 16, cpu: 'Sample 8-Core Processor', perLane: 3, suggested: 7, most: 7, mine: null }; }
+export async function openLanes(project, count) {
+  const d = (data[project || state.project] ??= seed(project || state.project));
+  const id = `lanes${Object.keys(jobs).length}`;
+  if (count !== null) d.lanes = { ...d.lanes, count, mine: count };
+  jobs[id] = { until: Date.now() + 3000, name: project, lanes: d, count: d.lanes.count };
+  return { job: id, saved: { committed: true, pushed: true, note: '' } };
+}
+export async function openConductor() { const a = await agent(); return { agent: a.name }; }
 export async function job(id) {
   const j = jobs[id], running = Date.now() < j.until;
+  if (j.lanes) {
+    if (!running) j.lanes.lanes = { ...j.lanes.lanes, main: true, open: Array.from({ length: j.count }, (_, i) => i + 1) };
+    return { running, ok: !running, project: j.name, output: running ? 'Lane 1: making its checkout' : `Open: Main and ${j.count} lanes.` };
+  }
   if (!running && !PROJECTS.some(p => p.id === j.name)) PROJECTS.push({ id: j.name, name: j.name, phase: 'Pitch' });
   return { running, ok: !running, project: j.name, output: running ? 'Copying the template ...' : `${j.name} is ready.` };
 }

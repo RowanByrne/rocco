@@ -58,6 +58,12 @@ export const api = {
   startSetup: (project, part, tiles) => DEMO ? demo.startSetup(project, part, tiles) : post(`/api/onboarding/setup?p=${encodeURIComponent(project)}`, { part, tiles }),
   // { name, code, repo, existing: { kind, from } }: a new game, or one brought in. Returns { job }.
   newProject: details => DEMO ? demo.newProject(details) : post('/api/projects/new', details),
+  // This PC's lanes (server/lanes.ps1): its memory and threads with a suggested number, and opening them in the
+  // background ({ job }). A count records this PC's number first; without one, the lanes it has are opened.
+  laneAdvice: project => DEMO ? demo.laneAdvice() : getJson(project ? `/api/lanes?p=${encodeURIComponent(project)}` : '/api/lanes'),
+  openLanes: (project, count = null) => DEMO ? demo.openLanes(project, count) : post(`/api/lanes?p=${encodeURIComponent(project || state.project)}`, { count }),
+  // The user's agent as this project's conductor, when none is running (server/conductor.ps1): { agent }.
+  openConductor: () => DEMO ? demo.openConductor() : post(withProject('/api/conductor')),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
   // Updates: the calendar's cards (live/CALENDAR.md) and the game page's events.

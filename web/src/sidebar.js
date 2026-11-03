@@ -8,7 +8,7 @@ import { api, DEMO } from './api.js';
 import { openMenu, closeMenus } from './ui/menu.js';
 import { sortable } from './ui/sortable.js';
 import { switchProject } from './projects.js';
-import { openOnboarding } from './dialogs/onboarding.js';
+import { openOnboarding, openLanesDialog } from './dialogs/onboarding.js';
 import { go } from './router.js';
 
 // A lane is busy while a worker is in it, or while it holds a branch: stuck, or a feature waiting for the user or the conductor.
@@ -39,8 +39,15 @@ export function renderSidebar() {
     const n = i + 1, [cls, tip] = laneState(n), isOpen = open.has(n);
     return { n, cls: cls + (isOpen ? '' : ' closed'), tip: tip + (isOpen ? '' : ' · not open'), busy: !!cls };
   });
-  $('#laneStat').hidden = $('#laneKey').hidden = !lanes.count;
-  $('#laneCount').textContent = `${[...open].filter(n => n <= lanes.count).length} open · ${bars.filter(b => b.busy).length} busy`;
+  // Lanes opens the lanes screen (onboarding.js): how many this PC runs, and opening them. A PC with none yet is asked.
+  const game = !currentProject().template && state.online;
+  $('#laneStat').hidden = !lanes.count && !game;
+  $('#laneKey').hidden = !lanes.count;
+  $('#laneStat').classList.toggle('unset', game && lanes.mine == null && !lanes.jobs?.length);
+  $('#laneStat').title = game ? 'How many lanes this PC runs, and opening them' : '';
+  $('#laneCount').textContent = lanes.jobs?.length ? 'Opening…'
+    : game && lanes.mine == null ? 'Set up'
+    : `${[...open].filter(n => n <= lanes.count).length} open · ${bars.filter(b => b.busy).length} busy`;
   $('#lanes').style.gridTemplateColumns = `repeat(${Math.min(lanes.count, 8) || 1}, 1fr)`;
   $('#lanes').innerHTML = bars.map(b => `<span class="ln ${b.cls}" title="${esc(b.tip)}">L${b.n}</span>`).join('');
 }
@@ -165,4 +172,6 @@ export function initSidebar() {
     const target = e.target.closest('[data-goto]');
     if (target) { closeMenus(); go(target.dataset.goto); }
   });
+
+  $('#laneStat').addEventListener('click', () => { if (!currentProject().template && !state.meta.lanes.jobs?.length) openLanesDialog(); });
 }
