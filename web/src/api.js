@@ -46,6 +46,8 @@ export const api = {
   // Rocco moves to a newer release and restarts; the page reloads when the new version answers.
   updateRocco: tag => DEMO ? demo.updateRocco(tag) : post(withProject('/api/rocco/update'), { tag }),
   send: () =>DEMO ? demo.send() : post(withProject('/api/send')),
+  // Stop Rocco, and the Lync servers it runs with no windows (Settings).
+  quit: () => DEMO ? Promise.resolve({ ok: true }) : post('/api/rocco/quit?p=' + encodeURIComponent(state.project)),
   // This PC's coding agent (server/agents.ps1).
   agent: () => DEMO ? demo.agent() : getJson('/api/agent'),
   setAgent: id => DEMO ? demo.setAgent(id) : post(withProject('/api/agent'), { id }),

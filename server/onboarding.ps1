@@ -98,7 +98,7 @@ function Save-Answers([string]$flow, [string]$source, $posted) {
 }
 
 # Hands the answers to the user's agent: a Workboard card that needs no review (it approves itself when it's ready), and
-# the agent opened on SETUP.md in its own window, as the project's conductor. A conductor already running gets the card
+# the agent opened on SETUP.md in its own window (minimized), as the project's conductor. A conductor already running gets the card
 # instead. Without an agent installed, the card waits in Up next, and the prompt comes back for copying.
 function Start-Setup([string]$part, [string[]]$tiles) {
 	$parts = @{ new = 'New game'; existing = 'Existing game'; more = 'More detail' }

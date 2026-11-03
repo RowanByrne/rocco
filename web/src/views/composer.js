@@ -70,7 +70,7 @@ async function addNote() {
     await refresh();
     emit('note-sent', noteType);
     // opened: no conductor was running, so Rocco opened the user's agent to pick it up.
-    toast((noteType === 'question' ? 'Asked. The answer shows here.' : 'Added to Up next') + (opened ? ` ${opened} opened in its own window to pick it up.` : ''),
+    toast((noteType === 'question' ? 'Asked. The answer shows here.' : 'Added to Up next') + (opened ? ` ${opened} started, minimized in your taskbar, to pick it up.` : ''),
       noteType === 'question' || opened ? 'var(--claude)' : 'var(--violet)');
   } catch (e) {
     // Put it all back so nothing is lost.

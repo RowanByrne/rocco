@@ -1,5 +1,6 @@
 # Lanes on this PC (the template's docs/workflow/LANES.md): how many it can run, recording that in PROJECT.md
-# "Workstations", and opening them: the Main place and each lane's place, the lane checkouts, Lync for each, and Studio.
+# "Workstations", and opening them: the Main place and each lane's place, the lane checkouts, Lync for each (with no
+# window: its output goes to <Game>\rocco\lync\), and Studio. Lync stops from Connections, or when Rocco quits.
 
 # ---- How many this PC can run ----
 
@@ -130,6 +131,69 @@ function Find-PlaceFile([string]$name) {
 	Join-Path $Root "places\$name.rbxl"
 }
 
+# A program started with no window, apart from this process, so it outlives a shell an agent runs commands in
+# (Win32_Process.Create). Hidden from the start, so Windows Terminal doesn't pick it up as a tab. Returns its id.
+function Start-Hidden([string]$commandLine, [string]$dir) {
+	$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+	$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $dir; ProcessStartupInformation = $startup }
+	if ($r.ReturnValue -ne 0) { throw "Couldn't start $commandLine (error $($r.ReturnValue))." }
+	[int]$r.ProcessId
+}
+
+function Find-Lync {
+	$lync = Join-Path $ToolsDir 'lync\lync.exe'
+	if (Test-Path $lync) { return $lync }
+	"$((Get-Command lync -ErrorAction SilentlyContinue | Select-Object -First 1).Source)"
+}
+
+# Lync for one checkout, with no window: what it says goes to <Game>\rocco\lync\<name>.log. A lane serves
+# lane.project.json on its own port (.lane-port), as the template's serve.bat does.
+function Start-Lync([string]$dir, [string]$name) {
+	$lync = Find-Lync
+	if (-not $lync) { throw 'Lync isn''t in the RoDev folder''s _tools\lync (WORKSTATION.md).' }
+	$project = 'default.project.json'
+	$portFile = Join-Path $dir '.lane-port'
+	if (Test-Path $portFile) {
+		$json = Get-Content (Join-Path $dir 'default.project.json') -Raw | ConvertFrom-Json
+		$json.port = [int](Get-Content $portFile -Raw).Trim()
+		[IO.File]::WriteAllText((Join-Path $dir 'lane.project.json'), ($json | ConvertTo-Json -Depth 64))
+		$project = 'lane.project.json'
+	}
+	$logs = Join-Path $Root 'rocco\lync'
+	New-Item -ItemType Directory -Force $logs | Out-Null
+	Start-Hidden "cmd.exe /d /c `"`"$lync`" serve $project > `"$(Join-Path $logs "$name.log")`" 2>&1`"" $dir | Out-Null
+}
+
+# Lync for Main and each of this PC's lanes that has a checkout, where it isn't serving yet. Says what it starts.
+function Start-ProjectLync {
+	$base = [int](Get-Content (Join-Path $RepoDir 'default.project.json') -Raw | ConvertFrom-Json).port
+	$count = [int](Get-WorkstationLanes)
+	$listening = Get-ListeningPorts
+	$checkouts = @([pscustomobject]@{ name = 'Main'; log = 'main'; dir = $RepoDir; port = $base })
+	if ($count -gt 0) { foreach ($n in 1..$count) { $checkouts += [pscustomobject]@{ name = "Lane $n"; log = "lane$n"; dir = (Join-Path $Root "lanes\lane$n"); port = $base + $n } } }
+	foreach ($c in $checkouts | Where-Object { (Test-Path $_.dir) -and -not $listening.Contains($_.port) }) {
+		Write-Output "$($c.name): starting Lync on port $($c.port)"
+		Start-Lync $c.dir $c.log
+	}
+}
+
+# Every Lync this RoDev folder's copy runs, or just this project's (listening on its port base and the 19 above it).
+function Get-LyncProcesses([switch]$Project) {
+	$lync = Find-Lync
+	$all = @(Get-Process lync -ErrorAction SilentlyContinue | Where-Object { -not $lync -or $_.Path -eq $lync })
+	if (-not $Project) { return $all }
+	$base = [int](Get-Content (Join-Path $RepoDir 'default.project.json') -Raw | ConvertFrom-Json).port
+	$ids = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -ge $base -and $_.LocalPort -lt $base + 20 } | ForEach-Object { [int]$_.OwningProcess })
+	@($all | Where-Object { $ids -contains $_.Id })
+}
+
+function Stop-Lync([switch]$Project) {
+	$stopped = @(Get-LyncProcesses -Project:$Project)
+	$stopped | Stop-Process -Force -ErrorAction SilentlyContinue
+	$script:ListenCache = $null
+	$stopped.Count
+}
+
 function Test-PlaceOpen([string]$path) {
 	$file = Split-Path $path -Leaf
 	[bool](Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*$file*" })
@@ -168,14 +232,7 @@ function Open-Lanes {
 	}
 
 	# Lync before Studio: its first serve installs the Studio plugin, which Studio loads as it opens.
-	$listening = Get-ListeningPorts
-	foreach ($c in $checkouts) {
-		if ($listening.Contains($c.port)) { continue }
-		$serve = Join-Path $c.dir 'tools\serve.bat'
-		if (-not (Test-Path $serve)) { Write-Output "$($c.name): no tools\serve.bat, so Lync isn't started"; continue }
-		Write-Output "$($c.name): starting Lync on port $($c.port)"
-		Start-Process $serve -WorkingDirectory $c.dir
-	}
+	Start-ProjectLync
 	$plugin = Join-Path $env:LOCALAPPDATA 'Roblox\Plugins\Lync.rbxm'
 	for ($i = 0; $i -lt 30 -and -not (Test-Path $plugin); $i++) { Start-Sleep -Milliseconds 500 }
 
@@ -184,7 +241,7 @@ function Open-Lanes {
 	foreach ($c in $checkouts) {
 		if (Test-PlaceOpen $c.place) { continue }
 		Write-Output "$($c.name): opening $(Split-Path $c.place -Leaf) in Studio"
-		Start-Process $c.place
+		Start-Hidden "cmd.exe /d /c start `"`" `"$($c.place)`"" $Root | Out-Null
 		Start-Sleep -Seconds 2
 	}
 	Write-Output "Open: Main$(if ($count) { " and $count lane$(if ($count -ne 1) { 's' })" }). Studio takes a moment to load each one."

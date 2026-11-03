@@ -154,11 +154,15 @@ function Invoke-ConnectionAction([string]$action, [string]$value) {
 			Update-TemplateTags $true
 			return [pscustomobject]@{ message = 'Template remote added. Checking its releases.' }
 		}
+		# Lync for Main and this PC's lanes, with no windows (lanes.ps1).
 		'lync-start' {
-			$serve = Join-Path $RepoDir 'tools\serve-all.bat'
-			if (-not (Test-Path $serve)) { throw 'This project has no tools\serve-all.bat.' }
-			Start-Process $serve -WorkingDirectory (Split-Path $serve)
-			return [pscustomobject]@{ message = 'Lync is starting, in its own windows.' }
+			$started = @(Start-ProjectLync)
+			$script:ListenCache = $null
+			return [pscustomobject]@{ message = $(if ($started.Count) { "Lync is starting for $($started.Count) place$(if ($started.Count -ne 1) { 's' }), in the background." } else { 'Lync is already serving.' }) }
+		}
+		'lync-stop' {
+			$n = Stop-Lync -Project
+			return [pscustomobject]@{ message = "Lync stopped$(if ($n -ne 1) { " ($n servers)" })." }
 		}
 		'push' {
 			Assert-OnMain

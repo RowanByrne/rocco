@@ -258,7 +258,7 @@ async function openLanesNow() {
     const r = await api.openLanes(ob.project, ob.laneCount);
     busy = false;
     closeOnboarding();
-    toast(`Opening ${lanesText(ob.laneCount)} and the Main place: Lync and Studio start in their own windows${r.saved?.note ? `. ${r.saved.note}` : ''}`, 'var(--cyan)');
+    toast(`Opening ${lanesText(ob.laneCount)} and the Main place: Lync starts in the background, and Studio opens each place${r.saved?.note ? `. ${r.saved.note}` : ''}`, 'var(--cyan)');
   } catch (e) {
     busy = false;
     render();
@@ -302,8 +302,8 @@ function reviewHTML() {
   const agent = state.agent;
   const building = ob.flow === 'new' ? ', then builds the prototype' : '';
   const handoff = !agent?.installed ? `${esc(agentName())} isn't installed on this PC, so the job waits in Up next for whichever agent you open.`
-    : state.accounts && !state.accounts.ready ? `${esc(agent.name)} opens in its own window. It isn't signed in yet, so it asks you to first, then writes the docs from your answers${building}.`
-    : `${esc(agent.name)} opens in its own window, writes the docs from your answers${building}.`;
+    : state.accounts && !state.accounts.ready ? `${esc(agent.name)} starts, minimized in your taskbar. It isn't signed in yet, so it asks you to first, then writes the docs from your answers${building}.`
+    : `${esc(agent.name)} starts, minimized in your taskbar, and writes the docs from your answers${building}.`;
   const lanesRow = ob.flow === 'new' ? `<button class="ob-rev" data-ob="goto-lanes"><small>Lanes</small><span class="q">How many lanes can this PC run?</span>`
     + `<span class="a">${ob.laneCount == null ? 'Not picked' : `${lanesText(ob.laneCount)}, opened with the Main place when you finish`}</span></button>` : '';
   return topHTML('Ready', 1)
@@ -321,7 +321,7 @@ function setupHTML() {
   return `<div class="ob-results">${done(`${esc(currentProjectName())} is set up in the RoDev folder.`)}`
     + done(`Your answers are in <code>docs/game/ONBOARDING.md</code>${saved?.pushed ? ', pushed to GitHub' : ''}.${saved?.note ? ` <span class="ob-note">${esc(saved.note)}</span>` : ''}`)
     + lanesJobHTML()
-    + (s.opened ? done(`${esc(s.agent)} is ${work} in its own window. Follow it on the Workboard (${esc(s.task)}).`)
+    + (s.opened ? done(`${esc(s.agent)} is ${work}, minimized in your taskbar. Follow it on the Workboard (${esc(s.task)}).`)
       : s.running ? done(`${esc(s.task)} is on the Workboard for the ${esc(s.agent)} session that's already running.`)
       : `<div class="ob-result">${icon.alert}<span>${esc(s.task)} is in Up next for your agent. To start it now, give your agent this:</span></div>`
         + `<div class="ob-prompt"><code>${esc(s.prompt)}</code><button class="copy" data-copy="${esc(s.prompt)}">${icon.copy}Copy</button></div>`)
@@ -489,7 +489,7 @@ async function send() {
   try {
     const s = await api.startSetup(ob.project || state.project, 'more', [...ob.unsent]);
     ob.unsent.clear();
-    toast(s.opened ? `${s.agent} is filling them in, in its own window (${s.task})` : `${s.task} is in Up next for your agent`, 'var(--violet)');
+    toast(s.opened ? `${s.agent} is filling them in, minimized in your taskbar (${s.task})` : `${s.task} is in Up next for your agent`, 'var(--violet)');
   } catch (e) { toast(`Couldn't send them: ${e.message}`, 'var(--red)'); }
   busy = false;
   render();

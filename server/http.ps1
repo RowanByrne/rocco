@@ -172,6 +172,11 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Invoke-ConnectionAction $Matches[1] ([string](Read-Json $req).value)) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	# Quit (Settings): Rocco stops once this answer is sent, and the Lync servers it ran with no windows stop now.
+	if ($path -eq '/api/rocco/quit') {
+		$script:Quitting = $true
+		Send-Json $ctx @{ ok = $true; lync = (Stop-Lync) }; return
+	}
 	# Rocco moves to a newer release, then restarts on it once this answer is sent (README.md "Updating").
 	if ($path -eq '/api/rocco/update') {
 		try { Update-Rocco ([string](Read-Json $req).tag) } catch { Send-Text $ctx 400 $_.Exception.Message; return }
@@ -228,7 +233,16 @@ function Invoke-Request($ctx) {
 	Send-Text $ctx 404 'Not found'
 }
 
-# Serves until stopped. Returns $true when it stopped to hand over to an updated Rocco in a new window.
+# How Rocco runs in the background (rocco.ps1 start, and after an update): serve, opening the project unless it's a
+# restart, whose tab is already open.
+function Get-ServeArguments([string]$project, [int]$port, [bool]$restart) {
+	$arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $AppDir 'rocco.ps1')`"", 'serve', '-Port', $port)
+	if ($project) { $arguments += '-Project', "`"$project`"" }
+	$arguments + $(if ($restart) { '-Restart' } else { '-Open' })
+}
+
+# Serves until stopped: Quit (Settings), Ctrl+C when it runs in a window, or an update. Returns $true when it stopped to
+# hand over to an updated Rocco. What it says goes to %APPDATA%\Rocco\rocco.log, since it usually has no window.
 function Start-Rocco {
 	$url = "http://localhost:$Port/"
 	$homeId = Split-Path $HomeProject -Leaf
@@ -248,9 +262,10 @@ function Start-Rocco {
 		}
 	}
 	try { $Host.UI.RawUI.WindowTitle = "Rocco - $url" } catch { }
+	try { Start-Transcript -Path (Join-Path (Split-Path $SettingsFile) 'rocco.log') -Force | Out-Null } catch { }
 	Write-Host "Rocco $RoccoVersion at $url"
 	Write-Host "Projects in $RoDev"
-	Write-Host 'Leave this window open while you use it. Ctrl+C stops it.'
+	Write-Host 'Quit it from Settings in the app (or Ctrl+C, when it runs in a window).'
 	# A restart keeps the tab that's open: it reconnects, and reloads for the new version.
 	if ($Open -and -not $Restart) { Start-Process $here }
 	try {
@@ -263,16 +278,18 @@ function Start-Rocco {
 				try { Send-Text $ctx 500 $_.Exception.Message } catch { }
 			}
 			Use-Project $HomeProject
-			# Updated: the new version starts in its own window and waits for this one to let go of the port.
+			if ($script:Quitting) { Write-Host 'Quit.'; break }
+			# Updated: the new version starts in the background and waits for this one to let go of the port.
 			if ($script:Restarting) {
-				Write-Host 'Updated. Rocco restarts in a new window.'
-				Start-Process (Join-Path $AppDir 'Rocco.bat') -ArgumentList '-Restart', '-Port', $Port, '-Project', "`"$homeId`""
+				Write-Host 'Updated. Rocco restarts in the background.'
+				Start-Process powershell -WindowStyle Hidden -ArgumentList (Get-ServeArguments $homeId $Port $true)
 				break
 			}
 		}
 	} finally {
 		$listener.Close()
 		Get-Job | Remove-Job -Force
+		try { Stop-Transcript | Out-Null } catch { }
 	}
 	[bool]$script:Restarting
 }

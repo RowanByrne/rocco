@@ -79,10 +79,10 @@ function Get-ProjectConnections([bool]$refresh) {
 	$lanes = Get-Lanes
 	if ($lanes.main) {
 		$open = @($lanes.open).Count
-		Conn 'Project' 'Studio sync' 'ok' '' '' "Lync is serving Main$(if ($open) { " and $open lane$(if ($open -ne 1) { 's' })" })." '' ''
+		# Rocco runs Lync with no windows, so stopping it is here (and in Quit).
+		Add-Action (Conn 'Project' 'Studio sync' 'ok' '' '' "Lync is serving Main$(if ($open) { " and $open lane$(if ($open -ne 1) { 's' })" })." '' '') 'run' 'Stop Lync' @{ id = 'lync-stop' }
 	} else {
-		$off = Conn 'Project' 'Studio sync' 'off' '' '' 'Lync isn''t serving, so Studio isn''t syncing.' 'Run tools\serve-all.bat.' ''
-		if (Test-Path (Join-Path $RepoDir 'tools\serve-all.bat')) { Add-Action $off 'run' 'Start Lync' @{ id = 'lync-start' } } else { $off }
+		Add-Action (Conn 'Project' 'Studio sync' 'off' '' '' 'Lync isn''t serving, so Studio isn''t syncing.' 'Run tools\serve-all.bat, or Start Lync here (no windows).' '') 'run' 'Start Lync' @{ id = 'lync-start' }
 	}
 }
 

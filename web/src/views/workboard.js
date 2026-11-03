@@ -192,7 +192,7 @@ function conductorHTML() {
   const c = state.meta.conductor || { state: 'none' }, name = c.agent || agentName();
   const waiting = state.tasks.some(t => t.pending && t.status !== 'removed');
   if (c.state === 'listening') return `<span class="cond on" title="${esc(name)} is watching the Workboard: what you send is picked up at once"><i></i>${esc(name)} is listening</span>`;
-  if (c.state === 'busy') return `<span class="cond busy" title="${esc(name)} is running as the conductor. It picks up what's waiting when it's done with what it's doing"><i></i>${esc(name)} is working</span>`;
+  if (c.state === 'busy') return `<span class="cond busy" title="${esc(name)} is running as the conductor. It picks up what's waiting when it's done with what it's doing. Its window is in your taskbar, if it needs you"><i></i>${esc(name)} is working</span>`;
   return waiting && state.agent?.installed ? `<button class="btn-sm go cond-open" data-open-conductor title="No conductor is running for this game">Start ${esc(name)}</button>`
     : `<span class="cond" title="No conductor is running. Sending a note starts one"><i></i>No conductor</span>`;
 }
@@ -200,11 +200,11 @@ function conductorHTML() {
 const startConductor = () => attempt('start the conductor', async () => {
   const r = await api.openConductor();
   await refresh();
-  if (r.agent) toast(`${r.agent} opened in its own window, as the conductor`, 'var(--claude)');
+  if (r.agent) toast(`${r.agent} started as the conductor, minimized in your taskbar`, 'var(--claude)');
 });
 
 // The server opened a conductor because none was running: say so.
-export function conductorOpened(agent) { if (agent) toast(`${agent} opened in its own window to pick it up`, 'var(--claude)'); }
+export function conductorOpened(agent) { if (agent) toast(`${agent} started, minimized in your taskbar, to pick it up`, 'var(--claude)'); }
 
 export function renderWorkboard() {
   const ready = work('ready').length, stuck = work('stuck').length, asks = work('inbox').length + plansToApprove().length, replies = answered().length;

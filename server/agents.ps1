@@ -55,9 +55,10 @@ function Set-Agent([string]$id) {
 	Get-Agent
 }
 
-# The user's agent, opened in a window of its own in $dir with a first prompt: their session, which they watch and steer.
-# The prompt has no double quotes: they don't survive the npm .cmd wrappers agents are often installed as. Returns the
-# window's process (conductor.ps1 finds the agent in it).
+# The user's agent, opened in a window of its own in $dir with a first prompt: their session, which they can watch and
+# steer. It starts minimized in the taskbar, out of the way: the user follows it in Rocco, and opens the window only when
+# they want to (or the agent asks them something there). The prompt has no double quotes: they don't survive the npm
+# .cmd wrappers agents are often installed as. Returns the window's process (conductor.ps1 finds the agent in it).
 function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title) {
 	$agent = Get-Agent
 	$exe = Find-AgentExe $agent.id
@@ -67,7 +68,7 @@ function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title) {
 	$text = "`$Host.UI.RawUI.WindowTitle = $(& $quote "Rocco: $title")`nSet-Location -LiteralPath $(& $quote $dir)`n" +
 		"& $(& $quote $exe) $(($arguments | ForEach-Object { & $quote $_ }) -join ' ')`n"
 	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
-	Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded -WorkingDirectory $dir -PassThru
+	Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded -WorkingDirectory $dir -WindowStyle Minimized -PassThru
 }
 
 # Whether the chosen agent has the Roblox Studio MCP registered, by the name workers rely on.

@@ -1,4 +1,5 @@
-// Settings: your agent, notifications, the Workboard's Working cards, voice notes, the sidebar, and hotkeys. Kept in this browser.
+// Settings: your agent, quitting Rocco, notifications, the Workboard's Working cards, voice notes, the sidebar, and
+// hotkeys. Kept in this browser.
 import { $, esc } from '../lib/dom.js';
 import { settings, setSetting } from '../settings.js';
 import { ACTIONS, keyFor, comboOf, bind, resetKeys, pause } from '../hotkeys.js';
@@ -9,8 +10,19 @@ import { state } from '../state.js';
 import { chooseAgent } from '../agent.js';
 import { resetNav } from '../sidebar.js';
 import { openAccounts } from '../dialogs/onboarding.js';
+import { api } from '../api.js';
 
 let recording = null; // the action whose new hotkey is being pressed
+let quitArmed = null;  // Quit asks once more for a few seconds: it stops Lync too, mid-task or not
+
+async function quit() {
+  if (!quitArmed) { quitArmed = setTimeout(() => { quitArmed = null; renderSettings(); }, 4000); renderSettings(); return; }
+  clearTimeout(quitArmed);
+  quitArmed = null;
+  renderSettings();
+  try { await api.quit(); toast('Rocco and Lync stopped. Run tools\\rocco.bat to start Rocco again.', 'var(--gray)'); }
+  catch (err) { toast(`Couldn't quit: ${err.message}`, 'var(--red)'); }
+}
 
 const toggle = (key, on) => `<button class="switch" role="switch" aria-checked="${on}" data-setting="${key}"><span></span></button>`;
 const row = (title, sub, control) => `<div class="set-row"><div class="set-text"><div class="set-title">${title}</div><div class="set-sub">${sub}</div></div>${control}</div>`;
@@ -31,7 +43,10 @@ export function renderSettings() {
   const s = settings();
   const permission = 'Notification' in window ? Notification.permission : 'unsupported';
   const blocked = permission === 'denied' ? ' Your browser is blocking them: allow notifications for this site in its settings.' : '';
-  $('#setBody').innerHTML = agentHTML() + `<div class="set-group"><div class="set-head">Notifications</div>`
+  $('#setBody').innerHTML = agentHTML() + `<div class="set-group"><div class="set-head">Rocco<span class="set-note">on this PC</span></div>`
+    + row('Runs in the background', 'Rocco and Lync run with no windows. Quitting stops both, so Studio stops syncing. Run tools\\rocco.bat in any project to start Rocco again.',
+      `<button class="mini" data-quit>${quitArmed ? 'Quit, and stop Lync?' : 'Quit Rocco'}</button>`)
+    + `</div><div class="set-group"><div class="set-head">Notifications</div>`
     + row('Desktop notifications', `A notification when something is ready to test, stuck, or waiting for your OK while Rocco is in the background.${blocked}`, toggle('notifications', s.notifications))
     + `</div><div class="set-group"><div class="set-head">Workboard</div>`
     + row('Live steps on Working cards', 'Show what the worker did last on each Working card. Off: a progress bar only.', toggle('liveSteps', s.liveSteps))
@@ -77,6 +92,7 @@ export function initSettings() {
     const r = e.target.closest('[data-reset-key]');
     if (r) { resetKeys(r.dataset.resetKey); return; }
     if (e.target.closest('[data-accounts]')) { openAccounts(); return; }
+    if (e.target.closest('[data-quit]')) { quit(); return; }
     if (e.target.closest('[data-reset-nav]')) { resetNav(); toast('The sidebar is back in its usual order'); return; }
     if (e.target.closest('[data-reset-keys]')) resetKeys();
   });

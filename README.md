@@ -3,14 +3,14 @@
 Rocco is the web app for making games from this template. One Rocco serves every project in the RoDev folder.
 
 - **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval; the inbox, where things the agent spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options, and the last answer sends them all (with a few seconds to undo; in the task's sheet, Enter sends a typed one); Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed.
-  - **The conductor** is your agent's session that handles the board. Up next says whether one is listening (watching the board with `rocco.ps1 wait`), working, or not running. When you hand something over (a note, an answer, an approved plan) and none is running, Rocco opens your agent in its own window as the conductor, on what's waiting; **Start** does the same for work already waiting.
+  - **The conductor** is your agent's session that handles the board. Up next says whether one is listening (watching the board with `rocco.ps1 wait`), working, or not running. When you hand something over (a note, an answer, an approved plan) and none is running, Rocco opens your agent in its own window (minimized in the taskbar) as the conductor, on what's waiting; **Start** does the same for work already waiting.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it.
 - **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask your agent to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (AGENTS.md "Template-owned files", and `rocco/`) can't be edited here; your agent changes them through the template. **Add game details** opens the onboarding's detail tiles for the open game.
 - **Onboarding:** New project is a short survey, and it opens by itself the first time Rocco runs in a RoDev folder with no games yet. The first choice is a new game, or one already made: on GitHub, in a folder, in a place file, or only in Studio. Then come the name and code, and questions one at a time; every answer is free text and optional. The questions are the template's `tools/onboarding.json`, so they change with the docs they fill. The project is made in the background while you answer (`new-project.ps1`, with `-Existing` for a game already made). A survey left half-way is kept in the browser.
   - **Your accounts** comes first, once per browser. No AI plan comes with RoDev, so it lists what each tool runs on: a coding agent (one is enough), Codex for images, and GitHub, ElevenLabs and the Roblox key for later. It checks each one on this PC, asking the tool itself where it can (`claude auth status`, `codex login status`). Installing or signing in is one click: the tool's own command, in a window of its own. Rocco checks again when you come back. After that, the survey's first screen warns when your agent isn't ready, with a button to it; Settings and Connections open it any time.
   - **Lanes:** a new game then asks how many lanes this PC can run, suggesting a number from its memory and threads (about 3 GB a lane, less the Main place and room for other apps, and no more than one per two threads).
   - **On finishing,** the answers are committed as the game's `docs/game/ONBOARDING.md`, this PC's lanes as its row in PROJECT.md "Workstations", and both pushed. Then the lanes open in the background (`rocco.ps1 lanes`): the Main place and each lane's, in Studio, with Lync serving each.
-  - **Your agent then opens** in a window of its own, as the game's conductor, on the template's `docs/workflow/SETUP.md`: it writes the first docs, then builds the prototype. Its Workboard card needs no review: it approves itself when it's ready. A conductor already running gets the card instead. Without an agent installed, the card waits in Up next, with the prompt to copy.
+  - **Your agent then opens** in a window of its own, minimized, as the game's conductor, on the template's `docs/workflow/SETUP.md`: it writes the first docs, then builds the prototype. Its Workboard card needs no review: it approves itself when it's ready. A conductor already running gets the card instead. Without an agent installed, the card waits in Up next, with the prompt to copy.
   - **Detail tiles** (monetization, economy, progression, and more) add answers then or later, and **Send** hands them to the agent the same way.
 - **Connections:** what the open project needs, not every tool on the PC (Rocco isn't a plugin manager).
   - **Needs attention** lists only what affects this project: its own links and libraries, the vital things below, and a linked account that stopped working. Updates count only for the template, the game's libraries and Rocco; other tools show theirs on their rows. With nothing to do, one line says so.
@@ -18,7 +18,7 @@ Rocco is the web app for making games from this template. One Rocco serves every
   - **Everything**, vital or not, follows by kind, as tiles with the full picture of each: this project, AI, Roblox, Roblox plugins (listed, never flagged), the game's libraries, and developer tools.
 
   The Template row shows which template release the game is on; when a newer one is out, it shows what's new and asks your agent to bring it in (the template's TEMPLATE.md). Rocco's own row does the same for Rocco, and updates it in one click ("Updating"). Every fix is one click, its command still shown in the details for doing it by hand:
-  - **Quick fixes** Rocco does at once: turning on the commit check, adding the template remote, connecting an empty GitHub repo and pushing main, pushing main, starting Lync.
+  - **Quick fixes** Rocco does at once: turning on the commit check, adding the template remote, connecting an empty GitHub repo and pushing main, pushing main, starting and stopping Lync (with no windows).
   - **Updates to this PC's tools** (Claude Code, Codex, Gemini CLI, Git, the GitHub CLI, Lync) run in a window of their own, so you see them and can answer an installer's prompts. Rocco waits for the window, then checks again; a window that failed stays open until you've read it.
   - **Changes to the game** (a library, the template, registering the Studio MCP) are your agent's: their button adds a note to Up next.
   - **A Studio plugin** opens its releases page.
@@ -54,15 +54,17 @@ Rocco only runs from a RoDev folder's `_tools\rocco`: it finds the projects next
 
 ## Run it
 
-Double-click `tools\rocco.bat` in any project (it's in the template, so every game has it). It serves Rocco on <http://localhost:34860/> and opens it on that project; if Rocco is already running, it just opens it. Leave its window open while you use it. `_tools\rocco\Rocco.bat` starts it too, on the template.
+Double-click `tools\rocco.bat` in any project (it's in the template, so every game has it). It serves Rocco on <http://localhost:34860/> and opens it on that project; if Rocco is already running, it just opens it. `_tools\rocco\Rocco.bat` starts it too, on the template.
+
+**No windows to keep open.** Rocco runs in the background (`rocco.ps1 start`), and so does Lync: its servers have no windows, and what each says goes to `<Game>\rocco\lync\<main or laneN>.log`. **Quit Rocco** in Settings stops Rocco and every Lync server, so Studio stops syncing; Connections' Studio sync row stops or starts one project's Lync. What Rocco says goes to `%APPDATA%\Rocco\rocco.log`. Your agent, when Rocco opens it, starts minimized in the taskbar: open it to watch it, or when it asks you something there. Installs and sign-ins still open a window, since they may ask you to type. To run Rocco in a window instead, for debugging: `powershell -File _tools\rocco\rocco.ps1 serve -Open`.
 
 To work on the design without real tasks, open <http://localhost:34860/?demo>: sample data, and nothing is saved.
 
 ## Updating
 
-Connections checks for a newer release (a `v*` tag) every half hour, and **Check now** checks at once. When there is one, Rocco shows it under Needs attention with what's new, and **Update** switches `_tools\rocco` to it and restarts Rocco in a new window; the open tab reloads by itself. It won't update over changes made in `_tools\rocco`.
+Connections checks for a newer release (a `v*` tag) every half hour, and **Check now** checks at once. When there is one, Rocco shows it under Needs attention with what's new, and **Update** switches `_tools\rocco` to it and restarts Rocco in the background; the open tab reloads by itself. It won't update over changes made in `_tools\rocco`.
 
-By hand: close Rocco, then `git -C _tools\rocco fetch --tags` and `git -C _tools\rocco checkout v0.2.0`, and start it again.
+By hand: quit Rocco (Settings), then `git -C _tools\rocco fetch --tags` and `git -C _tools\rocco checkout v0.2.0`, and start it again.
 
 ## Releasing
 
@@ -146,7 +148,7 @@ The agent keeps the Workboard current with `rocco.ps1`. Run from a project's `re
 | `log T-012 -Text "..." [-Who worker]` | Add to a task's history |
 | `clear T-012` | What the user asked of it (a plan, answer, reopen, merge, follow-ups) is handled |
 | `wait [-Timeout 540]` | The conductor between jobs: returns as soon as something waits on it, listed as `list -Pending` lists it, or after `-Timeout` seconds. Rocco shows the conductor listening meanwhile, and opens no other. Claude Code runs it as a background command and is woken when it returns; an agent without background commands runs it with `-Timeout`, again and again |
-| `lanes [-Count 3]` | Open this PC's lanes: any missing lane (the game's `tools\add-lane.ps1`), any missing place (a plain baseplate with its `__lync_port` set), Lync for each checkout not served yet, and each place in Studio not open yet. `-Count` records this PC's row in PROJECT.md "Workstations" first, committed and pushed |
+| `lanes [-Count 3]` | Open this PC's lanes: any missing lane (the game's `tools\add-lane.ps1`), any missing place (a plain baseplate with its `__lync_port` set), Lync for each checkout not served yet (with no window: its log is in `<Game>occoync`), and each place in Studio not open yet. Run by an agent, all of it outlives the agent's shell. `-Count` records this PC's row in PROJECT.md "Workstations" first, committed and pushed |
 
 ## API
 
@@ -184,6 +186,7 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `POST /api/links/elevenlabs/remove?p=` | Unlink it: removes the key from the user's environment |
 | `POST /api/docs/save?p=` | The user's edit to a doc (`{ path, text, base, message }`): committed on main and pushed. `{ conflict, hash }` instead if the doc's hash isn't `base` any more; refused for template-owned docs in a game |
 | `POST /api/actions/<action>?p=` | A Connections button (`{ value }` for one that needs it, like a GitHub repo address): `{ message }` when it's done, or `{ run, label }` for an update in its own window. Only the actions in `server/actions.ps1` run |
+| `POST /api/rocco/quit?p=` | Stop Rocco once it has answered, and every Lync server from this RoDev folder now. Returns `{ ok, lync }`, how many Lync servers stopped |
 | `POST /api/rocco/update?p=` | Switch to a newer release (`{ tag }`), then restart on it. Refused for a development copy, an older release, or local changes in `_tools\rocco`. `/api/state` and `/api/me` carry the running version as `rocco` |
 | `POST /api/send?p=` | Queue everything in the inbox |
 | `POST /api/projects/new` | Start a new project: `{ name, code, repo }`, plus `existing: { kind, from }` for a game already made (`github`, `folder` or `place` with where it is, or `studio`). Returns a job for `/api/jobs/<id>` |

@@ -3,7 +3,8 @@
 # <Game>\rocco\tasks\T-NNN\. Commands act on the project the current folder is in (a game's repo\ or a lane), or on
 # -Project <folder name>; from a game's repo\, run them as ..\..\_tools\rocco\rocco.ps1.
 #
-#   rocco.ps1 [serve] [-Open] [-Project Game]   serve Rocco on http://localhost:34860/ (opening that project)
+#   rocco.ps1 start [-Project Game]    serve Rocco in the background, with no window (Rocco.bat), and open that project
+#   rocco.ps1 [serve] [-Open] [-Project Game]   serve Rocco on http://localhost:34860/ in this window (opening that project)
 #   rocco.ps1 list [-Pending]          this project's open tasks; -Pending: only what waits on the conductor
 #   rocco.ps1 show T-012               one task in full: note, screenshots, questions, follow-ups, history
 #   rocco.ps1 new -Title "..." [-Type bug] [-Plan T-020] [-After T-011,T-012]   add a task to Up next; prints its id
@@ -20,7 +21,7 @@
 #   rocco.ps1 wait [-Timeout 540]      the conductor watching the board: returns when something waits on it (as list
 #                                      -Pending), or after -Timeout seconds. Rocco shows it listening meanwhile
 #   rocco.ps1 lanes [-Count 3]         open this PC's lanes: makes any missing lane, the Main and lane places, starts
-#                                      Lync for each and opens them in Studio. -Count: record this PC's number first
+#                                      Lync for each (no window) and opens them in Studio. -Count: record this PC's number first
 param(
 	[Parameter(Position = 0)] [string]$Command = 'serve',
 	[Parameter(Position = 1)] [string]$Id,
@@ -74,8 +75,14 @@ function Set-Common($t) {
 }
 
 switch ($Command) {
-	# 3 tells Rocco.bat this Rocco updated itself and carries on in a new window.
+	# 3: this Rocco updated itself, and the new one carries on in the background.
 	'serve' { if (Start-Rocco) { exit 3 } }
+
+	# Rocco.bat: the server in the background with no window, so nothing stays open on the user's screen. Settings
+	# has Quit. Started hidden, so Windows Terminal doesn't pick it up as a tab.
+	'start' {
+		Start-Process powershell -WindowStyle Hidden -ArgumentList (Get-ServeArguments $Project $Port $Restart)
+	}
 
 	'list' {
 		$rows = @(if ($Pending) { Get-PendingTasks } else { Get-Tasks | Where-Object { ($_.status -notin 'done', 'removed') -or $_.pending } })
