@@ -4,8 +4,8 @@
 // change with the docs they fill. A survey in progress is kept in this browser until it's finished.
 // Before the first one, the accounts screen: RoDev runs on the user's own AI plans, so it checks each one on this PC and
 // signs in from there. A new game then asks how many lanes this PC can run: finishing opens them (the Main place and each
-// lane's, in Studio, with Lync syncing each) while the agent writes the docs and goes on to build the prototype. The
-// lanes screen also opens on its own, from the sidebar.
+// lane's, in Studio, with Lync syncing each) while the agent writes the docs and plans the first build, which the user
+// approves on the Workboard before anything is built. The lanes screen also opens on its own, from the sidebar.
 import { state, currentProject } from '../state.js';
 import { $, esc } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
@@ -300,7 +300,7 @@ function reviewHTML() {
   const list = questions();
   const filled = list.filter(q => answered(q.id)).length;
   const agent = state.agent;
-  const building = ob.flow === 'new' ? ', then builds the prototype' : '';
+  const building = ob.flow === 'new' ? ', then plans the first build. The plan waits on the Workboard for your OK before anything is built' : '';
   const handoff = !agent?.installed ? `${esc(agentName())} isn't installed on this PC, so the job waits in Up next for whichever agent you open.`
     : state.accounts && !state.accounts.ready ? `${esc(agent.name)} starts, minimized in your taskbar. It isn't signed in yet, so it asks you to first, then writes the docs from your answers${building}.`
     : `${esc(agent.name)} starts, minimized in your taskbar, and writes the docs from your answers${building}.`;
@@ -310,14 +310,14 @@ function reviewHTML() {
     + `<div class="ob-body"><h2 class="ob-title">Ready to start?</h2><p class="ob-lede">${filled} of ${list.length} answered. ${handoff} Click any answer to change it.</p>`
     + `<div class="ob-review">${list.map((q, i) => `<button class="ob-rev" data-ob="goto:${i}"><small>${esc(q.step)}</small><span class="q">${esc(q.prompt)}</span>`
       + `<span class="a${answered(q.id) ? '' : ' skipped'}">${answered(q.id) ? esc(ob.answers[q.id]) : 'Skipped'}</span></button>`).join('')}${lanesRow}</div>${jobHTML()}</div>`
-    + foot(button('back', 'Back'), button('finish', busy ? '<span class="spin"></span>Starting' : ob.flow === 'new' ? 'Start building' : 'Save and start setup', 'btn accent', busy || ob.job?.state !== 'ready'));
+    + foot(button('back', 'Back'), button('finish', busy ? '<span class="spin"></span>Starting' : ob.flow === 'new' ? 'Start' : 'Save and start setup', 'btn accent', busy || ob.job?.state !== 'ready'));
 }
 
 function setupHTML() {
   const s = ob.setup, saved = ob.saved;
   if (!s) return '';
   const done = text => `<div class="ob-result">${icon.checkSm}<span>${text}</span></div>`;
-  const work = ob.flow === 'new' ? 'writing the docs, then building the prototype' : 'writing the docs';
+  const work = ob.flow === 'new' ? 'writing the docs, then a plan for the first build that you approve on the Workboard' : 'writing the docs';
   return `<div class="ob-results">${done(`${esc(currentProjectName())} is set up in the RoDev folder.`)}`
     + done(`Your answers are in <code>docs/game/ONBOARDING.md</code>${saved?.pushed ? ', pushed to GitHub' : ''}.${saved?.note ? ` <span class="ob-note">${esc(saved.note)}</span>` : ''}`)
     + lanesJobHTML()

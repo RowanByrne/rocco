@@ -9,9 +9,9 @@
 #   rocco.ps1 show T-012               one task in full: note, screenshots, questions, follow-ups, history
 #   rocco.ps1 new -Title "..." [-Type bug] [-Plan T-020] [-After T-011,T-012]   add a task to Up next; prints its id
 #   rocco.ps1 suggest -Title "..." [-Summary "why"]   put something you spotted in the inbox, for the user to queue or dismiss
-#   rocco.ps1 plan -Title "..." -Summary "..." -Steps "Trade window UI|4|standard","Trade service|6|heavy"
-#                                      a feature plan for the user to approve; prints its id. -Approved: the user
-#                                      already said go (the template's SETUP.md prototype), so it starts at once
+#   rocco.ps1 plan -Title "..." -Summary "..." -Steps "Trade window UI|4|standard","Trade service|6|heavy" [-Spec docs/game/features/trading.md]
+#                                      a feature plan for the user to approve; prints its id. -Spec: the feature's spec,
+#                                      which the card links (set -Spec changes it)
 #   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck).
 #                                      Options are a few words each; the detail goes in the question
 #   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
@@ -30,7 +30,7 @@ param(
 	[string]$Step, [string]$Summary, [string]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string]$Waiting,
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
 	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [int]$Port = 34860,
-	[string]$Project, [switch]$Approved, [int]$Timeout = 0, [int]$Count = -1,
+	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
 	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
 $ErrorActionPreference = 'Stop'
@@ -73,6 +73,12 @@ function Set-Common($t) {
 	if ($Plan) { Read-Task $Plan | Out-Null; Set-Field $t 'plan' $Plan }
 	if ($PSBoundParameters.ContainsKey('After') -or $After) { Set-Field $t 'after' @($After | ForEach-Object { $_ -split ',' } | Where-Object { $_ -match '^T-\d+$' }) }
 	if ($Feature) { Set-Field $t 'feature' $true }
+	# A feature's spec, which its plan card links: a doc in the repo.
+	if ($Spec) {
+		$path = $Spec.Replace('\', '/').TrimStart('/')
+		if (-not (Test-Path (Join-Path $RepoDir $path))) { throw "There's no $path in repo\ (-Spec is a path in the repo, like docs/game/features/trading.md)." }
+		Set-Field $t 'spec' $path
+	}
 }
 
 switch ($Command) {
@@ -169,11 +175,11 @@ switch ($Command) {
 	'plan' {
 		if (-not $Title) { throw 'plan needs -Title.' }
 		if (-not $Steps) { throw 'plan needs -Steps "title|lane|tier", one per task.' }
-		$t = New-Task $Title $Title $(if ($Approved) { 'queued' } else { 'inbox' }) 'plan' 'feature'
+		$t = New-Task $Title $Title 'inbox' 'plan' 'feature'
 		Set-Field $t 'feature' $true
 		if ($Summary) { Set-Field $t 'summary' $Summary }
 		Set-Field $t 'steps' (ConvertTo-Steps $Steps)
-		if ($Approved) { Add-Log $t 'conductor' 'Started without waiting: the user already said go.' }
+		Set-Common $t
 		Save-Task $t
 		$t.id
 	}

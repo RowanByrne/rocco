@@ -240,7 +240,8 @@
 .plan-badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 99px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em;
   color: var(--fc); background: color-mix(in srgb, var(--fc) 14%, transparent); }
 .plan-title { margin-top: 8px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
-.plan-sum { margin-top: 3px; font-size: 13px; color: var(--text-2); }
+.plan-sum { margin-top: 3px; font-size: 13px; color: var(--text-2); white-space: pre-line; }
+.plan-actions [data-plan-spec], .s-spec [data-plan-spec] { display: inline-flex; align-items: center; gap: 5px; }
 .plan-steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; }
 .plan-steps li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; background: rgba(255,255,255,.03); font-size: 13px; }
 .ps-n { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--fc);
@@ -283,7 +284,8 @@
 /* A task in the sheet */
 .s-title { margin: 6px 0 4px; font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 1.3; overflow-wrap: anywhere; }
 .s-where { font-size: 12.5px; color: var(--text-3); }
-.s-sum { margin: 16px 0 0; color: var(--text-2); }
+.s-sum { margin: 16px 0 0; color: var(--text-2); white-space: pre-line; }
+.s-spec { margin-top: 10px; }
 .s-try { margin-top: 14px; padding: 11px 13px; border-radius: var(--r); background: rgba(52,211,153,.06); border: 1px solid rgba(52,211,153,.16); }
 .s-try small { display: block; font-size: 11px; font-weight: 600; color: var(--green); margin-bottom: 3px; letter-spacing: .02em; }
 .s-q { margin-top: 16px; font-size: 14.5px; font-weight: 500; }

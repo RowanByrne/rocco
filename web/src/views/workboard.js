@@ -13,6 +13,7 @@ import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
 import { agentShort, agentName } from '../agent.js';
 import { shotOf, imagesIn, shotsHTML, shotClick, clip } from '../ui/shots.js';
+import { showDoc } from './docs.js';
 
 const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
@@ -119,13 +120,17 @@ function columnHTML(status) {
 const stepsHTML = p => `<ol class="plan-steps">${(p.steps || []).map((s, i) => `<li><span class="ps-n">${i + 1}</span><span class="ps-t">${esc(s.title)}</span>`
   + `<span class="ps-meta">${s.lane ? `Lane ${s.lane}` : ''}${s.lane && s.tier ? ' · ' : ''}${esc(s.tier || '')}</span></li>`).join('')}</ol>`;
 
+// A plan's spec (rocco.ps1 plan -Spec): what it builds, in full, opened in Docs.
+const specButton = p => p.spec ? `<span class="sp"></span><button class="btn-sm" data-plan-spec="${esc(p.spec)}" title="${esc(p.spec)}">${icon.doc}Read the spec</button>` : '';
+
 function planCardHTML(p) {
   return `<div class="plan${p.fresh ? ' fresh' : ''}" style="${featureVars(p.id)}" data-id="${p.id}">`
     + `<div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span></div>`
     + `<div class="plan-title">${esc(p.title)}</div>${p.summary ? `<div class="plan-sum">${esc(p.summary)}</div>` : ''}${stepsHTML(p)}`
     + (p.pending === 'revise' ? '<div class="plan-note">Changes asked for · waiting for the conductor</div>' : '')
     + `<div class="plan-actions"><button class="btn-sm go" data-plan-approve="${p.id}">Approve plan</button>`
-    + `<button class="btn-sm" data-plan-reply="${p.id}" data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply="${p.id}" data-mode="followup">Ask</button></div>`
+    + `<button class="btn-sm" data-plan-reply="${p.id}" data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply="${p.id}" data-mode="followup">Ask</button>`
+    + `${specButton(p)}</div>`
     + `<div class="plan-reply" hidden><textarea class="field" placeholder=""></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-plan-send="${p.id}">Send</button></div></div></div>`;
 }
 
@@ -269,6 +274,7 @@ function sheetBody(t) {
   if (t.summary) h += `<p class="s-sum">${esc(t.summary)}</p>`;
   if (isPlan(t)) {
     h += stepsHTML(t);
+    if (t.spec) h += `<div class="row s-spec">${specButton(t).replace('<span class="sp"></span>', '')}</div>`;
     const kids = childrenOf(t);
     if (kids.length) h += `<div class="sec-h">Tasks</div>${kids.map(k => `<div class="s-row" data-id="${k.id}"><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${esc(k.title)}</span><span class="at">${NAMES[k.status] || ''}</span></div>`).join('')}`;
   }
@@ -518,6 +524,7 @@ export function initWorkboard() {
     const hit = selector => e.target.closest(selector);
     const card = hit('[data-id]')?.dataset.id;
     if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
+    else if (hit('[data-plan-spec]')) showDoc(hit('[data-plan-spec]').dataset.planSpec);
     else if (hit('[data-pick]')) pick(card, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-back]')) { answers.set(card, (answers.get(card) || []).slice(0, -1)); renderWorkboard(); }
     else if (hit('[data-approve]')) approve(hit('[data-approve]').dataset.approve);
@@ -584,6 +591,7 @@ export function initWorkboard() {
     const el = e.target, hit = selector => el.closest(selector);
     const id = openSheetKey();
     if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
+    else if (hit('[data-plan-spec]')) { closeSheet(); showDoc(hit('[data-plan-spec]').dataset.planSpec); }
     else if (hit('[data-pick]')) pick(id, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-answer]')) sendAnswers(id, $('#answerText').value.trim());
     else if (hit('[data-approve-open]')) { closeSheet(); setTimeout(() => approve(id), 250); }

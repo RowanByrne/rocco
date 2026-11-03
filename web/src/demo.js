@@ -104,7 +104,8 @@ function seed(id) {
 
       // A feature plan waiting for the user's go-ahead.
       { ...base, id: 'T-056', status: 'inbox', kind: 'plan', type: 'feature', title: 'Pet evolution', note: 'pets should level up and evolve after a while',
-        summary: 'Pets earn XP while equipped and evolve at level 10 and 25, with a new look each time.',
+        summary: 'Pets earn XP while equipped and evolve at level 10 and 25, with a new look each time.\nLeft out: trading evolved pets, and evolving more than twice.\nMy call: XP only while the pet is equipped (proposed).',
+        spec: 'docs/game/features/pet-evolution.md',
         steps: [{ title: 'Pet XP and levels, saved with the pet', lane: 2, tier: 'heavy' }, { title: 'Evolve at 10 and 25, with the new models', lane: 4, tier: 'standard' },
           { title: 'Level bar and evolve effect in the pet menu', lane: 7, tier: 'standard' }],
         log: [{ who: 'conductor', at: ago(3), text: 'Plan ready: three tasks, on a feature branch.' }] },
@@ -476,6 +477,9 @@ function sampleDocs() {
       '| Game | Sample Game |', '| Code | `SG` |', '| Phase | Production |', '| Lanes | 8 |', '', '## Current focus', '', 'Pets that follow you, then trading.'), 1500, 'PROJECT.md: Production phase'),
     'docs/game/PITCH.md': doc(md('# Pitch', '', 'Collect pets on floating islands, raise them, and trade the rare ones. Short sessions, a pet that grows with you, and a reason to come back every day.',
       '', '## Why it can win', '', '- Pet games keep players for months when trading is safe.', '- Every island is a short, clear goal.', '', '## Not doing', '', '- Paid random eggs (PLATFORM-RISKS.md).'), 9000, 'PITCH.md: the pitch'),
+    'docs/game/features/pet-evolution.md': doc(md('# Feature: Pet evolution', '', '**Status:** specced.', '', '## Goal', '', 'Pets grow with you: the longer one is out, the stronger and better-looking it gets.', '',
+      '## How it plays', '', '1. An equipped pet earns XP as you collect.', '2. At level 10 and 25 it evolves, with an effect and a new model.', '', '## Left out', '', '- Trading evolved pets.', '- A third evolution.', '',
+      '## Open questions', '', '- XP only while equipped, or for every pet you own? **Equipped only (proposed).**'), 30, 'Spec: pet evolution'),
     'docs/game/GDD.md': doc(md('# Game design', '', 'The design map: the loop, the systems, and how they feed each other. Each feature has its own spec in `features/`.', '', '## Loop', '',
       'Explore an island, collect coins, hatch pets, upgrade them, unlock the next island.', '', '## Currencies', '', '| Currency | From | Spent on |', '|---|---|---|',
       '| Coins | Collecting, quests | Eggs, upgrades |', '| Gems | Daily reward, events | Cosmetics |', '', '## Systems', '', '- **Pets:** follow you and level up (`docs/game/features/pets.md`).',
