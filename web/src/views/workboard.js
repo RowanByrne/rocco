@@ -326,17 +326,43 @@ function sheetFoot(t) {
     if (t.status === 'ready') return `<div class="row"><button class="btn go" data-got-it="${t.id}">${icon.checkSm}Got it</button></div>`
       + `<textarea class="field" id="followText" placeholder="Ask a follow-up"></textarea><div class="row"><span class="sp"></span><button class="btn" data-ask-more-send>Ask more</button></div>`;
     if (t.status === 'done') return '';
-    return followUpHTML('Add to your question') + '<div class="row"><button class="btn" data-remove>Take it back</button></div>';
+    return followUpHTML('Add to your question');
   }
   if (isPlan(t) && t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-plan-approve="${t.id}">Approve plan</button></div>`
     + `<textarea class="field" id="followText" placeholder="Want changes? Say what, then send"></textarea><div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
   if (t.status === 'ready') return replyHTML() + `<div class="row"><button class="btn go" style="flex:1" data-approve-open>${icon.checkSm}Approve</button></div>`;
   if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
-  if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button><button class="btn" data-remove>Dismiss</button></div>`;
+  if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button></div>`;
   if (t.status === 'working' || isPlan(t)) return followUpHTML('Add something while it works. It picks it up at its next stop.');
-  // A queued task can take a follow-up too; a note the conductor hasn't picked up yet can be taken back.
-  if (t.status === 'queued') return followUpHTML('Add more for when it starts') + (t.pending === 'plan' ? '<div class="row"><button class="btn" data-remove>Remove from Up next</button></div>' : '');
+  if (t.status === 'queued') return followUpHTML('Add more for when it starts');
   return '';
+}
+
+// ---- Deleting a task, from its sheet: a second click confirms, and Undo takes it back for a few seconds ----
+
+// Work a worker is on, or that's done on a branch but not merged: the conductor stops it and drops it.
+const running = t => t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && !!t.branch && (t.status !== 'done' || t.pending === 'merge'));
+
+const deleteHTML = t => `<button class="btn-sm danger" data-delete>${isPlan(t) && childrenOf(t).length ? 'Delete plan' : 'Delete'}</button>`;
+
+function deletedText(t) {
+  if (isPlan(t)) return childrenOf(t).length ? 'Deleted the plan and its tasks' : 'Plan deleted';
+  if (isQuestion(t)) return 'Question deleted';
+  if (running(t)) return 'Deleted. The conductor stops its work.';
+  if (t.status === 'ready' || t.status === 'done') return 'Deleted. What it changed stays in Main.';
+  return 'Deleted';
+}
+
+function deleteTask(id, button) {
+  const t = byId(id);
+  if (!t) return;
+  if (!button.classList.contains('confirm')) {
+    button.classList.add('confirm');
+    button.textContent = running(t) || (isPlan(t) && childrenOf(t).some(running)) ? 'Stop and delete?' : 'Delete it?';
+    return;
+  }
+  closeSheet();
+  attempt('delete it', async () => { await act(id, 'remove'); undoable(id, deletedText(t), 'var(--gray)'); });
 }
 
 async function loadChanges(t) {
@@ -357,7 +383,7 @@ export function openTask(id) {
   const color = isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status];
   const chip = isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status];
   if (reply.id !== id) reply = { id, shots: [] };
-  showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t) });
+  showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: deleteHTML(t) });
   if (t.branch) loadChanges(t);
 }
 
@@ -613,7 +639,7 @@ export function initWorkboard() {
       closeSheet();
       askMore(id, text);
     } else if (hit('[data-queue-open]')) { closeSheet(); queueIt(id); }
-    else if (hit('[data-remove]')) { closeSheet(); dismiss(id); }
+    else if (hit('[data-delete]')) deleteTask(id, hit('[data-delete]'));
     else if (el.matches('.shots img')) el.classList.toggle('big');
     else if (hit('.s-row')) openTask(hit('.s-row').dataset.id);
     else if (hit('.ftag')) { const t = byId(id); if (t?.plan) openTask(t.plan); }

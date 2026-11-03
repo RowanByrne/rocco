@@ -11,13 +11,15 @@ let openKey = null;
 // What's open: a task id, or another key like 'approved'; null when closed.
 export const openSheetKey = () => openKey;
 
-export function showSheet(key, { color, chip, id = '', body, foot = '' }) {
+// tools: buttons in the header, by the close button (a task's Delete).
+export function showSheet(key, { color, chip, id = '', body, foot = '', tools = '' }) {
   hidePopover();
   closeMenus();
   openKey = key;
   sheet.style.setProperty('--c', color);
   $('#sChip').innerHTML = `<span class="chip"><i></i>${esc(chip)}</span>`;
   $('#sId').textContent = id;
+  $('#sTools').innerHTML = tools;
   $('#sBody').innerHTML = body;
   $('#sBody').scrollTop = 0;
   $('#sFoot').innerHTML = foot;

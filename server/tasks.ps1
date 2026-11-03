@@ -4,6 +4,10 @@
 $Statuses = 'inbox', 'queued', 'working', 'stuck', 'ready', 'done', 'removed'
 $Types = 'bug', 'tweak', 'idea', 'feature', 'question'
 $ToConductor = 'Waiting for the conductor'
+# How long the app offers Undo (its toast, and a moment more), and so how long a deleted task's work waits before the
+# conductor hears it should stop.
+$UndoSeconds = 6
+$DeletedText = '{0} was deleted on the Workboard. Stop work on it and report; the conductor cleans up.'
 
 function Set-Field($t, [string]$name, $value) {
 	if ($t.PSObject.Properties[$name]) { $t.$name = $value } else { $t | Add-Member -NotePropertyName $name -NotePropertyValue $value }
@@ -17,6 +21,7 @@ function Add-Log($t, [string]$who, [string]$text) {
 }
 
 function Set-Status($t, [string]$status) {
+	if ($t.status -eq 'removed' -and $status -ne 'removed') { throw ($DeletedText -f $t.id) }
 	# A card that needs no review (onboarding's setup) is done as soon as it's ready.
 	if ($status -eq 'ready' -and $t.PSObject.Properties['auto'] -and $t.auto) {
 		$status = 'done'
@@ -133,6 +138,28 @@ function Restore-Undo($t) {
 	Set-Field $t 'undo' $null
 }
 
+# ---- Deleting a task ----
+
+# Work that's running, or done but not merged yet: a worker on it, a question it waits on, or a branch still to merge.
+function Test-Running($t) {
+	$t.status -in 'working', 'stuck' -or ($t.where -eq 'lane' -and $t.branch -and ($t.status -ne 'done' -or $t.pending -eq 'merge'))
+}
+
+# Deleted on the Workboard. Work that's running or unmerged waits on the conductor to stop and drop it ('cancel'), once
+# Undo has had its chance (rocco.ps1 list -Pending); what's merged stays. $with: the plan it went with.
+function Remove-Task($t, [string]$with = '') {
+	Save-Undo $t
+	$cancel = Test-Running $t
+	Set-Status $t 'removed'
+	Set-Field $t 'pending' $(if ($cancel) { 'cancel' } else { '' })
+	Set-Field $t 'removedWith' $with
+}
+
+# The tasks a plan's deletion takes with it: all but what's done and merged.
+function Get-PlanTasks($plan) {
+	@(Get-Tasks | Where-Object { $_.plan -eq $plan.id -and $_.status -ne 'removed' -and ($_.status -ne 'done' -or $_.pending -eq 'merge') })
+}
+
 # ---- What the user does to a task in the app ----
 
 function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
@@ -163,8 +190,10 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Add-Log $t 'you' 'Queued.'
 		}
 		'remove' {
-			Save-Undo $t
-			Set-Status $t 'removed'
+			Remove-Task $t
+			if ($t.kind -eq 'plan') {
+				foreach ($k in Get-PlanTasks $t) { $k = Read-Task $k.id; Remove-Task $k $t.id; Save-Task $k }
+			}
 		}
 		# More from the user while the task is running; it waits until the worker or conductor reads it (clear).
 		'followup' {
@@ -173,7 +202,15 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Set-Field $t 'followups' ([int]$t.followups + 1)
 			if (-not $t.pending) { Set-Field $t 'pending' 'followup' }
 		}
-		'undo' { Restore-Undo $t }
+		'undo' {
+			Restore-Undo $t
+			# A deleted plan brings back the tasks that went with it.
+			if ($t.kind -eq 'plan') {
+				foreach ($k in Get-Tasks | Where-Object { $_.status -eq 'removed' -and $_.PSObject.Properties['removedWith'] -and $_.removedWith -eq $t.id -and $_.undo }) {
+					$k = Read-Task $k.id; Restore-Undo $k; Set-Field $k 'removedWith' ''; Save-Task $k
+				}
+			}
+		}
 		# A feature plan: approve it, or ask for changes.
 		'approve-plan' {
 			Set-Status $t 'queued'

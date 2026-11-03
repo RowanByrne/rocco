@@ -267,13 +267,21 @@ export async function act(id, action, text) {
       break;
     case 'answer': saveUndo(t); toConductor(t, 'answer'); say(text); break;
     case 'queue': saveUndo(t); toConductor(t, 'plan'); say('Queued.'); break;
-    case 'remove': saveUndo(t); t.status = 'removed'; break;
+    case 'remove': {
+      // As the server does: a plan's unfinished tasks go with it, and running work waits on the conductor (cancel).
+      const running = k => k.status === 'working' || k.status === 'stuck' || (k.where === 'lane' && k.branch && (k.status !== 'done' || k.pending === 'merge'));
+      const drop = (k, with_) => { saveUndo(k); k.pending = running(k) ? 'cancel' : ''; k.status = 'removed'; k.removedWith = with_; };
+      drop(t, '');
+      if (t.kind === 'plan') current().tasks.filter(k => k.plan === t.id && k.status !== 'removed' && (k.status !== 'done' || k.pending === 'merge')).forEach(k => drop(k, t.id));
+      break;
+    }
     case 'followup': if (!text) throw new Error('A follow-up needs some text.'); say(text); t.followups = (t.followups || 0) + 1; t.pending ||= 'followup'; break;
     case 'undo': {
       const u = t.undo;
       if (!u) throw new Error('Nothing to undo.');
-      Object.assign(t, { status: u.status, pending: u.pending, waiting: u.waiting, doneAt: u.doneAt, order: u.order, undo: null });
-      t.log.length = u.logCount;
+      const restore = k => { const v = k.undo; Object.assign(k, { status: v.status, pending: v.pending, waiting: v.waiting, doneAt: v.doneAt, order: v.order, undo: null, removedWith: '' }); k.log.length = v.logCount; };
+      restore(t);
+      if (t.kind === 'plan') current().tasks.filter(k => k.status === 'removed' && k.removedWith === t.id && k.undo).forEach(restore);
       break;
     }
     case 'approve-plan': Object.assign(t, { status: 'queued', pending: 'approved', waiting: 'Waiting for the conductor' }); say('Approved the plan.'); break;

@@ -227,8 +227,10 @@ function Invoke-Request($ctx) {
 	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise)$') {
 		$id, $action = $Matches[1], $Matches[2]
 		Invoke-TaskAction $id $action ([string](Read-Json $req).text)
-		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved).
-		Send-Json $ctx @{ ok = $true; opened = $(if ((Read-Task $id).pending) { Request-Conductor } else { '' }) }; return
+		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved). A deleted task's work
+		# waits for the next conductor instead: with none running, nothing is running it either.
+		$pending = (Read-Task $id).pending
+		Send-Json $ctx @{ ok = $true; opened = $(if ($pending -and $pending -ne 'cancel') { Request-Conductor } else { '' }) }; return
 	}
 	Send-Text $ctx 404 'Not found'
 }

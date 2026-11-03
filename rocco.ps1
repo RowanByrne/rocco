@@ -18,7 +18,7 @@
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
-#   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, follow-ups) is handled
+#   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, cancel, follow-ups) is handled
 #   rocco.ps1 wait [-Timeout 540]      the conductor watching the board: returns when something waits on it (as list
 #                                      -Pending), or after -Timeout seconds. Rocco shows it listening meanwhile
 #   rocco.ps1 lanes [-Count 3]         open this PC's lanes: makes any missing lane, the Main and lane places, starts
@@ -53,8 +53,12 @@ function Format-Tasks($rows) {
 	}
 }
 
-# What waits on the conductor: what the user asked of a task, until it's handled.
-function Get-PendingTasks { @(Get-Tasks | Where-Object { $_.pending -and $_.status -ne 'removed' }) }
+# What waits on the conductor: what the user asked of a task, until it's handled. A deleted task waits only to be stopped
+# (cancel), once the app's Undo has had its chance.
+function Get-PendingTasks {
+	$undoGone = (Get-Date).AddSeconds(-$UndoSeconds)
+	@(Get-Tasks | Where-Object { $_.pending -and ($_.status -ne 'removed' -or ($_.pending -eq 'cancel' -and (-not $_.undo -or [datetime]$_.undo.at -lt $undoGone))) })
+}
 
 # A plan's steps from "title|lane|tier" strings.
 function ConvertTo-Steps([string[]]$steps) {
@@ -198,6 +202,8 @@ switch ($Command) {
 
 	'set' {
 		$t = Read-Task $Id
+		# A worker finds out here (set -Step) that the user deleted its task.
+		if ($t.status -eq 'removed' -and $Status -ne 'removed') { throw ($DeletedText -f $t.id) }
 		if ($Status) {
 			if ($Status -notin $Statuses) { throw "Status must be one of: $($Statuses -join ', ')." }
 			Set-Status $t $Status
