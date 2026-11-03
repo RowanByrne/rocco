@@ -119,7 +119,7 @@ function Add-Question($t, [string]$text, [string[]]$options, [string[]]$audio) {
 	Set-Field $t 'questions' (@($keep) + $question)
 }
 
-# ---- Undo: approve, queue and dismiss can be taken back for a little while ----
+# ---- Undo: approve, answer, queue and dismiss can be taken back for a little while ----
 
 function Save-Undo($t) {
 	Set-Field $t 'undo' ([pscustomobject]@{ status = $t.status; pending = $t.pending; waiting = $t.waiting; doneAt = $t.doneAt; order = $t.order; logCount = @(Get-List $t.log).Count; at = (Now) })
@@ -152,6 +152,7 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Add-Log $t 'you' $(if ($text) { $text } else { 'Not right yet.' })
 		}
 		'answer' {
+			Save-Undo $t
 			Send-ToConductor $t 'answer'
 			Add-Log $t 'you' $text
 		}

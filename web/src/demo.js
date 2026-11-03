@@ -263,7 +263,7 @@ export async function act(id, action, text) {
       say(text || 'Not right yet.');
       if (t.kind === 'question') answerSoon(t);
       break;
-    case 'answer': toConductor(t, 'answer'); say(text); break;
+    case 'answer': saveUndo(t); toConductor(t, 'answer'); say(text); break;
     case 'queue': saveUndo(t); toConductor(t, 'plan'); say('Queued.'); break;
     case 'remove': saveUndo(t); t.status = 'removed'; break;
     case 'followup': if (!text) throw new Error('A follow-up needs some text.'); say(text); t.followups = (t.followups || 0) + 1; t.pending ||= 'followup'; break;

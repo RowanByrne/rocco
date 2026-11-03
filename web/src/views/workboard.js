@@ -66,14 +66,11 @@ const optionHTML = (o, i, picked) => `<span class="opt-wrap"><button class="opt$
 
 // ---- Columns ----
 
-// The stuck card asks its questions one at a time, right on the board.
+// The stuck card asks its questions one at a time, right on the board. The last answer sends them all (pick).
 function questionCardHTML(t) {
   const qs = questionsOf(t), picked = answers.get(t.id) || [];
   if (!qs.length) return '';
-  if (picked.length >= qs.length) {
-    return `<div class="ask-card done"><span>${qs.length === 1 ? 'Answered' : `All ${qs.length} answered`}</span><span class="sp"></span>`
-      + `<button class="btn-sm" data-restart="${t.id}">Start over</button><button class="btn-sm warm-sm" data-send-answers="${t.id}">Send</button></div>`;
-  }
+  if (picked.length >= qs.length) return `<div class="ask-card done"><span class="spin"></span><span>Sending your answer${qs.length === 1 ? '' : 's'}</span></div>`;
   const i = picked.length, q = qs[i];
   return `<div class="ask-card"><div class="ask-q"><span>${esc(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
     + `<div class="opts">${(q.options || []).map(o => optionHTML(o, i, '')).join('')}</div>`
@@ -294,7 +291,7 @@ function sheetFoot(t) {
     + `<textarea class="field" id="followText" placeholder="Want changes? Say what, then send"></textarea><div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
   if (t.status === 'ready') return `<div class="row"><button class="btn go" data-approve-open>${icon.checkSm}Approve</button><button class="btn" data-reopen-toggle>Reopen</button></div>`
     + `<div id="reopenBox" hidden><textarea class="field" id="reopenText" placeholder="What's still wrong?"></textarea><div class="row" style="margin-top:8px"><button class="btn warm" data-reopen>Send back</button></div></div>`;
-  if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? (optional)' : 'Your answer'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
+  if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
   if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button><button class="btn" data-remove>Dismiss</button></div>`;
   if (t.status === 'working' || isPlan(t)) return followUpHTML('Add something while it works. It picks it up at its next stop.');
   // A queued task can take a follow-up too; a note the conductor hasn't picked up yet can be taken back.
@@ -347,7 +344,7 @@ async function act(id, action, text) {
   if (opened) setTimeout(() => conductorOpened(opened), 1600);
 }
 
-// Approve, queue and dismiss can be taken back for a few seconds.
+// Approve, answer, queue and dismiss can be taken back for a few seconds.
 const undoable = (id, message, color) => toast(message, color, { label: 'Undo', run: () => attempt('undo it', () => act(id, 'undo')) });
 
 function collapse(el) {
@@ -395,18 +392,32 @@ function answerText(t, extra) {
   return lines.join('\n');
 }
 
-function sendAnswers(id, extra = '') {
+// Sent straight away, with a few seconds to take it back.
+async function sendAnswers(id, extra = '') {
   const t = byId(id), text = t && answerText(t, extra);
   if (!text) { toast('Pick an answer, or write one', 'var(--amber)'); return; }
   closeSheet();
-  attempt('send the answer', async () => { await act(id, 'answer', text); answers.delete(id); toast('Answer sent to the conductor', 'var(--amber)'); });
+  renderWorkboard();
+  try {
+    await act(id, 'answer', text);
+    undoable(id, 'Answer sent to the conductor', 'var(--amber)');
+  } catch (e) {
+    toast(`Couldn't send the answer: ${e.message}`, 'var(--red)');
+  }
+  answers.delete(id);
+  renderWorkboard();
 }
 
+// Picking the last unanswered question's option sends them all, with anything typed in the sheet's box.
 function pick(taskId, q, value) {
   const t = byId(taskId);
   const picked = [...(answers.get(taskId) || [])];
   picked[q] = value;
   answers.set(taskId, picked.slice(0, Math.max(q + 1, picked.length)));
+  if (t && questionsOf(t).every((_, i) => picked[i] !== undefined)) {
+    sendAnswers(taskId, openSheetKey() === taskId ? $('#answerText')?.value.trim() || '' : '');
+    return;
+  }
   if (openSheetKey() === taskId) openTask(taskId); else renderWorkboard();
 }
 
@@ -474,8 +485,6 @@ export function initWorkboard() {
     if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
     else if (hit('[data-pick]')) pick(card, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-back]')) { answers.set(card, (answers.get(card) || []).slice(0, -1)); renderWorkboard(); }
-    else if (hit('[data-restart]')) { answers.delete(card); renderWorkboard(); }
-    else if (hit('[data-send-answers]')) sendAnswers(card);
     else if (hit('[data-approve]')) approve(hit('[data-approve]').dataset.approve);
     else if (hit('[data-queue]')) queueIt(hit('[data-queue]').dataset.queue);
     else if (hit('[data-dismiss]')) dismiss(hit('[data-dismiss]').dataset.dismiss);
@@ -508,6 +517,11 @@ export function initWorkboard() {
   });
   view.addEventListener('keydown', e => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id); }
+  });
+
+  // A typed answer goes with Enter; Shift+Enter starts a new line.
+  $('#sheet').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'answerText' && e.target.value.trim()) { e.preventDefault(); sendAnswers(openSheetKey(), e.target.value.trim()); }
   });
 
   // The controls inside a task's sheet.

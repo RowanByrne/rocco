@@ -126,7 +126,6 @@
 .speaker { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-3); }
 .speaker:hover { color: var(--amber); background: rgba(251,191,36,.1); }
 .speaker.playing { color: var(--amber); background: rgba(251,191,36,.14); animation: blink 1s infinite; }
-.btn-sm.warm-sm { color: #2b1d00; border: 0; background: linear-gradient(180deg, #fcd34d, #f0a91a); }
 
 /* A working card's last steps */
 .steps { list-style: none; margin: 9px 0 2px; padding: 0; display: grid; gap: 3px; font-size: 12px; color: var(--text-3); }
