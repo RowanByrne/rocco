@@ -62,7 +62,7 @@ function play(url, button) {
   player.play().catch(() => { button.classList.remove('playing'); toast("Couldn't play that sound", 'var(--red)'); });
 }
 
-const optionHTML = (o, i, picked) => `<span class="opt-wrap"><button class="opt${picked === o.label ? ' on' : ''}" data-pick="${esc(o.label)}" data-q="${i}">${esc(o.label)}</button>`
+const optionHTML = (o, i, picked) => `<span class="opt-wrap"><button class="opt${picked === o.label ? ' on' : ''}" data-pick="${esc(o.label)}" data-q="${i}" title="${esc(o.label)}"><span>${esc(o.label)}</span></button>`
   + `${o.audio ? `<button class="speaker" data-play="${esc(o.audio)}" title="Play" aria-label="Play ${esc(o.label)}">${icon.speaker}</button>` : ''}</span>`;
 
 // ---- Columns ----
@@ -111,7 +111,7 @@ function cardHTML(t) {
 function columnHTML(status) {
   const list = work(status);
   return `<div class="col c-${status}"><div class="col-head"><span class="sdot"></span>${NAMES[status]}<span class="count">${list.length}</span></div>`
-    + (list.length ? list.map(cardHTML).join('') : `<div class="empty">${EMPTY[status]}</div>`) + `</div>`;
+    + `<div class="col-list">${list.length ? list.map(cardHTML).join('') : `<div class="empty">${EMPTY[status]}</div>`}</div></div>`;
 }
 
 // ---- Feature plans: their own look, in the feature's color ----

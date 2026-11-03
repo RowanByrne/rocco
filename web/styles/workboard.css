@@ -87,13 +87,16 @@
 
 /* Three columns that stay columns: scroll sideways when the window is narrow */
 .board { display: grid; grid-template-columns: repeat(3, minmax(230px, 1fr)); gap: 12px; overflow-x: auto; padding-bottom: 2px; }
-.col { display: flex; flex-direction: column; min-height: 280px; padding: 6px; border-radius: var(--r-lg);
+/* A column grows with its cards up to about the window's height, then its list scrolls */
+.col { display: flex; flex-direction: column; min-height: 280px; max-height: max(280px, calc(100vh - 220px)); padding: 6px; border-radius: var(--r-lg);
   background: linear-gradient(180deg, color-mix(in srgb, var(--c) 8%, transparent), transparent 160px), var(--glass);
   border: 1px solid color-mix(in srgb, var(--c) 16%, var(--stroke)); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
 .col-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 10px; font-weight: 500; }
 .col-head .sp { flex: 1; }
 .count { color: var(--text-3); font-size: 12px; }
+.col-list { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: thin; }
+.col-list > .card { flex: none; }
 .col .empty { margin: auto 0; }
 .empty { padding: 18px 8px 20px; text-align: center; color: var(--text-3); font-size: 12.5px; }
 
@@ -127,7 +130,9 @@
 .ask-q > span:first-child { flex: 1; }
 .ask-n { flex: none; font-size: 11px; font-weight: 400; color: var(--amber); }
 .ask-card .opts { margin-top: 8px; gap: 6px; }
-.ask-card .opt { height: 28px; padding: 0 10px; font-size: 12.5px; }
+/* On the card, two lines at most: the whole option is in its tooltip and the task's sheet */
+.ask-card .opt { min-height: 28px; padding: 5px 10px; font-size: 12.5px; }
+.ask-card .opt span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .ask-foot { display: flex; gap: 12px; margin-top: 8px; }
 .linkish { padding: 0; border: 0; background: none; font-size: 12px; color: var(--text-3); }
 .linkish:hover { color: var(--text); text-decoration: underline; }
@@ -283,7 +288,8 @@
 .s-try small { display: block; font-size: 11px; font-weight: 600; color: var(--green); margin-bottom: 3px; letter-spacing: .02em; }
 .s-q { margin-top: 16px; font-size: 14.5px; font-weight: 500; }
 .opts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.opt { height: 32px; padding: 0 12px; border-radius: 9px; background: var(--glass); border: 1px solid var(--stroke-2); color: var(--text-2); font-weight: 500; transition: all .15s; }
+/* An option grows with its text, so a long one wraps instead of running into the next */
+.opt { min-height: 32px; padding: 6px 12px; border-radius: 9px; text-align: left; line-height: 1.35; background: var(--glass); border: 1px solid var(--stroke-2); color: var(--text-2); font-weight: 500; transition: all .15s; }
 .opt:hover { color: var(--text); border-color: rgba(251,191,36,.4); }
 .opt.on { color: var(--amber); border-color: rgba(251,191,36,.55); background: rgba(251,191,36,.08); box-shadow: 0 0 16px rgba(251,191,36,.15); }
 .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 16px; }

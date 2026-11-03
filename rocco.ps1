@@ -12,7 +12,8 @@
 #   rocco.ps1 plan -Title "..." -Summary "..." -Steps "Trade window UI|4|standard","Trade service|6|heavy"
 #                                      a feature plan for the user to approve; prints its id. -Approved: the user
 #                                      already said go (the template's SETUP.md prototype), so it starts at once
-#   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck)
+#   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck).
+#                                      Options are a few words each; the detail goes in the question
 #   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
@@ -184,6 +185,9 @@ switch ($Command) {
 		Set-Status $t 'stuck'
 		Save-Task $t
 		"$($t.id) stuck: $(@(Get-List $t.questions).Count) question(s)"
+		# The card shows two lines of an option at most.
+		$long = @($Options | Where-Object { "$_".Length -gt 40 })
+		if ($long.Count) { "Asked, but $($long.Count) option(s) run long for the card. Options read best in a few words, with the detail in the question: set $($t.id) -Question `"...`" -Options ... replaces it." }
 	}
 
 	'set' {

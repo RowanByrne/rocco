@@ -142,7 +142,7 @@ The agent keeps the Workboard current with `rocco.ps1`. Run from a project's `re
 | `new -Title "..." [-Type bug] [-Plan T-020] [-After T-011]` | Add a task to Up next. `-Plan`: part of that feature. `-After`: it needs those done first, so the user can't drag it ahead of them |
 | `suggest -Title "..." [-Summary "why"]` | Put something the agent spotted in the inbox |
 | `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",...` | A feature plan for the user to approve or change. When they ask for changes, `set T-020 -Summary "..." -Steps ...` revises it, then `clear`. `-Approved`: the user already said go (the template's SETUP.md prototype), so it starts at once |
-| `ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]` | Ask the user; more `ask`s while it's stuck add questions. `-Audio` files (one per option, in order) get play buttons |
+| `ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]` | Ask the user; more `ask`s while it's stuck add questions. Options are a few words each, like "A lap" or "An open pad": the detail goes in the question, since the card shows two lines of an option at most. `-Audio` files (one per option, in order) get play buttons |
 | `reply T-012 -Text "..."` | Answer a question the user asked from the note box (`list` marks them QUESTION). It shows under the note box until they click Got it, or Ask more, which sends it back |
 | `set T-012 -Status working -Lane 3 -Step "..." [-Progress 40]` | Where a task stands. A worker's `log` lines show live on its card |
 | `log T-012 -Text "..." [-Who worker]` | Add to a task's history |
