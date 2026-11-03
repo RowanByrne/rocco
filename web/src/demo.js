@@ -242,8 +242,9 @@ function answerSoon(t) {
 }
 
 export async function shot(id, file) {
-  find(id).shots.push(URL.createObjectURL(file));
-  return {};
+  const t = find(id);
+  t.shots.push(URL.createObjectURL(file));
+  return { name: `shot-${t.shots.length}.png` };
 }
 
 const toConductor = (t, pending) => {

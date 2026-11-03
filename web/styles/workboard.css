@@ -57,6 +57,15 @@
 .drafts button { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%;
   background: #2a2c36; color: var(--text); font-size: 11px; line-height: 18px; box-shadow: 0 0 0 1px var(--stroke-2); }
 
+/* Sending a task back from its sheet: a small note box, always open above Approve */
+.reply { display: grid; gap: 2px; padding: 8px 8px 6px; border-radius: var(--r); background: rgba(255,255,255,.03); border: 1px solid var(--stroke-2); transition: border-color .15s; }
+.reply:focus-within { border-color: rgba(251,191,36,.45); }
+.reply.drag { border-style: dashed; border-color: rgba(251,191,36,.7); }
+.reply .drafts { padding: 6px 4px 4px; }
+.reply .field { min-height: 52px; padding: 4px 6px; border: 0; background: transparent; box-shadow: none; resize: none; }
+.reply .row { align-items: center; }
+.reply .btn.warm { flex: none; }
+
 /* Inbox: what Claude spotted, under the note box until it's queued or dismissed */
 .inbox { margin-top: 14px; }
 .inbox-head { display: flex; align-items: center; gap: 8px; padding: 0 6px 8px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }

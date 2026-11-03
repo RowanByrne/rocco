@@ -12,6 +12,7 @@ import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
 import { agentShort, agentName } from '../agent.js';
+import { shotOf, imagesIn, shotsHTML, shotClick, clip } from '../ui/shots.js';
 
 const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
@@ -283,6 +284,37 @@ function sheetBody(t) {
 
 const followUpHTML = placeholder => `<textarea class="field" id="followText" placeholder="${placeholder}"></textarea><div class="row"><span class="sp"></span><button class="btn accent" data-follow>Send follow-up</button></div>`;
 
+// ---- Sending a task back: a box that's always open under To test, with screenshots like the note box ----
+
+let reply = { id: '', shots: [] }; // the sheet's task, and the screenshots going back with it
+
+const replyHTML = () => `<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotsHTML(reply.shots)}</div>`
+  + `<textarea class="field" id="reopenText" placeholder="Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back"></textarea>`
+  + `<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button>`
+  + `<input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span><button class="btn warm" data-reopen>Send back</button></div></div>`;
+
+function attachReply(files) {
+  const added = files.map(shotOf).filter(Boolean);
+  if (!added.length || !$('#replyShots')) return;
+  reply.shots.push(...added);
+  $('#replyShots').innerHTML = shotsHTML(reply.shots);
+  $('#reopenText').focus();
+}
+
+// The screenshots go up first, so the conductor finds them, named in the text, when the task comes back to it.
+async function sendBack(id) {
+  const text = $('#reopenText').value.trim(), shots = [...reply.shots];
+  if (!text && !shots.length) { $('#reopenText').focus(); toast("Say what's still wrong, or add a screenshot", 'var(--amber)'); return; }
+  closeSheet();
+  await attempt('send it back', async () => {
+    const names = [];
+    for (const s of shots) { const { name } = await api.shot(id, s.file); if (name) names.push(name); }
+    await act(id, 'reopen', [text, names.length ? `Screenshots: ${names.join(', ')}` : ''].filter(Boolean).join('\n'));
+    reply = { id: '', shots: [] };
+    toast('Sent back to the conductor', 'var(--amber)');
+  });
+}
+
 function sheetFoot(t) {
   if (isQuestion(t)) {
     if (t.status === 'ready') return `<div class="row"><button class="btn go" data-got-it="${t.id}">${icon.checkSm}Got it</button></div>`
@@ -292,8 +324,7 @@ function sheetFoot(t) {
   }
   if (isPlan(t) && t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-plan-approve="${t.id}">Approve plan</button></div>`
     + `<textarea class="field" id="followText" placeholder="Want changes? Say what, then send"></textarea><div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
-  if (t.status === 'ready') return `<div class="row"><button class="btn go" data-approve-open>${icon.checkSm}Approve</button><button class="btn" data-reopen-toggle>Reopen</button></div>`
-    + `<div id="reopenBox" hidden><textarea class="field" id="reopenText" placeholder="What's still wrong?"></textarea><div class="row" style="margin-top:8px"><button class="btn warm" data-reopen>Send back</button></div></div>`;
+  if (t.status === 'ready') return replyHTML() + `<div class="row"><button class="btn go" style="flex:1" data-approve-open>${icon.checkSm}Approve</button></div>`;
   if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
   if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button><button class="btn" data-remove>Dismiss</button></div>`;
   if (t.status === 'working' || isPlan(t)) return followUpHTML('Add something while it works. It picks it up at its next stop.');
@@ -319,6 +350,7 @@ export function openTask(id) {
   if (!t) return;
   const color = isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status];
   const chip = isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status];
+  if (reply.id !== id) reply = { id, shots: [] };
   showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t) });
   if (t.branch) loadChanges(t);
 }
@@ -522,9 +554,29 @@ export function initWorkboard() {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id); }
   });
 
-  // A typed answer goes with Enter; Shift+Enter starts a new line.
+  // A typed answer, or what's still wrong, goes with Enter; Shift+Enter starts a new line.
   $('#sheet').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'answerText' && e.target.value.trim()) { e.preventDefault(); sendAnswers(openSheetKey(), e.target.value.trim()); }
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (e.target.id === 'answerText' && e.target.value.trim()) { e.preventDefault(); sendAnswers(openSheetKey(), e.target.value.trim()); }
+    if (e.target.id === 'reopenText') { e.preventDefault(); sendBack(openSheetKey()); }
+  });
+  // Screenshots for sending a task back: pasted anywhere while its sheet is open, dropped on the box, or picked.
+  document.addEventListener('paste', e => {
+    if (!openSheetKey() || !$('#reply')) return;
+    const files = imagesIn(e.clipboardData?.items);
+    if (!files.length) return;
+    e.preventDefault();
+    attachReply(files);
+  });
+  $('#sheet').addEventListener('change', e => { if (e.target.id === 'replyInput') { attachReply([...e.target.files]); e.target.value = ''; } });
+  $('#sheet').addEventListener('dragover', e => { const box = e.target.closest('#reply'); if (box) { e.preventDefault(); box.classList.add('drag'); } });
+  $('#sheet').addEventListener('dragleave', e => e.target.closest('#reply')?.classList.remove('drag'));
+  $('#sheet').addEventListener('drop', e => {
+    const box = e.target.closest('#reply');
+    if (!box) return;
+    e.preventDefault();
+    box.classList.remove('drag');
+    attachReply(imagesIn(e.dataTransfer.files));
   });
 
   // The controls inside a task's sheet.
@@ -535,15 +587,10 @@ export function initWorkboard() {
     else if (hit('[data-pick]')) pick(id, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-answer]')) sendAnswers(id, $('#answerText').value.trim());
     else if (hit('[data-approve-open]')) { closeSheet(); setTimeout(() => approve(id), 250); }
-    else if (hit('[data-reopen-toggle]')) {
-      const box = $('#reopenBox');
-      box.hidden = !box.hidden;
-      if (!box.hidden) $('#reopenText').focus();
-    } else if (hit('[data-reopen]')) {
-      const text = $('#reopenText').value.trim();
-      closeSheet();
-      attempt('reopen it', async () => { await act(id, 'reopen', text); toast('Sent back to the conductor', 'var(--amber)'); });
-    } else if (hit('[data-follow]') || hit('[data-revise]')) {
+    else if (hit('[data-reopen]')) sendBack(id);
+    else if (hit('[data-reply-attach]')) $('#replyInput').click();
+    else if (hit('#replyShots')) shotClick(el, reply.shots).then(changed => { if (changed && $('#replyShots')) $('#replyShots').innerHTML = shotsHTML(reply.shots); });
+    else if (hit('[data-follow]') || hit('[data-revise]')) {
       const text = $('#followText').value.trim();
       if (!text) { $('#followText').focus(); return; }
       closeSheet();

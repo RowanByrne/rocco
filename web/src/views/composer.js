@@ -9,7 +9,8 @@ import { settings } from '../settings.js';
 import { keyFor } from '../hotkeys.js';
 import { capturing, captureFrame, stopCapture } from '../capture.js';
 import { voiceSupported, listening, listeningFor, toggleVoice } from '../voice.js';
-import { openMarkup } from '../dialogs/markup.js';
+import { shotOf, imagesIn, shotsHTML, shotClick } from '../ui/shots.js';
+import { openSheetKey } from '../ui/sheet.js';
 import { go } from '../router.js';
 
 // Question isn't work: it goes to the conductor to answer, and the answer shows under the note box.
@@ -22,10 +23,7 @@ const text = () => $('#noteText');
 const hint = id => keyFor(id) ? ` (${keyFor(id)})` : '';
 const svg = paths => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
-function renderDrafts() {
-  $('#drafts').innerHTML = drafts.map((d, i) => `<span class="th" title="Draw on it"><img src="${d.url}" alt="Attached screenshot" data-draw="${i}">`
-    + `<span class="th-draw">${svg('<path d="M4 20l4-1 11-11-3-3L5 16z"/>')}</span><button type="button" data-unshot="${i}" aria-label="Remove screenshot">×</button></span>`).join('');
-}
+function renderDrafts() { $('#drafts').innerHTML = shotsHTML(drafts); }
 
 // The toolbar's live parts: capture, type chips and the mic.
 export function renderComposerTools() {
@@ -44,8 +42,9 @@ export function renderComposerTools() {
 }
 
 function attach(file) {
-  if (!file || !file.type.startsWith('image/')) return;
-  drafts.push({ file, url: URL.createObjectURL(file) });
+  const shot = shotOf(file);
+  if (!shot) return;
+  drafts.push(shot);
   renderDrafts();
 }
 
@@ -124,19 +123,14 @@ export function initComposer() {
     else if (el.hasAttribute('data-capture')) captureStudio();
     else if (el.hasAttribute('data-capture-stop')) stopCapture();
     else if (el.hasAttribute('data-voice')) toggleVoiceNote();
-    else if (el.dataset.unshot !== undefined) { drafts.splice(+el.dataset.unshot, 1); renderDrafts(); }
-    else if (el.dataset.draw !== undefined) {
-      const i = +el.dataset.draw;
-      const drawn = await openMarkup(drafts[i].file);
-      if (drawn) { drafts[i] = { file: drawn, url: URL.createObjectURL(drawn) }; renderDrafts(); }
-    }
+    else if (await shotClick(el, drafts)) renderDrafts();
   });
   $('#attachBtn').addEventListener('click', () => $('#attachInput').click());
   $('#attachInput').addEventListener('change', e => { [...e.target.files].forEach(attach); e.target.value = ''; text().focus(); });
-  // A screenshot pasted anywhere on the Workboard goes with the next note.
+  // A screenshot pasted anywhere on the Workboard goes with the next note; with a task's sheet open, it's the sheet's.
   document.addEventListener('paste', e => {
-    if (state.view !== 'workboard') return;
-    const files = [...(e.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile());
+    if (state.view !== 'workboard' || openSheetKey()) return;
+    const files = imagesIn(e.clipboardData?.items);
     if (!files.length) return;
     e.preventDefault();
     files.forEach(attach);
