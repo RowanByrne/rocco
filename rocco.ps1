@@ -7,7 +7,8 @@
 #   rocco.ps1 [serve] [-Open] [-Project Game]   serve Rocco on http://localhost:34860/ in this window (opening that project)
 #   rocco.ps1 list [-Pending]          this project's open tasks; -Pending: only what waits on the conductor
 #   rocco.ps1 show T-012               one task in full: note, screenshots, questions, follow-ups, history
-#   rocco.ps1 new -Title "..." [-Type bug] [-Plan T-020] [-After T-011,T-012]   add a task to Up next; prints its id
+#   rocco.ps1 new -Title "..." [-Type bug] [-Plan T-020] [-After T-011,T-012]   add a task to Up next; prints its id.
+#                                      -Plan: a step of that feature plan (plans are never worked as cards)
 #   rocco.ps1 suggest -Title "..." [-Summary "why"]   put something you spotted in the inbox, for the user to queue or dismiss
 #   rocco.ps1 plan -Title "..." -Summary "..." -Steps "Trade window UI|4|standard","Trade service|6|heavy" [-Spec docs/game/features/trading.md]
 #                                      a feature plan for the user to approve; prints its id. -Spec: the feature's spec,
@@ -212,6 +213,14 @@ switch ($Command) {
 			''
 			"Taking it on? First: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}
+		# A feature plan is never worked as a card: its steps are tasks, which the plan's chip counts.
+		if ($t.kind -eq 'plan') {
+			$perStep = "a task per step, new -Title `"<step>`" -Plan $($t.id) [-After T-0xx], and give each worker its step's id"
+			$hint = if ($t.status -eq 'inbox' -and $t.pending) { "It still waits for the user's OK (Approve plan on its card). If their words approve it (`"go`", `"build it`"), make $perStep; the first one approves it. Otherwise answer them, and it waits." }
+				elseif ($t.pending -eq 'approved') { "Approved: make $perStep. Then clear $($t.id)." }
+				elseif ($t.status -in 'working', 'stuck', 'ready') { "It's being worked as one card, so the board shows none of it: make $perStep. That puts the plan back." }
+			if ($hint) { ''; $hint }
+		}
 	}
 
 	'new' {
@@ -221,6 +230,8 @@ switch ($Command) {
 		Set-Common $t
 		if ($Waiting) { Set-Field $t 'waiting' $Waiting }
 		Save-Task $t
+		# A plan's step: the plan is under way (approved, if the user said so in words).
+		if ($Plan) { Open-Plan $Plan }
 		$t.id
 	}
 
@@ -258,6 +269,8 @@ switch ($Command) {
 			"$($e.id) asked, above the user's note box. Their answer comes back through wait, as an [answer]."
 		} else {
 			$t = Read-Task $Id
+			# A plan's question would show nowhere: it's asked on the step's task.
+			if ($t.kind -eq 'plan') { throw ($PlanNotWorked -f $t.id) }
 			Add-Question $t $Question @($Options) @($Audio)
 			Set-Status $t 'stuck'
 			Save-Task $t
@@ -276,6 +289,7 @@ switch ($Command) {
 		$t = Read-Task $Id
 		# A worker finds out here (set -Step) that the user deleted its task.
 		if ($t.status -eq 'removed' -and $Status -ne 'removed') { throw ($DeletedText -f $t.id) }
+		if ($t.kind -eq 'plan' -and ($Status -in 'working', 'stuck', 'ready' -or $Lane -gt 0)) { throw ($PlanNotWorked -f $t.id) }
 		Assert-CardText ($t.kind -ne 'plan' -and -not ($t.PSObject.Properties['auto'] -and $t.auto))
 		$before = $t.status
 		if ($Status) {
@@ -296,6 +310,9 @@ switch ($Command) {
 		if ($Order -ge 0) { Set-Field $t 'order' $Order }
 		Set-Common $t
 		Save-Task $t
+		# A step task approved, taken back or deleted: its plan follows. One just linked to a plan puts it under way.
+		if ($Plan) { Open-Plan $Plan }
+		if ($t.status -ne $before) { Sync-Plan $t.plan }
 		# Milestones for the conductor's history in Rocco.
 		if ($t.status -ne $before) {
 			switch ($t.status) {

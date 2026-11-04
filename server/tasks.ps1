@@ -167,6 +167,50 @@ function Get-PlanTasks($plan) {
 	@(Get-Tasks | Where-Object { $_.plan -eq $plan.id -and $_.status -ne 'removed' -and ($_.status -ne 'done' -or $_.pending -eq 'merge') })
 }
 
+# ---- A feature plan's life: its steps are the tasks that get worked, and it follows them ----
+
+# What a plan can't be: a card that's worked. Its steps are (new -Plan), so the board can show and count them.
+$PlanNotWorked = '{0} is a feature plan: its steps are the cards that get worked, and the plan''s chip counts them. Make a task per step, new -Title "<step>" -Plan {0} [-After T-0xx], then set or ask on those. Each worker gets its step''s id.'
+
+# A step task was just made for it (new -Plan). A plan still waiting for the user's OK is approved: the conductor makes
+# its tasks only once the user has approved it, with the button or in their own words ("build it"). A plan that was
+# worked as one card goes back to being the plan, its lane and step left to its tasks. A finished one opens again.
+function Open-Plan([string]$id) {
+	$p = Read-Task $id
+	if ($p.kind -ne 'plan' -or $p.status -in 'queued', 'removed') { return }
+	$was = $p.status
+	Set-Status $p 'queued'
+	if ($was -eq 'inbox') {
+		Add-Log $p 'conductor' 'Approved in your words, so its tasks started.'
+		Add-Event "Plan approved: $($p.title)" $p.id
+	}
+	if ($was -in 'working', 'stuck', 'ready') {
+		foreach ($name in 'lane', 'progress', 'startedAt') { Set-Field $p $name $null }
+		Set-Field $p 'step' ''
+		Set-Field $p 'questions' @()
+	}
+	Save-Task $p
+}
+
+# A plan is done once the user has approved a task for each of its steps, and open again if one comes back (Undo).
+function Sync-Plan([string]$id) {
+	if (-not $id) { return }
+	try { $p = Read-Task $id } catch { return }
+	if ($p.kind -ne 'plan' -or $p.status -notin 'queued', 'done') { return }
+	$kids = @(Get-Tasks | Where-Object { $_.plan -eq $id -and $_.status -ne 'removed' })
+	$approved = @($kids | Where-Object { $_.status -eq 'done' }).Count
+	$finished = $kids.Count -gt 0 -and $approved -eq $kids.Count -and $kids.Count -ge @(Get-List $p.steps).Count
+	if ($finished -and $p.status -ne 'done') {
+		Set-Status $p 'done'
+		Add-Log $p 'conductor' 'Every step approved, so the feature is done.'
+		Save-Task $p
+		Add-Event "Feature done: $($p.title)" $p.id
+	} elseif (-not $finished -and $p.status -eq 'done') {
+		Set-Status $p 'queued'
+		Save-Task $p
+	}
+}
+
 # ---- What the user does to a task in the app ----
 
 function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
@@ -233,6 +277,8 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 		default { throw "Unknown action '$action'." }
 	}
 	Save-Task $t
+	# Approving a plan's last step finishes the feature; Undo opens it again.
+	Sync-Plan $t.plan
 }
 
 # Everything in the inbox goes to the conductor to plan.
