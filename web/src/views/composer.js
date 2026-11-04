@@ -12,6 +12,7 @@ import { voiceSupported, listening, listeningFor, toggleVoice } from '../voice.j
 import { shotOf, imagesIn, shotsHTML, shotClick } from '../ui/shots.js';
 import { openSheetKey } from '../ui/sheet.js';
 import { go } from '../router.js';
+import { noteMode, sendInMode, leaveMode } from './conductor.js';
 
 // Question isn't work: it goes to the conductor to answer, and the answer shows under the note box.
 const TYPES = [['bug', 'Bug'], ['tweak', 'Tweak'], ['idea', 'Idea'], ['question', 'Question']];
@@ -31,9 +32,9 @@ export function renderComposerTools() {
     ? `<span class="cap on"><button type="button" class="tool-label" data-capture title="Capture Studio${hint('capture')}"><i></i>Capture</button><button type="button" class="cap-stop" data-capture-stop title="Stop sharing Studio" aria-label="Stop sharing Studio">×</button></span>`
     : `<button type="button" class="tool-label" data-capture title="Pick Studio's window once, then capture it any time${hint('capture')}">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/>')}Capture Studio</button>`;
   $('#types').innerHTML = TYPES.map(([id, label]) => `<button type="button" class="type t-${id}${type === id ? ' on' : ''}" data-type="${id}" role="radio" aria-checked="${type === id}" title="${id === 'question' ? 'Just need to know something? Ask, and the answer shows here' : label}${hint('type')}">${label}</button>`).join('');
-  const asking = type === 'question';
-  text().placeholder = asking ? 'What do you want to know?' : 'What did you notice?';
-  $('#sendBtn').title = asking ? 'Ask' : 'Add to Up next';
+  const asking = type === 'question', mode = noteMode();
+  text().placeholder = mode ? mode.placeholder : asking ? 'What do you want to know?' : 'What did you notice?';
+  $('#sendBtn').title = mode ? 'Send' : asking ? 'Ask' : 'Add to Up next';
   $('#sendBtn').setAttribute('aria-label', $('#sendBtn').title);
   const on = settings().voice && voiceSupported();
   $('#voiceSlot').innerHTML = on ? (listening()
@@ -56,6 +57,14 @@ function grow() {
 async function addNote() {
   if (listening()) toggleVoice(() => {});
   const note = text().value.trim(), shots = drafts, noteType = type;
+  // Answering the conductor, or replying to it: words only. Screenshots stay for a note.
+  if (noteMode()) {
+    if (!note) { text().focus(); return; }
+    text().value = '';
+    grow();
+    try { await sendInMode(note); } catch { text().value = note; grow(); }
+    return;
+  }
   if (!note && !shots.length) return;
   text().value = '';
   drafts = [];
@@ -119,7 +128,8 @@ export function initComposer() {
   form.addEventListener('click', async e => {
     const el = e.target.closest('button, img');
     if (!el) return;
-    if (el.dataset.type) { type = type === el.dataset.type ? '' : el.dataset.type; renderComposerTools(); }
+    // Picking a type makes it a note, even with the conductor's question open.
+    if (el.dataset.type) { type = type === el.dataset.type ? '' : el.dataset.type; if (type && noteMode()) leaveMode(); renderComposerTools(); }
     else if (el.hasAttribute('data-capture')) captureStudio();
     else if (el.hasAttribute('data-capture-stop')) stopCapture();
     else if (el.hasAttribute('data-voice')) toggleVoiceNote();
@@ -142,6 +152,7 @@ export function initComposer() {
 
   on('capture', renderComposerTools);
   on('settings', renderComposerTools);
+  on('note-mode', renderComposerTools);
   on('voice', () => {
     renderComposerTools();
     clearInterval(voiceTimer);

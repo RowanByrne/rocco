@@ -114,8 +114,78 @@ function seed(id) {
       { ...base, id: 'T-036', status: 'done', type: 'bug', doneAt: ago(65), title: "Music toggle doesn't save", note: "music toggle doesn't save", summary: 'Saved with player data now.' },
       { ...base, id: 'T-037', status: 'done', type: 'tweak', doneAt: ago(50), title: 'Tutorial arrow points at old shop', note: 'tutorial arrow points at the old shop spot', summary: 'Arrow finds the shop by tag.' },
     ],
+    conductor: { state: 'busy', agent: 'Claude Code', doing: 'Merge the daily reward fix into main' },
+    thread: sampleThread(),
   };
 }
+
+// The conductor's thread (server/thread.ps1): what it said and asked, what the user sent, milestones, and its steps.
+function sampleThread() {
+  const at = ago;
+  const items = [
+    { id: 'C-000001', at: at(200), who: 'rocco', kind: 'event', text: 'Rocco opened Claude Code as the conductor' },
+    { id: 'C-000002', at: at(181), who: 'you', kind: 'sent', act: 'note', task: 'T-044', title: 'Pets follow the player', text: 'pets should follow the player around' },
+    { id: 'C-000003', at: at(176), who: 'conductor', kind: 'said', text: "One task: pets follow on a feature branch, so you can try it in lane 5 before it goes into Main." },
+    { id: 'C-000004', at: at(170), who: 'rocco', kind: 'event', text: 'Started in lane 5: Pets follow the player', task: 'T-044' },
+    { id: 'C-000005', at: at(130), who: 'rocco', kind: 'event', text: 'Posted a plan for your OK: Trading between players', task: 'T-040' },
+    { id: 'C-000006', at: at(124), who: 'you', kind: 'sent', act: 'approve-plan', task: 'T-040', title: 'Trading between players', text: '' },
+    { id: 'C-000007', at: at(61), who: 'conductor', kind: 'permission', tool: 'Bash', text: 'Push main to GitHub', detail: 'git push origin main', worker: false },
+    { id: 'C-000008', at: at(60), who: 'you', kind: 'decided', to: 'C-000007', allow: true },
+    { id: 'C-000009', at: at(31), who: 'conductor', kind: 'said', text: "**Done**\n- Daily reward can't be claimed twice: it saves on claim now (T-038, lane 2).\n- Shop prices fit on phones (T-041).\n\n**Flagged**\n- The trade countdown has no sound yet. I'll ask you which one when it's built.\n- `T-046` found the camera only checks walls behind the head; the fix is in progress." },
+    { id: 'C-000010', at: at(28), who: 'you', kind: 'message', text: 'nice. do the camera next', via: 'rocco' },
+    { id: 'C-000011', at: at(4), who: 'rocco', kind: 'event', text: 'Ready to test: Daily reward claimable twice after rejoin', task: 'T-038' },
+    { id: 'C-000012', at: at(2), who: 'conductor', kind: 'asked', via: 'hook', questions: [
+      { text: 'The trade countdown needs a sound when it ends. Which one?', header: 'Trade sound', multi: false,
+        options: [{ label: 'Soft chime', detail: 'A short two-note chime' }, { label: 'Cash register', detail: 'Ka-ching, a bit louder' }, { label: 'None', detail: 'Silent, the window just closes' }] },
+      { text: 'Which players hear it?', header: 'Who hears', multi: true,
+        options: [{ label: 'Both traders', detail: '' }, { label: 'Players nearby', detail: 'Within 30 studs' }] }] },
+    { id: 'C-000013', at: at(1), who: 'conductor', kind: 'permission', tool: 'Bash', text: 'Delete the old shop branch', detail: 'git branch -D agent/old-shop', worker: false },
+  ];
+  const steps = [
+    [44, 'Reading CONDUCTOR.md'], [43, 'List what waits on the conductor'], [41, 'Starting a worker: Daily reward claimable twice'], [38, 'Merge agent/daily-reward into main'],
+    [36, 'Running the tests'], [33, 'Push main to GitHub'], [26, 'Starting a worker: Camera clips into walls'], [12, 'Reading CameraController.luau'],
+    [9, 'Using Studio: start stop play'], [6, 'Merge the daily reward fix into main'],
+  ].map(([m, text]) => ({ at: at(m), text }));
+  return { items, steps };
+}
+
+const threadOf = d => (d.thread ??= { items: [], steps: [] });
+const addLine = (d, kind, fields, who = 'conductor') => { const e = { id: `C-${String(next++).padStart(6, '0')}`, at: new Date().toISOString(), who, kind, ...fields }; threadOf(d).items.push(e); return e; };
+
+// What the status line shows, worked out as the server does (thread.ps1, Get-ConductorThread).
+function conductorView(d) {
+  const t = threadOf(d), has = (kind, id) => t.items.some(x => x.kind === kind && x.to === id);
+  const open = t.items.filter(e => (e.kind === 'asked' && !has('answered', e.id)) || (e.kind === 'permission' && !has('decided', e.id) && !has('expired', e.id)));
+  const last = [...t.items].reverse().find(e => e.kind === 'said');
+  const replied = !!last && t.items.some(e => e.who === 'you' && e.at > last.at);
+  return { ...(d.conductor || { state: 'listening', agent: 'Claude Code' }), open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
+}
+
+export async function conductorThread(stamp) {
+  const d = current(), t = threadOf(d), now = `${t.items.length}.${t.steps.length}`;
+  return stamp === now ? { same: true } : { stamp: now, items: t.items, steps: t.steps };
+}
+
+// The demo's conductor carries on a moment after the user answers or writes.
+function carryOn(d, text, step) {
+  setTimeout(() => { threadOf(d).steps.push({ at: new Date().toISOString(), text: step }); d.conductor = { ...d.conductor, state: 'busy', doing: step }; }, 1200);
+  setTimeout(() => { addLine(d, 'said', { text }); d.conductor = { ...d.conductor, state: 'listening', doing: '' }; }, 3500);
+}
+
+export async function conductorAnswer(id, answers, text) {
+  const d = current();
+  addLine(d, 'answered', { to: id, answers, text }, 'you');
+  carryOn(d, `Going with: ${answers.join('; ')}. This is the demo, so nothing is built.`, 'Wiring the trade countdown sound');
+  return { ok: true, opened: '' };
+}
+export async function conductorPermission(id, allow) { addLine(current(), 'decided', { to: id, allow }, 'you'); return { ok: true }; }
+export async function conductorMessage(text, to) {
+  const d = current();
+  const e = addLine(d, 'message', { text, to, via: 'rocco' }, 'you');
+  carryOn(d, 'Got it. In a real project the conductor reads this through rocco.ps1 wait and answers here.', 'Reading your message');
+  return { id: e.id, opened: '' };
+}
+export async function showConductor() { return { shown: true }; }
 
 const data = {};
 const current = () => (data[state.project] ??= seed(state.project));
@@ -128,7 +198,7 @@ export async function projects() { return { home: 'sample-game', projects: PROJE
 
 export async function snapshot() {
   const d = current();
-  return JSON.stringify({ project: PROJECTS.find(p => p.id === state.project), lanes: d.lanes, conductor: d.conductor || { state: 'listening', agent: 'Claude Code' }, main: d.main, tasks: d.tasks.filter(t => t.status !== 'removed') });
+  return JSON.stringify({ project: PROJECTS.find(p => p.id === state.project), lanes: d.lanes, conductor: conductorView(d), main: d.main, tasks: d.tasks.filter(t => t.status !== 'removed') });
 }
 
 export async function me() {
@@ -228,6 +298,7 @@ export async function note(text, type) {
   const title = (text || 'Screenshot').split('\n')[0], question = type === 'question';
   const t = { id: `T-${next++}`, kind: question ? 'question' : 'note', type: type || '', attempt: 1, where: 'main', title, note: text, shots: [], options: [], log: [] };
   current().tasks.push(toConductor(t, question ? 'question' : 'plan'));
+  addLine(current(), 'sent', { act: question ? 'question' : 'note', task: t.id, title, text }, 'you');
   if (question) answerSoon(t);
   return { id: t.id };
 }

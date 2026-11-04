@@ -10,6 +10,7 @@ import { showView, go, syncUrl } from './router.js';
 import { initSidebar, renderSidebar, renderMe, loadMe } from './sidebar.js';
 import { initWorkboard, renderWorkboard, openTask } from './views/workboard.js';
 import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType } from './views/composer.js';
+import { initConductor, renderConductor, resetConductor } from './views/conductor.js';
 import { initMascot } from './mascot.js';
 import { initConnections, renderConnections, loadConnections } from './views/connections.js';
 import { initHistory, renderHistory, loadHistory } from './views/history.js';
@@ -46,7 +47,7 @@ on('updates', renderUpdates);
 on('thumbs', renderThumbnails);
 on('settings', () => { renderSettings(); renderWorkboard(); });
 // This PC's agent changed (Settings), or loaded: everything that names it.
-on('agent', () => { renderSettings(); renderWorkboard(); renderDocs(); renderUpdates(); renderThumbnails(); renderConnections(); renderMe(); loadConnections(true); });
+on('agent', () => { renderSettings(); renderWorkboard(); renderConductor(); renderDocs(); renderUpdates(); renderThumbnails(); renderConnections(); renderMe(); loadConnections(true); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
 // Rocco updated itself: load the new app, unless that would lose an edit in Docs.
 on('rocco-updated', version => {
@@ -68,6 +69,7 @@ on('project', () => {
   closeMenus();
   syncUrl();
   sync.reset();
+  resetConductor();
   resetDocs();
   resetUpdates();
   resetThumbnails();
@@ -112,6 +114,8 @@ document.addEventListener('keydown', e => {
   initSidebar();
   initWorkboard();
   initComposer();
+  initConductor();
+  renderConductor();
   initMascot();
   initConnections();
   initHistory();

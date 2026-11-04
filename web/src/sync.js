@@ -1,4 +1,6 @@
-// Keeps the open project's tasks current: polls the server and announces 'tasks' when anything changed.
+// Keeps the open project's tasks current: polls the server and announces 'tasks' when anything changed, and
+// 'conductor' after every change. A change to the conductor alone (what it's doing, its questions) announces only
+// 'conductor', so the board isn't redrawn for each of its steps.
 import { state, emit } from './state.js';
 import { api } from './api.js';
 import { toast } from './ui/toast.js';
@@ -7,6 +9,7 @@ import { agentShort } from './agent.js';
 
 const POLL_MS = 2500;
 let lastJson = '';
+let lastRest = '';
 let loaded = false;
 
 export async function load() {
@@ -15,15 +18,19 @@ export async function load() {
     setOnline(true);
     if (text === lastJson) return;
     lastJson = text;
-    apply(JSON.parse(text));
+    const s = JSON.parse(text), { conductor, ...rest } = s;
+    const restJson = JSON.stringify(rest);
+    if (restJson !== lastRest) { lastRest = restJson; apply(s); }
+    state.meta.conductor = conductor || { state: 'none' };
+    emit('conductor');
   } catch { setOnline(false); }
 }
 
 // After the user changes something: load now, even if the text looks the same.
-export function refresh() { lastJson = ''; return load(); }
+export function refresh() { lastJson = ''; lastRest = ''; return load(); }
 
 // A different project: forget the old one, so its changes don't toast.
-export function reset() { lastJson = ''; loaded = false; }
+export function reset() { lastJson = ''; lastRest = ''; loaded = false; }
 
 export function start() {
   load();

@@ -14,13 +14,19 @@
 #                                      which the card links (set -Spec changes it)
 #   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck).
 #                                      Options are a few words each; the detail goes in the question
+#   rocco.ps1 ask -Question "..." [-Options "A","B"]   with no task: the conductor asks the user, above their note box;
+#                                      wait returns the answer ([answer] C-xxxxxx)
+#   rocco.ps1 doing "Merging the trade window"   what the conductor is doing now: Rocco's status line
+#   rocco.ps1 say -Text "..."          a message to the user (a report, anything you'd tell them): Rocco's history
 #   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
 #   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, cancel, follow-ups) is handled
+#   rocco.ps1 show C-1a2b3c / clear C-1a2b3c   a message or answer the user sent the conductor; clear: it's read
 #   rocco.ps1 wait [-Timeout 540]      the conductor watching the board: returns when something waits on it (as list
 #                                      -Pending), or after -Timeout seconds. Rocco shows it listening meanwhile
+#   rocco.ps1 hook permission|question  Claude Code's hooks, for a conductor Rocco opened (server\conductor.ps1)
 #   rocco.ps1 lanes [-Count 3]         open this PC's lanes: makes any missing lane, the Main and lane places, starts
 #                                      Lync for each (no window) and opens them in Studio. -Count: record this PC's number first
 param(
@@ -35,7 +41,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-foreach ($part in 'core', 'agents', 'tasks', 'projects', 'conductor', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
+foreach ($part in 'core', 'agents', 'tasks', 'thread', 'projects', 'conductor', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
 
 function Format-Time($iso) { if ($iso) { ([datetime]$iso).ToString('HH:mm') } else { '' } }
 
@@ -59,6 +65,16 @@ function Get-PendingTasks {
 	$undoGone = (Get-Date).AddSeconds(-$UndoSeconds)
 	@(Get-Tasks | Where-Object { $_.pending -and ($_.status -ne 'removed' -or ($_.pending -eq 'cancel' -and (-not $_.undo -or [datetime]$_.undo.at -lt $undoGone))) })
 }
+
+# Everything that waits on the conductor, as list -Pending and wait print it: tasks, then what the user sent it.
+function Write-Pending($rows, $thread) {
+	if (@($rows).Count) { Format-Tasks $rows }
+	foreach ($e in $thread.pending) { Format-ThreadItem $e $thread }
+}
+$PendingHead = 'Waiting on you (show each, then handle it as CONDUCTOR.md "The Workboard" says; clear a C- message or answer once you''ve acted on it):'
+
+# The text of doing and say: -Text, or the first word after the command.
+function Get-Words { if ($Text) { $Text } else { $Id } }
 
 # A plan's steps from "title|lane|tier" strings.
 function ConvertTo-Steps([string[]]$steps) {
@@ -98,8 +114,14 @@ switch ($Command) {
 
 	'list' {
 		$rows = @(if ($Pending) { Get-PendingTasks } else { Get-Tasks | Where-Object { ($_.status -notin 'done', 'removed') -or $_.pending } })
-		if (-not $rows.Count) { $(if ($Pending) { 'Nothing waiting on the conductor.' } else { 'Nothing on the Workboard.' }); break }
-		Format-Tasks $rows
+		$thread = Get-ThreadState
+		if ($Pending) {
+			if (-not $rows.Count -and -not $thread.pending.Count) { 'Nothing waiting on the conductor.'; break }
+			Write-Pending $rows $thread
+			break
+		}
+		if (-not $rows.Count) { 'Nothing on the Workboard.' } else { Format-Tasks $rows }
+		if ($thread.pending.Count) { ''; 'From the user:'; foreach ($e in $thread.pending) { Format-ThreadItem $e $thread } }
 	}
 
 	# The conductor between jobs: returns as soon as the user hands something over. Rocco shows it listening meanwhile,
@@ -110,7 +132,8 @@ switch ($Command) {
 		try {
 			while ($true) {
 				$rows = @(Get-PendingTasks)
-				if ($rows.Count) { 'Waiting on you (show each, then handle it as CONDUCTOR.md "The Workboard" says):'; Format-Tasks $rows; break }
+				$thread = Get-ThreadState
+				if ($rows.Count -or $thread.pending.Count) { $PendingHead; Write-Pending $rows $thread; break }
 				if ((Get-Date) -gt $deadline) { 'Nothing new yet. Run wait again.'; break }
 				if (((Get-Date) - $beat).TotalSeconds -ge 5) { Register-Waiting $true; $beat = Get-Date }
 				Start-Sleep -Seconds 2
@@ -127,6 +150,7 @@ switch ($Command) {
 	}
 
 	'show' {
+		if ($Id -match '^C-') { Show-ThreadItem $Id; break }
 		$t = Read-Task $Id
 		$dir = Get-TaskDir $Id
 		$head = "$($t.id)  $($t.status)"
@@ -173,6 +197,7 @@ switch ($Command) {
 		if ($Summary) { Set-Field $t 'summary' $Summary }
 		Set-Common $t
 		Save-Task $t
+		Add-Event "Spotted: $Title" $t.id
 		$t.id
 	}
 
@@ -185,25 +210,38 @@ switch ($Command) {
 		Set-Field $t 'steps' (ConvertTo-Steps $Steps)
 		Set-Common $t
 		Save-Task $t
+		Add-Event "Posted a plan for your OK: $Title" $t.id
 		$t.id
 	}
 
 	'ask' {
 		if (-not $Question) { throw 'ask needs -Question.' }
-		$t = Read-Task $Id
-		Add-Question $t $Question @($Options) @($Audio)
-		Set-Status $t 'stuck'
-		Save-Task $t
-		"$($t.id) stuck: $(@(Get-List $t.questions).Count) question(s)"
+		if (-not $Id) {
+			# The conductor's own question: above the note box, and its answer comes back through wait.
+			$q = [ordered]@{ text = $Question; header = ''; multi = $false; options = @($Options | Where-Object { $_ } | ForEach-Object { [ordered]@{ label = $_; detail = '' } }) }
+			$e = Add-Thread 'asked' @{ questions = @($q); via = 'command' }
+			"$($e.id) asked, above the user's note box. Their answer comes back through wait, as an [answer]."
+		} else {
+			$t = Read-Task $Id
+			Add-Question $t $Question @($Options) @($Audio)
+			Set-Status $t 'stuck'
+			Save-Task $t
+			Add-Event "Needs your answer: $($t.title)" $t.id
+			"$($t.id) stuck: $(@(Get-List $t.questions).Count) question(s)"
+		}
 		# The card shows two lines of an option at most.
 		$long = @($Options | Where-Object { "$_".Length -gt 40 })
-		if ($long.Count) { "Asked, but $($long.Count) option(s) run long for the card. Options read best in a few words, with the detail in the question: set $($t.id) -Question `"...`" -Options ... replaces it." }
+		if ($long.Count) {
+			"Asked, but $($long.Count) option(s) run long for the card. Options read best in a few words, with the detail in the question" +
+			$(if ($Id) { ": set $Id -Question `"...`" -Options ... replaces it." } else { '.' })
+		}
 	}
 
 	'set' {
 		$t = Read-Task $Id
 		# A worker finds out here (set -Step) that the user deleted its task.
 		if ($t.status -eq 'removed' -and $Status -ne 'removed') { throw ($DeletedText -f $t.id) }
+		$before = $t.status
 		if ($Status) {
 			if ($Status -notin $Statuses) { throw "Status must be one of: $($Statuses -join ', ')." }
 			Set-Status $t $Status
@@ -221,6 +259,14 @@ switch ($Command) {
 		if ($Order -ge 0) { Set-Field $t 'order' $Order }
 		Set-Common $t
 		Save-Task $t
+		# Milestones for the conductor's history in Rocco.
+		if ($t.status -ne $before) {
+			switch ($t.status) {
+				'working' { Add-Event "$(if ($t.lane) { "Started in lane $($t.lane)" } else { 'Started' }): $($t.title)" $t.id }
+				'ready' { Add-Event "Ready to test: $($t.title)" $t.id }
+				'done' { if ($t.PSObject.Properties['auto'] -and $t.auto) { Add-Event "Done: $($t.title)" $t.id } }
+			}
+		}
 		"$($t.id) $($t.status)"
 	}
 
@@ -242,14 +288,54 @@ switch ($Command) {
 		Set-Field $t 'waiting' ''
 		Add-Log $t $(if ($PSBoundParameters.ContainsKey('Who')) { $Who } else { 'conductor' }) $Text
 		Save-Task $t
+		Add-Thread 'said' @{ text = $Text; task = $t.id; re = $t.title } | Out-Null
 	}
 
 	'clear' {
+		if ($Id -match '^C-') { Find-ThreadItem $Id | Out-Null; Add-Thread 'handled' @{ to = $Id } | Out-Null; break }
 		$t = Read-Task $Id
+		switch ($t.pending) {
+			'merge' { Add-Event "Merged into Main: $($t.title)" $t.id }
+			'cancel' { Add-Event "Stopped deleted work: $($t.title)" $t.id }
+		}
 		Set-Field $t 'pending' ''
 		Set-Field $t 'followups' 0
 		Save-Task $t
 	}
 
-	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, reply, set, log, clear, wait or lanes." }
+	# The conductor's status line in Rocco, and a step in its history.
+	'doing' {
+		$words = Get-Words
+		if (-not $words) { throw 'doing needs what you are doing: doing "Merging the trade window".' }
+		Add-Activity $words
+	}
+
+	# A message to the user, in Rocco's history: a report, or anything you'd otherwise only say in your own window.
+	'say' {
+		$words = Get-Words
+		if (-not $words) { throw 'say needs -Text.' }
+		Add-Thread 'said' @{ text = $words } | Out-Null
+	}
+
+	# Claude Code's hooks for a conductor Rocco opened (server\conductor.ps1 writes them): they wait for the user's
+	# answer in Rocco and hand it back. Anything that goes wrong leaves the agent's own dialog to ask instead.
+	'hook' {
+		# Bytes in and out, as UTF-8: the console's own encoding would garble anything past ASCII.
+		$raw = New-Object IO.MemoryStream
+		[Console]::OpenStandardInput().CopyTo($raw)
+		$in = $Utf8.GetString($raw.ToArray()) | ConvertFrom-Json
+		$out = switch ($Id) {
+			'permission' { Wait-Permission $in }
+			'question' { Wait-Question $in }
+			default { throw "Unknown hook '$Id'." }
+		}
+		if ($out) {
+			$bytes = $Utf8.GetBytes($out)
+			$stdout = [Console]::OpenStandardOutput()
+			$stdout.Write($bytes, 0, $bytes.Length)
+			$stdout.Flush()
+		}
+	}
+
+	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, doing, say, reply, set, log, clear, wait or lanes." }
 }

@@ -10,7 +10,7 @@ function Send($ctx, [int]$code, [string]$type, [byte[]]$bytes) {
 	if ($ctx.Request.HttpMethod -ne 'HEAD') { $res.OutputStream.Write($bytes, 0, $bytes.Length) }
 	$res.OutputStream.Close()
 }
-function Send-Json($ctx, $value, [int]$code = 200) { Send $ctx $code 'application/json; charset=utf-8' $Utf8.GetBytes((ConvertTo-Json -InputObject $value -Depth 8 -Compress)) }
+function Send-Json($ctx, $value, [int]$code = 200) { Send $ctx $code 'application/json; charset=utf-8' $Utf8.GetBytes((ConvertTo-Json -InputObject $value -Depth 10 -Compress)) }
 function Send-Text($ctx, [int]$code, [string]$text) { Send $ctx $code 'text/plain; charset=utf-8' $Utf8.GetBytes($text) }
 
 $Mime = @{
@@ -70,6 +70,11 @@ function Invoke-Request($ctx) {
 			Invoke-UpdateAuto $false | Out-Null # due game page events get queued even when Updates isn't open (updates.ps1)
 			Send-Json $ctx (Get-State $req.QueryString['p']); return
 		}
+		# The conductor's history (thread.ps1), only when it changed since the stamp the app has.
+		if ($path -eq '/api/conductor/thread') {
+			if ($req.QueryString['stamp'] -and $req.QueryString['stamp'] -eq (Get-HistoryStamp)) { Send-Json $ctx @{ same = $true }; return }
+			Send-Json $ctx (Get-ConductorHistory); return
+		}
 		if ($path -eq '/api/updates') { Send-Json $ctx (Get-Updates ($req.QueryString['refresh'] -eq '1')); return }
 		if ($path -eq '/api/thumbnails') { Send-Json $ctx (Get-Thumbnails ($req.QueryString['refresh'] -eq '1')); return }
 		# A thumbnail concept or an event's card image: candidates in ..\art\generated (thumbnails.ps1, updates.ps1).
@@ -123,6 +128,41 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Start-OpenLanes $(if ($null -ne $count) { [int]$count } else { $null })) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	# The conductor's thread (thread.ps1): the user answers its questions and permission requests, and writes to it. What
+	# it waits on wakes it through wait, or opens one when none is running.
+	if ($path -eq '/api/conductor/answer') {
+		$body = Read-Json $req
+		$s = Get-ThreadState
+		$q = $s.open | Where-Object { $_.id -eq [string]$body.id -and $_.kind -eq 'asked' } | Select-Object -First 1
+		if (-not $q) { Send-Text $ctx 409 'That question was already answered.'; return }
+		Add-Thread 'answered' @{ to = $q.id; answers = @($body.answers | ForEach-Object { [string]$_ }); text = [string]$body.text } 'you' | Out-Null
+		# A hook waiting on it hands it over itself; otherwise it waits for the conductor's wait.
+		$waiting = $q.via -eq 'hook' -and -not $s.expired.ContainsKey($q.id)
+		$script:ConductorCache = @{}
+		Send-Json $ctx @{ ok = $true; opened = $(if ($waiting) { '' } else { Request-Conductor }) }; return
+	}
+	if ($path -eq '/api/conductor/permission') {
+		$body = Read-Json $req
+		$p = (Get-ThreadState).open | Where-Object { $_.id -eq [string]$body.id -and $_.kind -eq 'permission' } | Select-Object -First 1
+		if (-not $p) { Send-Text $ctx 409 "That request isn't waiting any more: answer it in the agent's window."; return }
+		Add-Thread 'decided' @{ to = $p.id; allow = [bool]$body.allow } 'you' | Out-Null
+		$script:ConductorCache = @{}
+		Send-Json $ctx @{ ok = $true }; return
+	}
+	if ($path -eq '/api/conductor/message') {
+		$body = Read-Json $req
+		$text = ([string]$body.text).Trim()
+		if (-not $text) { Send-Text $ctx 400 'Write something to send.'; return }
+		$e = Add-Thread 'message' @{ text = $text; to = [string]$body.to; via = 'rocco' } 'you'
+		$script:ConductorCache = @{}
+		Send-Json $ctx @{ id = $e.id; opened = (Request-Conductor) }; return
+	}
+	# Claude Code's background hooks for a conductor Rocco opened (server\hook-post.ps1).
+	if ($path -eq '/api/conductor/hook') {
+		try { Add-HookEvent ([string]$req.QueryString['e']) (Read-Json $req) } catch { }
+		Send-Json $ctx @{ ok = $true }; return
+	}
+	if ($path -eq '/api/conductor/show-window') { Send-Json $ctx @{ shown = (Show-ConductorWindow) }; return }
 	# The user's agent as this project's conductor, when none is running (conductor.ps1).
 	if ($path -eq '/api/conductor') {
 		if ((Get-Conductor).state -ne 'none') { Send-Json $ctx @{ agent = ''; running = $true }; return }
@@ -194,6 +234,7 @@ function Invoke-Request($ctx) {
 		$t = New-Task $title $text 'queued' $(if ($question) { 'question' } else { 'note' }) $type
 		Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
 		Save-Task $t
+		Add-Sent $(if ($question) { 'question' } else { 'note' }) $t $text
 		# opened: the agent Rocco opened as the conductor, because none was running.
 		Send-Json $ctx @{ id = $t.id; opened = (Request-Conductor) }; return
 	}
@@ -226,10 +267,15 @@ function Invoke-Request($ctx) {
 	}
 	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise)$') {
 		$id, $action = $Matches[1], $Matches[2]
-		Invoke-TaskAction $id $action ([string](Read-Json $req).text)
+		$text = [string](Read-Json $req).text
+		Invoke-TaskAction $id $action $text
+		$t = Read-Task $id
+		# On the user's own question, approve is "Got it" and reopen is "Ask more".
+		$said = if ($t.kind -eq 'question' -and $action -eq 'approve') { 'got-it' } elseif ($t.kind -eq 'question' -and $action -eq 'reopen') { 'ask-more' } else { $action }
+		Add-Sent $said $t $text
 		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved). A deleted task's work
 		# waits for the next conductor instead: with none running, nothing is running it either.
-		$pending = (Read-Task $id).pending
+		$pending = $t.pending
 		Send-Json $ctx @{ ok = $true; opened = $(if ($pending -and $pending -ne 'cancel') { Request-Conductor } else { '' }) }; return
 	}
 	Send-Text $ctx 404 'Not found'

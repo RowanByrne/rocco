@@ -66,6 +66,12 @@ export const api = {
   openLanes: (project, count = null) => DEMO ? demo.openLanes(project, count) : post(`/api/lanes?p=${encodeURIComponent(project || state.project)}`, { count }),
   // The user's agent as this project's conductor, when none is running (server/conductor.ps1): { agent }.
   openConductor: () => DEMO ? demo.openConductor() : post(withProject('/api/conductor')),
+  // The conductor's thread (server/thread.ps1): its history (only if it changed since stamp), and the user's side of it.
+  conductorThread: stamp => DEMO ? demo.conductorThread(stamp) : getJson(withProject('/api/conductor/thread', stamp ? `&stamp=${encodeURIComponent(stamp)}` : '')),
+  conductorAnswer: (id, answers, text) => DEMO ? demo.conductorAnswer(id, answers, text) : post(withProject('/api/conductor/answer'), { id, answers, text }),
+  conductorPermission: (id, allow) => DEMO ? demo.conductorPermission(id, allow) : post(withProject('/api/conductor/permission'), { id, allow }),
+  conductorMessage: (text, to) => DEMO ? demo.conductorMessage(text, to) : post(withProject('/api/conductor/message'), { text, to }),
+  showConductor: () => DEMO ? demo.showConductor() : post(withProject('/api/conductor/show-window')),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
   // Updates: the calendar's cards (live/CALENDAR.md) and the game page's events.

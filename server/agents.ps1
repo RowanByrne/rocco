@@ -4,8 +4,9 @@
 # (onboarding's accounts screen: the user brings their own), and how to install it and sign in (actions.ps1).
 
 $Agents = [ordered]@{
+	# hooks: the flag that loads Rocco's conductor hooks (conductor.ps1), so Rocco shows what it does and asks.
 	claude = @{ name = 'Claude Code'; short = 'Claude'; exe = 'claude'; prompt = @(); mcp = '.claude.json'; studio = '"Roblox_Studio"\s*:\s*\{'
-		plan = 'A Claude Pro or Max plan, or Anthropic API credit'; install = 'claude-install'; login = 'claude-login' }
+		plan = 'A Claude Pro or Max plan, or Anthropic API credit'; install = 'claude-install'; login = 'claude-login'; hooks = '--settings' }
 	codex  = @{ name = 'Codex'; short = 'Codex'; exe = 'codex'; prompt = @(); mcp = '.codex\config.toml'; studio = '\[mcp_servers\.Roblox_Studio\]'
 		plan = 'A ChatGPT plan, or OpenAI API credit'; install = 'codex-update'; login = 'codex-login' }
 	gemini = @{ name = 'Gemini CLI'; short = 'Gemini'; exe = 'gemini'; prompt = @('-i'); mcp = '.gemini\settings.json'; studio = '"Roblox_Studio"\s*:\s*\{'
@@ -59,13 +60,16 @@ function Set-Agent([string]$id) {
 # steer. It starts minimized in the taskbar, out of the way: the user follows it in Rocco, and opens the window only when
 # they want to (or the agent asks them something there). The prompt has no double quotes: they don't survive the npm
 # .cmd wrappers agents are often installed as. Returns the window's process (conductor.ps1 finds the agent in it).
-function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title) {
+function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title, [string[]]$extra = @()) {
 	$agent = Get-Agent
 	$exe = Find-AgentExe $agent.id
 	if (-not $exe) { throw "$($agent.name) isn't installed on this PC (Connections)." }
 	$quote = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
-	$arguments = @($Agents[$agent.id].prompt) + $prompt.Replace('"', '')
+	$arguments = @($extra | Where-Object { $_ }) + @($Agents[$agent.id].prompt) + $prompt.Replace('"', '')
+	# A session of its own: what marks an agent's child processes (Rocco started from an agent's shell) is left behind,
+	# or Claude Code takes it for a sub-session and doesn't save its transcript.
 	$text = "`$Host.UI.RawUI.WindowTitle = $(& $quote "Rocco: $title")`nSet-Location -LiteralPath $(& $quote $dir)`n" +
+		"Remove-Item Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION -ErrorAction SilentlyContinue`n" +
 		"& $(& $quote $exe) $(($arguments | ForEach-Object { & $quote $_ }) -join ' ')`n"
 	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
 	Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded -WorkingDirectory $dir -WindowStyle Minimized -PassThru

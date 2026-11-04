@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="styles/shell.css">
 <link rel="stylesheet" href="styles/components.css">
 <link rel="stylesheet" href="styles/workboard.css">
+<link rel="stylesheet" href="styles/conductor.css">
 <link rel="stylesheet" href="styles/connections.css">
 <link rel="stylesheet" href="styles/history.css">
 <link rel="stylesheet" href="styles/docs.css">
@@ -126,7 +127,11 @@
       </div>
       <div class="ask">
         <div class="mascot" id="mascot" aria-hidden="true" hidden></div>
+        <div class="cond-bar" id="condBar"></div>
+        <div class="chist" id="condHistory"><div class="chist-in"><div class="chist-list" id="condList"></div></div></div>
+        <div class="cond-asks" id="condAsks"></div>
         <form class="composer" id="composer" autocomplete="off">
+          <div class="note-mode" id="noteMode" hidden></div>
           <div class="drafts" id="drafts"></div>
           <textarea id="noteText" rows="1" placeholder="What did you notice?" aria-label="New note"></textarea>
           <div class="composer-row">

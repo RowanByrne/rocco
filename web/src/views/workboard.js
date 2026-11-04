@@ -188,29 +188,10 @@ function queueHTML() {
       + (deps.length ? `<span class="q-dep" title="${esc(t.waiting || `Needs ${deps.join(', ')} done first`)}">${icon.lock}After ${deps.join(', ')}</span>`
         : `<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${esc(t.waiting || 'Queued')}</span></span>`) + '</div>';
   };
-  return `<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? '<span class="q-hint">Drag to reorder</span>' : ''}${conductorHTML()}</div>`
+  // Whether a conductor is there to pick things up is the status line above the note box (conductor.js).
+  return `<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? '<span class="q-hint">Drag to reorder</span>' : ''}</div>`
     + (list.length ? `<div class="q-list">${list.map(row).join('')}</div>` : '<div class="empty">Nothing queued. Notes you add go here.</div>');
 }
-
-// Whether a conductor is there to pick things up (server/conductor.ps1). With none, Rocco opens one when the user hands
-// something over; the button opens one now, for work that's already waiting.
-function conductorHTML() {
-  const c = state.meta.conductor || { state: 'none' }, name = c.agent || agentName();
-  const waiting = state.tasks.some(t => t.pending && t.status !== 'removed');
-  if (c.state === 'listening') return `<span class="cond on" title="${esc(name)} is watching the Workboard: what you send is picked up at once"><i></i>${esc(name)} is listening</span>`;
-  if (c.state === 'busy') return `<span class="cond busy" title="${esc(name)} is running as the conductor. It picks up what's waiting when it's done with what it's doing. Its window is in your taskbar, if it needs you"><i></i>${esc(name)} is working</span>`;
-  // Work left Working with no conductor was cut off (its window closed): the button carries it on.
-  const cutOff = state.tasks.some(t => t.status === 'working');
-  return (waiting || cutOff) && state.agent?.installed
-    ? `<button class="btn-sm go cond-open" data-open-conductor title="${cutOff ? 'No conductor is running, and work was cut off: this carries it on' : 'No conductor is running for this game'}">${cutOff ? 'Carry on with' : 'Start'} ${esc(name)}</button>`
-    : `<span class="cond" title="No conductor is running. Sending a note starts one"><i></i>No conductor</span>`;
-}
-
-const startConductor = () => attempt('start the conductor', async () => {
-  const r = await api.openConductor();
-  await refresh();
-  if (r.agent) toast(`${r.agent} started as the conductor, minimized in your taskbar`, 'var(--claude)');
-});
 
 // The server opened a conductor because none was running: say so.
 export function conductorOpened(agent) { if (agent) toast(`${agent} started, minimized in your taskbar, to pick it up`, 'var(--claude)'); }
@@ -504,7 +485,6 @@ function conflict(ids) {
 let dragId = null;
 function initReorder() {
   const box = $('#queue');
-  box.addEventListener('click', e => { if (e.target.closest('[data-open-conductor]')) startConductor(); });
   const clearMarks = () => box.querySelectorAll('.drop-before, .drop-after').forEach(r => r.classList.remove('drop-before', 'drop-after'));
   box.addEventListener('dragstart', e => {
     const row = e.target.closest('.q-row');

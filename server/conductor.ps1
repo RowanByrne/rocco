@@ -45,13 +45,15 @@ function Find-AgentBelow([int]$window) {
 	0
 }
 
-# 'listening' (waiting on the board now), 'busy' (running, doing something), or 'none'.
+# 'listening' (waiting on the board now), 'busy' (running, doing something), or 'none'. With what Rocco's status line
+# shows (thread.ps1): what it's doing, its open questions and permission requests, and its latest message.
 $script:ConductorCache = @{}
 function Get-Conductor {
 	$hit = $script:ConductorCache[$Root]
 	if ($hit -and ((Get-Date) - $hit.Read).TotalSeconds -lt 3) { return $hit.Value }
 	$c = Read-Conductor
-	$value = [pscustomobject]@{ state = 'none'; agent = '' }
+	$thread = Get-ConductorThread
+	$value = [pscustomobject]@{ state = 'none'; agent = ''; doing = ''; open = $thread.open; elsewhere = $thread.elsewhere; last = $thread.last; stamp = $thread.stamp }
 	if ($c) {
 		# Opened by Rocco a moment ago: its agent may not have started yet.
 		if (-not $c.pid -and $c.window -and (Test-ProcessAlive $c.window $c.windowStarted)) {
@@ -62,18 +64,97 @@ function Get-Conductor {
 		$fresh = $c.waiting -and ((Get-Date) - [datetime]$c.at).TotalSeconds -lt 20
 		$value.agent = "$($c.agent)"
 		$value.state = if ($fresh) { 'listening' } elseif ($alive) { 'busy' } else { 'none' }
+		# Its latest step, while it's working and the step is recent.
+		if ($value.state -eq 'busy' -and $thread.step -and ((Get-Date) - [datetime]$thread.step.at).TotalMinutes -lt 3) { $value.doing = $thread.step.text }
+		# Opened with Rocco's hooks, and not a word from them since: it's asking something in its own window, before any
+		# hook runs (the first time an agent opens in a folder, it asks whether the user trusts it).
+		if ($value.state -eq 'busy' -and $c.PSObject.Properties['hooks'] -and $c.hooks -and $c.opened) {
+			$since = ((Get-Date) - [datetime]$c.opened).TotalSeconds
+			$value | Add-Member -NotePropertyName inWindow -NotePropertyValue ($since -gt 20 -and (-not $thread.heard -or $thread.heard -lt [datetime]$c.opened))
+		}
 	}
 	$script:ConductorCache[$Root] = @{ Read = Get-Date; Value = $value }
 	$value
 }
 
-# The user's agent, opened in its own window as this project's conductor, on a first prompt. Returns the agent.
+# The user's agent, opened in its own window as this project's conductor, on a first prompt. An agent that takes
+# Rocco's hooks (agents.ps1) gets them, so Rocco shows what it does and the user answers it in Rocco. Returns the agent.
 function Open-Conductor([string]$prompt) {
 	$agent = Get-Agent
 	if (-not $agent.installed) { throw "$($agent.name) isn't installed on this PC (Connections)." }
-	$window = Start-AgentWindow $RepoDir $prompt "$($agent.name), conductor on $(Split-Path $Root -Leaf)"
-	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now) })
+	$extra = @()
+	if ($Agents[$agent.id].hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
+	$window = Start-AgentWindow $RepoDir $prompt "$($agent.name), conductor on $(Split-Path $Root -Leaf)" $extra
+	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now)
+		hooks = [bool]$extra.Count; opened = (Now) })
+	Add-Event "Rocco opened $($agent.name) as the conductor"
 	$agent
+}
+
+# Told to a conductor that has Rocco's hooks. Also how Rocco knows its own prompt when the hook passes it on.
+$InRocco = 'Rocco shows the user what you do, your messages, your questions (AskUserQuestion) and permission prompts, so talk to them as usual: they read Rocco, not this window. What they write to you comes back through wait, as a [message].'
+
+# Claude Code's settings for a conductor Rocco opens (--settings), so only that session and its workers load them:
+#   PermissionRequest, and PreToolUse on AskUserQuestion: rocco.ps1 hook waits for the user's answer in Rocco
+#   PreToolUse (every tool), Stop, UserPromptSubmit: server\hook-post.ps1 passes the step, its last message, or what the
+#   user typed in its window to Rocco, in the background
+# Written at each launch, so its paths follow the RoDev folder wherever it is.
+function Write-ConductorHooks {
+	$id = Split-Path $Root -Leaf
+	$exe = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File'
+	$wait = { param($hook) "$exe `"$((Join-Path $AppDir 'rocco.ps1').Replace('\', '/'))`" hook $hook -Project `"$id`"" }
+	$post = { param($event) "$exe `"$((Join-Path $AppDir 'server\hook-post.ps1').Replace('\', '/'))`" -Event $event -Project `"$id`" -Port $Port" }
+	$command = { param($text, [bool]$async) $h = [ordered]@{ type = 'command'; command = $text }; if ($async) { $h.async = $true } else { $h.timeout = $HookWait + 120 }; $h }
+	$settings = [ordered]@{ hooks = [ordered]@{
+		PermissionRequest = @([ordered]@{ hooks = @(& $command (& $wait 'permission') $false) })
+		PreToolUse = @(
+			[ordered]@{ matcher = 'AskUserQuestion'; hooks = @(& $command (& $wait 'question') $false) },
+			[ordered]@{ matcher = '*'; hooks = @(& $command (& $post 'tool') $true) }
+		)
+		Stop = @([ordered]@{ hooks = @(& $command (& $post 'stop') $true) })
+		UserPromptSubmit = @([ordered]@{ hooks = @(& $command (& $post 'prompt') $true) })
+	} }
+	$file = Join-Path (Get-ThreadDir) 'claude-settings.json'
+	New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+	[IO.File]::WriteAllText($file, (ConvertTo-Json -InputObject $settings -Depth 10), $Utf8)
+	$file
+}
+
+# What a hook passed on (server\hook-post.ps1): a step, the conductor's message at the end of a turn, or something the
+# user typed in its window. Its workers' steps are left out: their cards show them.
+function Add-HookEvent([string]$event, $in) {
+	if ($in.agent_id) { return }
+	switch ($event) {
+		'tool' { Add-Activity (Get-ToolSummary ([string]$in.tool_name) $in.tool_input) }
+		'stop' { if ("$($in.last_assistant_message)".Trim()) { Add-Thread 'said' @{ text = [string]$in.last_assistant_message; via = 'hook' } | Out-Null } }
+		'prompt' {
+			$text = "$($in.prompt)".Trim()
+			# Rocco's own prompts, and its agent's notices about background work, aren't the user's.
+			if ($text -and -not $text.Contains($InRocco) -and $text -notmatch '^<task-notification>') { Add-Thread 'message' @{ text = $text; via = 'terminal' } 'you' | Out-Null }
+		}
+	}
+}
+
+# Brings the conductor's window up: for a permission request its hook stopped waiting on, answered there.
+function Show-ConductorWindow {
+	if (-not ('Rocco.Win' -as [type])) {
+		Add-Type -Namespace Rocco -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);'
+	}
+	$c = Read-Conductor
+	foreach ($start in @($c.window, $c.pid) | Where-Object { $_ }) {
+		$id = [int]$start
+		# The window belongs to the agent's console, or to whatever started it.
+		for ($i = 0; $i -lt 5 -and $id; $i++) {
+			$p = Get-Process -Id $id -ErrorAction SilentlyContinue
+			if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
+				[void][Rocco.Win]::ShowWindow($p.MainWindowHandle, 9)
+				[void][Rocco.Win]::SetForegroundWindow($p.MainWindowHandle)
+				return $true
+			}
+			$id = [int](Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue).ParentProcessId
+		}
+	}
+	$false
 }
 
 # What every conductor Rocco opens is told after its first job: keep watching the board. Rocco's README has the command,
