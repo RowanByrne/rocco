@@ -145,6 +145,9 @@ function Get-LaneHistory($worktrees) {
 	$open = @((Get-Lanes).open)
 	foreach ($w in $worktrees | Sort-Object lane) {
 		$dirty = @(Invoke-Git $w.path status --porcelain | Where-Object { $_ }).Count
+		# Commits a detached lane holds that main doesn't have yet: the conductor checking a merge or a fix there
+		# before it pushes (CONDUCTOR.md "Checking in a lane").
+		$ahead = if ($w.branch) { 0 } else { [int]("$(Invoke-Git $w.path rev-list --count origin/main..HEAD)".Trim()) }
 		$events = foreach ($line in @(Invoke-Git $w.path reflog -n 30 --date=iso-strict '--format=%h%x09%gd%x09%gs')) {
 			$f = $line -split "`t", 3
 			if ($f.Count -lt 3 -or -not $f[2]) { continue } # creating the checkout leaves an entry with no message
@@ -153,7 +156,7 @@ function Get-LaneHistory($worktrees) {
 		}
 		[pscustomobject]@{
 			lane = $w.lane; branch = $w.branch; head = $w.head.Substring(0, [Math]::Min(7, $w.head.Length))
-			dirty = $dirty; open = $open -contains $w.lane; events = @($events)
+			dirty = $dirty; ahead = $ahead; open = $open -contains $w.lane; events = @($events)
 		}
 	}
 }

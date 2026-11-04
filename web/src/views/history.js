@@ -11,7 +11,8 @@ import { openTask } from './workboard.js';
 const EVENT_ICON = { commit: icon.commit, merge: icon.merge, switch: icon.branch, refresh: icon.sync, pull: icon.down, reset: icon.alert, other: icon.commit };
 const LANE_STATE = {
   working: ['Working', 'var(--blue)'], stuck: ['Stuck', 'var(--amber)'], held: ['Holding a branch', 'var(--cyan)'],
-  branch: ['On a branch', 'var(--cyan)'], dirty: ['Uncommitted changes', 'var(--amber)'], idle: ['Idle', 'var(--gray)'],
+  branch: ['On a branch', 'var(--cyan)'], check: ['Checking before main', 'var(--accent)'], dirty: ['Uncommitted changes', 'var(--amber)'],
+  idle: ['Idle', 'var(--gray)'],
 };
 let timer = null;
 
@@ -79,17 +80,19 @@ function branchesHTML(h) {
 
 // ---- Lanes ----
 
-// What a lane is doing: its Workboard task first, else what git shows.
+// What a lane is doing: its Workboard task first, else what git shows. A detached lane with commits main doesn't
+// have yet is the conductor checking a merge or a fix there before it goes to Main (CONDUCTOR.md "Checking in a lane").
 function laneState(l) {
   const task = state.tasks.find(t => t.lane === l.lane && (t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && (t.status === 'ready' || t.status === 'queued'))));
-  const kind = task ? (task.status === 'working' || task.status === 'stuck' ? task.status : 'held') : l.branch ? 'branch' : l.dirty ? 'dirty' : 'idle';
+  const kind = task ? (task.status === 'working' || task.status === 'stuck' ? task.status : 'held') : l.branch ? 'branch' : l.ahead ? 'check' : l.dirty ? 'dirty' : 'idle';
   const last = l.events[0]?.at || '';
   return { task, kind, active: kind !== 'idle', last };
 }
 
 function laneHTML(l, s) {
   const [label, color] = LANE_STATE[s.kind];
-  const where = l.branch ? `${icon.branch}<span>${esc(l.branch)}</span>` : `<span>main @ ${esc(l.head)}</span>`;
+  const where = l.branch ? `${icon.branch}<span>${esc(l.branch)}</span>`
+    : `<span>main @ ${esc(l.head)}${l.ahead ? ` · ${l.ahead} commit${l.ahead === 1 ? '' : 's'} not on main yet` : ''}</span>`;
   const done = of('done').filter(t => t.lane === l.lane).slice(0, 3);
   const events = l.events.slice(0, 6);
   return `<div class="lane-card${s.active ? ' active' : ''}" style="--c:${color}">`
