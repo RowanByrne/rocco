@@ -10,7 +10,6 @@ import { api } from '../api.js';
 import { toast } from '../ui/toast.js';
 import { initPopover } from '../ui/popover.js';
 import { go, syncUrl, docUrl } from '../router.js';
-import { agentShort } from '../agent.js';
 import * as sync from '../sync.js';
 
 let open = null;            // the open doc as the server sent it: { path, text, hash, dirty, locked, last }, or { path, error }
@@ -31,7 +30,7 @@ const nameOf = path => path.split('/').pop();
 const docOf = path => state.docs?.docs.find(d => d.path === path);
 const lf = text => String(text).replace(/\r\n?/g, '\n');
 export const hasDrafts = () => drafts.size > 0;
-const locked = () => `Owned by the template: in a game it changes through the template, so ask ${agentShort()} to change it.`;
+const locked = () => `Owned by the template: in a game it changes through the template, so ask Rocco to change it.`;
 
 // Folders the user closed, kept in this browser. .claude (agent definitions) starts closed.
 let closed;
@@ -209,9 +208,9 @@ function headHTML(d) {
 }
 
 function askHTML(d) {
-  const hint = d.locked ? `Ask ${agentShort()} to change this doc (it goes through the template)` : `Ask ${agentShort()} to change this doc…`;
+  const hint = d.locked ? `Ask Rocco to change this doc (it goes through the template)` : `Ask Rocco to change this doc…`;
   return `<form class="doc-ask" id="docAskForm" autocomplete="off"><span class="doc-ask-icon">${icon.sparkle}</span>`
-    + `<textarea id="docAsk" rows="1" placeholder="${esc(hint)}" aria-label="Ask ${esc(agentShort())} to change this doc"></textarea>`
+    + `<textarea id="docAsk" rows="1" placeholder="${esc(hint)}" aria-label="Ask Rocco to change this doc"></textarea>`
     + '<button class="send" type="submit" title="Add to Up next" aria-label="Add to Up next"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button></form>';
 }
 
@@ -242,7 +241,7 @@ function barHTML(d) {
 function blankHTML() {
   const recent = (state.docs?.docs || []).slice().sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 6);
   return `<div class="panel doc doc-blank"><div class="blank-icon">${icon.doc}</div><div class="blank-title">Pick a doc</div>`
-    + `<div class="blank-sub">Hover one for a preview. Open it to read it, edit it and push, or ask ${esc(agentShort())} to change it.</div>`
+    + `<div class="blank-sub">Hover one for a preview. Open it to read it, edit it and push, or ask Rocco to change it.</div>`
     + (recent.length ? `<div class="doc-recents"><div class="doc-recents-label">Changed lately</div>${recent.map(d => `<button class="doc-recent" data-doc="${esc(d.path)}">${icon.doc}`
       + `<span class="dr-name">${esc(d.title || nameOf(d.path))}</span><span class="dr-path">${esc(d.path)}</span><span class="dr-at">${agoText(d.at)}</span></button>`).join('')}</div>` : '')
     + '</div>';

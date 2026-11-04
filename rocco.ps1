@@ -208,7 +208,7 @@ switch ($Command) {
 		}
 		# A note for the conductor to take on: Up next tells the user it's been read, and the conductor what comes first.
 		if ($t.pending -eq 'plan' -and $t.status -eq 'queued') {
-			if ($t.waiting -eq $ToConductor) { Set-Field $t 'waiting' ($ReadIt -f (Get-Agent).short); Save-Task $t }
+			if ($t.waiting -eq $ToConductor) { Set-Field $t 'waiting' $ReadIt; Save-Task $t }
 			''
 			"Taking it on? First: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}

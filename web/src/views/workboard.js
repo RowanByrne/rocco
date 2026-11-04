@@ -11,7 +11,6 @@ import { settings } from '../settings.js';
 import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
-import { agentShort, agentName } from '../agent.js';
 import { shotOf, imagesIn, shotsHTML, shotClick, clip } from '../ui/shots.js';
 import { showDoc } from './docs.js';
 
@@ -37,11 +36,15 @@ const unfinishedDeps = t => (t.after || []).filter(id => { const d = byId(id); r
 // Questions for the user: the list, or the older single question.
 const questionsOf = t => t.questions?.length ? t.questions : (t.question ? [{ text: t.question, options: (t.options || []).map(label => ({ label })) }] : []);
 const answers = new Map(); // task id -> picked answers, kept across re-renders
+// The reply boxes on the board: a plan's "Change it" and "Ask", an answer's "Ask more". The board re-renders on every
+// refresh and every 30 seconds, so each open box is kept here, with what's typed in it, until it's sent or closed.
+const drafts = new Map(); // task id -> { mode, text }
+const PLAN_PROMPT = { revise: 'What should change?', followup: 'Your question' };
 
 // Where a queued task came from, for its tag in Up next.
 const source = t => t.pending === 'reopen' ? ['Reopened', 'var(--amber)']
   : t.pending === 'answer' ? ['Answered', 'var(--amber)']
-  : t.kind === 'suggestion' ? [`From ${agentShort()}`, 'var(--claude)']
+  : t.kind === 'suggestion' ? [`From Rocco`, 'var(--claude)']
   : t.kind === 'note' ? ['Your note', 'var(--violet)'] : null;
 
 const typeTag = t => TYPES[t.type] && t.type !== 'feature' ? `<span class="ttag t-${t.type}">${TYPES[t.type]}</span>` : '';
@@ -76,7 +79,7 @@ function questionCardHTML(t) {
   const i = picked.length, q = qs[i];
   return `<div class="ask-card"><div class="ask-q"><span>${esc(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
     + `<div class="opts">${(q.options || []).map(o => optionHTML(o, i, '')).join('')}</div>`
-    + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let ${esc(agentShort())} decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
+    + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
 }
 
 function workingHTML(t) {
@@ -124,14 +127,17 @@ const stepsHTML = p => `<ol class="plan-steps">${(p.steps || []).map((s, i) => `
 const specButton = p => p.spec ? `<span class="sp"></span><button class="btn-sm" data-plan-spec="${esc(p.spec)}" title="${esc(p.spec)}">${icon.doc}Read the spec</button>` : '';
 
 function planCardHTML(p) {
+  const d = drafts.get(p.id);
   return `<div class="plan${p.fresh ? ' fresh' : ''}" style="${featureVars(p.id)}" data-id="${p.id}">`
-    + `<div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span></div>`
+    + `<div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span>`
+    + `<button class="plan-x" data-plan-dismiss="${p.id}" title="Dismiss this plan" aria-label="Dismiss this plan">×</button></div>`
     + `<div class="plan-title">${esc(p.title)}</div>${p.summary ? `<div class="plan-sum">${esc(p.summary)}</div>` : ''}${stepsHTML(p)}`
-    + (p.pending === 'revise' ? '<div class="plan-note">Changes asked for · waiting for the conductor</div>' : '')
+    + (p.pending === 'revise' ? '<div class="plan-note">Changes asked for · waiting for Rocco</div>' : '')
     + `<div class="plan-actions"><button class="btn-sm go" data-plan-approve="${p.id}">Approve plan</button>`
     + `<button class="btn-sm" data-plan-reply="${p.id}" data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply="${p.id}" data-mode="followup">Ask</button>`
     + `${specButton(p)}</div>`
-    + `<div class="plan-reply" hidden><textarea class="field" placeholder=""></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-plan-send="${p.id}">Send</button></div></div></div>`;
+    + `<div class="plan-reply"${d ? ` data-mode="${d.mode}"` : ' hidden'}><textarea class="field" placeholder="${d ? PLAN_PROMPT[d.mode] : ''}">${esc(d?.text || '')}</textarea>`
+    + `<div class="row"><span class="sp"></span><button class="btn-sm go" data-plan-send="${p.id}">Send</button></div></div></div>`;
 }
 
 function featuresHTML() {
@@ -153,7 +159,8 @@ function questionHTML(t) {
     + (!done && t.attempt > 1 ? `<div class="qa-follow">${esc(t.log.filter(l => l.who === 'you').at(-1)?.text || '')}</div>` : '')
     + (done ? `<div class="qa-a">${esc(t.summary || '')}</div>`
       + `<div class="qa-actions"><button class="btn-sm go" data-got-it="${t.id}">${icon.check}Got it</button><button class="btn-sm" data-ask-more="${t.id}">Ask more</button></div>`
-      + `<div class="qa-reply" hidden><textarea class="field" placeholder="Ask a follow-up"></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send="${t.id}">Ask</button></div></div>`
+      + `<div class="qa-reply"${drafts.has(t.id) ? '' : ' hidden'}><textarea class="field" placeholder="Ask a follow-up">${esc(drafts.get(t.id)?.text || '')}</textarea>`
+      + `<div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send="${t.id}">Ask</button></div></div>`
       : `<div class="qa-actions"><button class="linkish" data-unask="${t.id}">Take it back</button></div>`)
     + `</div>`;
 }
@@ -166,7 +173,7 @@ function inboxHTML() {
   const list = work('inbox');
   if (!list.length) return '';
   const why = t => t.summary || (t.note && t.note !== t.title ? t.note : '');
-  return `<div class="inbox-head">${icon.sparkle}${esc(agentShort())} spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>`
+  return `<div class="inbox-head">${icon.sparkle}Rocco spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>`
     + `${list.length > 1 ? '<button class="btn-sm" data-queue-all>Queue all</button>' : ''}</div>`
     + `<div class="inbox-items">${list.map(t => `<div class="sug${t.fresh ? ' fresh' : ''}" data-id="${t.id}"><div class="sug-title">${esc(t.title)}</div>`
       + `${why(t) ? `<div class="sug-why">${esc(why(t))}</div>` : ''}`
@@ -196,7 +203,25 @@ function queueHTML() {
 // The server opened a conductor because none was running: say so.
 export function conductorOpened(agent) { if (agent) toast(`${agent} started, minimized in your taskbar, to pick it up`, 'var(--claude)'); }
 
+// The cursor in a reply box (drafts, above), put back after the board re-renders.
+function keepTyping(render) {
+  const f = document.activeElement;
+  const box = f?.matches?.('.plan-reply textarea, .qa-reply textarea') ? f : null;
+  const at = box && { id: box.closest('[data-id]').dataset.id, start: box.selectionStart, end: box.selectionEnd, top: box.scrollTop };
+  render();
+  if (!at) return;
+  const again = [...document.querySelectorAll('#plans .plan-reply textarea, #questions .qa-reply textarea')].find(t => t.closest('[data-id]').dataset.id === at.id);
+  if (!again || again === box) return;
+  again.focus({ preventScroll: true });
+  again.setSelectionRange(at.start, at.end);
+  again.scrollTop = at.top;
+}
+
 export function renderWorkboard() {
+  keepTyping(renderBoard);
+}
+
+function renderBoard() {
   const ready = work('ready').length, stuck = work('stuck').length, asks = work('inbox').length + plansToApprove().length, replies = answered().length;
   const waiting = ready + stuck + asks + replies;
   $('#boardSub').textContent = [ready && `${ready} to test`, stuck && `${stuck} stuck`, asks && `${asks} waiting for your OK`, replies && `${replies} answer${replies === 1 ? '' : 's'} for you`].filter(Boolean).join(' · ');
@@ -270,7 +295,7 @@ function whereLine(t) {
     case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
     case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
     case 'queued': return esc(t.waiting || 'Queued');
-    case 'inbox': return `${agentShort()} spotted this. Queue it to have it done.`;
+    case 'inbox': return `Rocco spotted this. Queue it to have it done.`;
     case 'done': return `Approved at ${hhmm(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
   }
   return '';
@@ -279,7 +304,7 @@ function whereLine(t) {
 function questionsSheetHTML(t) {
   const picked = answers.get(t.id) || [];
   return questionsOf(t).map((q, i) => `<div class="s-q">${esc(q.text)}</div><div class="opts">${(q.options || []).map(o => optionHTML(o, i, picked[i])).join('')}`
-    + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let ${esc(agentShort())} decide</button></div>`).join('');
+    + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button></div>`).join('');
 }
 
 function sheetBody(t) {
@@ -331,7 +356,7 @@ async function sendBack(id) {
     for (const s of shots) { const { name } = await api.shot(id, s.file); if (name) names.push(name); }
     await act(id, 'reopen', [text, names.length ? `Screenshots: ${names.join(', ')}` : ''].filter(Boolean).join('\n'));
     reply = { id: '', shots: [] };
-    toast('Sent back to the conductor', 'var(--amber)');
+    toast('Sent back to Rocco', 'var(--amber)');
   });
 }
 
@@ -453,7 +478,7 @@ async function approve(id) {
 
 const queueIt = id => attempt('queue it', async () => { await act(id, 'queue'); undoable(id, 'Added to Up next', 'var(--violet)'); });
 const gotIt = id => attempt('close it', async () => { await act(id, 'approve'); undoable(id, 'Got it', 'var(--claude)'); });
-const askMore = (id, text) => attempt('ask it', async () => { await act(id, 'reopen', text); toast('Asked. The answer shows here.', 'var(--claude)'); });
+const askMore = (id, text) => attempt('ask it', async () => { await act(id, 'reopen', text); drafts.delete(id); renderWorkboard(); toast('Asked. The answer shows here.', 'var(--claude)'); });
 const unask = id => attempt('take it back', async () => { await act(id, 'remove'); undoable(id, 'Question taken back', 'var(--gray)'); });
 const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); });
 const queueAll = () => attempt('queue them', async () => {
@@ -481,7 +506,7 @@ async function sendAnswers(id, extra = '') {
   renderWorkboard();
   try {
     await act(id, 'answer', text);
-    undoable(id, 'Answer sent to the conductor', 'var(--amber)');
+    undoable(id, 'Answer sent to Rocco', 'var(--amber)');
   } catch (e) {
     toast(`Couldn't send the answer: ${e.message}`, 'var(--red)');
   }
@@ -575,29 +600,40 @@ export function initWorkboard() {
     else if (hit('[data-ask-more]')) {
       const box = hit('.qa').querySelector('.qa-reply');
       box.hidden = !box.hidden;
-      if (!box.hidden) box.querySelector('textarea').focus();
+      if (box.hidden) drafts.delete(card); else { drafts.set(card, { mode: 'more', text: box.querySelector('textarea').value }); box.querySelector('textarea').focus(); }
     } else if (hit('[data-ask-send]')) {
       const field = hit('.qa-reply').querySelector('textarea'), text = field.value.trim();
       if (!text) { field.focus(); return; }
       askMore(card, text);
     } else if (hit('.qa-reply')) { /* typing in it */ }
     else if (hit('.qa-q')) openTask(card);
-    else if (hit('[data-plan-approve]')) attempt('approve the plan', async () => { await act(card, 'approve-plan'); toast('Plan approved. The conductor starts it.', 'var(--accent-text)'); });
+    else if (hit('[data-plan-approve]')) attempt('approve the plan', async () => { await act(card, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); });
+    else if (hit('[data-plan-dismiss]')) attempt('dismiss the plan', async () => { await act(card, 'remove'); drafts.delete(card); undoable(card, 'Plan dismissed', 'var(--gray)'); });
     else if (hit('[data-plan-reply]')) {
       const box = hit('.plan').querySelector('.plan-reply'), mode = hit('[data-plan-reply]').dataset.mode;
+      const field = box.querySelector('textarea');
       box.hidden = box.dataset.mode === mode ? !box.hidden : false;
       box.dataset.mode = mode;
-      box.querySelector('textarea').placeholder = mode === 'revise' ? 'What should change?' : 'Your question';
-      if (!box.hidden) box.querySelector('textarea').focus();
+      field.placeholder = PLAN_PROMPT[mode];
+      if (box.hidden) drafts.delete(card); else { drafts.set(card, { mode, text: field.value }); field.focus(); }
     } else if (hit('[data-plan-send]')) {
       const box = hit('.plan-reply'), text = box.querySelector('textarea').value.trim();
       if (!text) { box.querySelector('textarea').focus(); return; }
-      attempt('send it', async () => { await act(card, box.dataset.mode === 'revise' ? 'revise' : 'followup', text); toast('Sent to the conductor', 'var(--accent-text)'); });
+      attempt('send it', async () => {
+        await act(card, box.dataset.mode === 'revise' ? 'revise' : 'followup', text);
+        drafts.delete(card);
+        renderWorkboard();
+        toast('Sent to Rocco', 'var(--accent-text)');
+      });
     } else if (hit('.plan-reply')) { /* typing in it */ }
     else if (hit('.card, .sug, .q-row, .feat, .plan')) openTask(card);
   });
   view.addEventListener('keydown', e => {
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id); }
+  });
+  view.addEventListener('input', e => {
+    const box = e.target.closest('.plan-reply, .qa-reply'), id = e.target.closest('[data-id]')?.dataset.id;
+    if (box && id) drafts.set(id, { mode: box.dataset.mode || 'more', text: e.target.value });
   });
 
   // A typed answer, or what's still wrong, goes with Enter; Shift+Enter starts a new line.
@@ -644,7 +680,7 @@ export function initWorkboard() {
       attempt('send it', async () => { await act(id, hit('[data-revise]') ? 'revise' : 'followup', text); toast(hit('[data-revise]') ? 'Changes asked for' : 'Follow-up sent', 'var(--violet)'); });
     } else if (hit('[data-plan-approve]')) {
       closeSheet();
-      attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. The conductor starts it.', 'var(--accent-text)'); });
+      attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); });
     } else if (hit('[data-got-it]')) { closeSheet(); gotIt(id); }
     else if (hit('[data-ask-more-send]')) {
       const text = $('#followText').value.trim();

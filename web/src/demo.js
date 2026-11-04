@@ -96,7 +96,7 @@ function seed(id) {
       { ...base, id: 'T-048', status: 'queued', type: 'tweak', kind: 'note', order: 1, after: ['T-047'], title: 'Sort leaderboard by level', note: 'leaderboard should sort by level', waiting: 'After T-047 (same file)' },
       { ...base, id: 'T-049', status: 'queued', type: 'tweak', kind: 'task', order: 2, after: ['T-043'], title: 'Coin pickup sound too loud', note: 'coin pickup sound is way too loud', waiting: 'After T-043 (same file)' },
       { ...base, id: 'T-050', status: 'queued', type: 'bug', kind: 'note', order: 4, pending: 'plan', waiting: 'Waiting for the conductor', title: "NPC dialog runs off the bubble when it's long", note: "npc dialog runs off the bubble when it's long", shots: [picture(120)] },
-      { ...base, id: 'T-051', status: 'queued', type: 'bug', kind: 'note', order: 5, pending: 'plan', waiting: 'Claude has read it', title: 'FPS drops near the spawn fountain', note: 'fps drops near the spawn fountain' },
+      { ...base, id: 'T-051', status: 'queued', type: 'bug', kind: 'note', order: 5, pending: 'plan', waiting: 'Rocco has read it', title: 'FPS drops near the spawn fountain', note: 'fps drops near the spawn fountain' },
       { ...base, id: 'T-052', status: 'inbox', type: 'tweak', kind: 'suggestion', title: 'Shop button overlaps the health bar on small phones', note: 'Shop button overlaps the health bar on small phones',
         summary: 'Spotted while fixing the shop prices (T-041).' },
       { ...base, id: 'T-053', status: 'inbox', type: 'idea', kind: 'suggestion', title: 'Daily reward claims have no analytics event', note: 'Daily reward claims have no analytics event',

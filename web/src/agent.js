@@ -1,10 +1,10 @@
-// This PC's coding agent (server/agents.ps1): picked in Settings, opened for onboarding, and named wherever Rocco asks it
-// for something. Never assume Claude: the user works with whichever agent their subscription gives them.
+// This PC's coding agent (server/agents.ps1): picked in Settings, and opened as the conductor and for onboarding.
+// Never assume Claude: the user works with whichever agent their subscription gives them. In the app, the agent at
+// work in a game is called Rocco, whichever agent it is ("Rocco is listening", "Ask Rocco"); the agent's own name is
+// for the program itself: Settings, Connections, starting it, and its window.
 import { state, emit } from './state.js';
 import { api } from './api.js';
 
-// "Claude", "Codex", ...: for "Ask Codex", "Codex spotted".
-export const agentShort = () => state.agent?.short || 'your agent';
 // "Claude Code", "Gemini CLI", ...
 export const agentName = () => state.agent?.name || 'your agent';
 

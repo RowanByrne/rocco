@@ -6,7 +6,6 @@ import { $, esc } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
 import { api } from '../api.js';
 import { toast } from '../ui/toast.js';
-import { agentShort } from '../agent.js';
 import { go } from '../router.js';
 import { openTask } from './workboard.js';
 
@@ -26,7 +25,7 @@ export async function loadUpdates(force = false) {
     state.updates = await api.updates(force);
     emit('updates');
     const queued = state.updates.auto?.queued || [];
-    if (queued.length) toast(`Queued for ${agentShort()}: the game page event for ${queued.map(q => q.title).join(', ')}`, 'var(--violet)');
+    if (queued.length) toast(`Queued for Rocco: the game page event for ${queued.map(q => q.title).join(', ')}`, 'var(--violet)');
   } catch (e) { state.updates = { error: e.message }; emit('updates'); }
   // Sooner while Roblox is still being asked.
   timer = setTimeout(() => loadUpdates(), state.updates?.roblox?.loading ? 2500 : 60000);
@@ -52,7 +51,7 @@ const eventDay = iso => ymd(new Date(iso));
 
 function eventChip(c) {
   const states = {
-    notyet: ['No event yet', 'var(--gray)'], queued: [`Queued for ${agentShort()}`, 'var(--violet)'], drafted: ['Drafted: ready to publish', 'var(--amber)'],
+    notyet: ['No event yet', 'var(--gray)'], queued: [`Queued for Rocco`, 'var(--violet)'], drafted: ['Drafted: ready to publish', 'var(--amber)'],
     scheduled: ['On the game page', 'var(--green)'], live: ['Live on the game page', 'var(--green)'], over: ['Event over', 'var(--gray)'], none: ['No game page event', 'var(--gray)'],
   };
   const [label, color] = states[c.event] || states.notyet;
@@ -67,7 +66,7 @@ function cardActions(c, u) {
   if (c.event === 'queued' && c.task) return `<button class="mini" data-task="${esc(c.task)}">${esc(c.task)}</button>`;
   if (c.event === 'drafted') return c.onRoblox ? publishButton(c.eventId, u) : hubLink(u);
   if (c.event !== 'notyet' || daysUntil(c.date) < 0) return '';
-  const auto = u.lead > 0 && daysUntil(c.date) > u.lead ? `<span class="upd-note">${agentShort()} gets it ${u.lead} days before</span>` : '';
+  const auto = u.lead > 0 && daysUntil(c.date) > u.lead ? `<span class="upd-note">Rocco gets it ${u.lead} days before</span>` : '';
   return `${auto}<button class="mini" data-queue="${esc(c.id)}">Queue its event now</button>`;
 }
 
@@ -150,7 +149,7 @@ function listHTML(u) {
   const row = c => `<div class="upd-row" data-card="${esc(c.id)}"><span class="upd-dot" style="--c:${KIND_COLOR[c.kind] || KIND_COLOR.Update}"></span>`
     + `<div class="upd-main"><b>${esc(c.title)}</b><span class="upd-when">${esc(c.kind)} · ${c.date ? esc(whenText(c)) : 'No date'}</span>`
     + `${c.notes ? `<span class="upd-notes">${esc(c.notes)}</span>` : ''}<span class="upd-state">${eventChip(c)}${cardActions(c, u)}</span>${candidatesHTML(c)}</div></div>`;
-  const lead = `<label class="upd-lead">${agentShort()} makes each update's game page event <select class="input" id="updLead">`
+  const lead = `<label class="upd-lead">Rocco makes each update's game page event <select class="input" id="updLead">`
     + LEADS.map(n => `<option value="${n}"${n === u.lead ? ' selected' : ''}>${n ? `${n} days before` : 'only when I ask'}</option>`).join('') + '</select></label>';
   return `<div class="panel upd-list"><div class="panel-head">${icon.calendar}Planned<span class="count">${upcoming.length}</span></div>`
     + (upcoming.length ? upcoming.map(row).join('') : `<div class="upd-empty">Nothing planned yet. <button class="mini" id="updFirst">Plan an update</button></div>`)
@@ -174,7 +173,7 @@ export function renderUpdates() {
 function openEditor(card, date) {
   const c = card || { id: '', title: '', date: date || todayYmd(), time: '', kind: 'Update', notes: '', event: 'notyet' };
   modal.querySelector('.modal-card').innerHTML = `<h2>${card ? 'Edit the update' : 'Plan an update'}</h2>`
-    + `<p class="m-sub">It goes on the game's calendar (<code>live/CALENDAR.md</code>), where ${esc(agentShort())} reads it too.</p>`
+    + `<p class="m-sub">It goes on the game's calendar (<code>live/CALENDAR.md</code>), where Rocco reads it too.</p>`
     + `<div class="fields"><label class="lbl">Name<input class="input" id="updTitle" value="${esc(c.title)}" placeholder="Pet evolution" autocomplete="off"></label>`
     + `<div class="two"><label class="lbl">Day<input class="input" type="date" id="updDate" value="${esc(c.date)}"></label>`
     + `<label class="lbl">Time <small>UTC, optional</small><input class="input" type="time" id="updTime" value="${esc(c.time)}"></label></div>`
@@ -222,7 +221,7 @@ async function publish(eventId, button) {
 async function pickImage(id, image) {
   try {
     await api.pickCardImage(id, image);
-    toast(`Card image picked. ${agentShort()} puts it on the event`);
+    toast(`Card image picked. Rocco puts it on the event`);
     await loadUpdates();
   } catch (e) { toast(e.message, 'var(--red)'); }
 }
@@ -232,7 +231,7 @@ async function queueEvent(id, button) {
   try {
     const r = await api.queueUpdateEvent(id);
     const q = r.queued?.[0];
-    toast(q ? `${q.task} is in Up next: ${agentShort()} makes the game page event for ${q.title}` : 'It already has one', 'var(--violet)');
+    toast(q ? `${q.task} is in Up next: Rocco makes the game page event for ${q.title}` : 'It already has one', 'var(--violet)');
     await loadUpdates();
   } catch (e) { toast(e.message, 'var(--red)'); button.disabled = false; }
 }

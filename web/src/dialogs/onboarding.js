@@ -14,7 +14,7 @@ import { api, DEMO } from '../api.js';
 import { toast } from '../ui/toast.js';
 import { loadProjects, switchProject } from '../projects.js';
 import { go } from '../router.js';
-import { agentName, agentShort } from '../agent.js';
+import { agentName } from '../agent.js';
 import { LINKS } from '../views/connections.js';
 import { loadAccounts, yourAgent, notReady, runAccountAction, useAgent, accRowHTML, agentRowHTML, fixButtons, windowButton, imagesNeed } from '../accounts.js';
 
@@ -335,11 +335,11 @@ function tilesHTML() {
   const sendable = ob.unsent.size > 0;
   return topHTML(after ? 'All set' : `More detail for ${esc(currentProject().name)}`)
     + `<div class="ob-body">${after ? `<h2 class="ob-title">All set</h2>${setupHTML()}<h3 class="ob-sub">Want to add more?</h3>` : '<h2 class="ob-title">Add game details</h2>'}`
-    + `<p class="ob-lede">Optional. Pick any of these and write as much or as little as you like. ${esc(agentShort())} files each into its doc.</p>`
+    + `<p class="ob-lede">Optional. Pick any of these and write as much or as little as you like. Rocco files each into its doc.</p>`
     + `<div class="ob-tiles">${survey.tiles.map(t => `<button class="ob-tile${tileFilled(t) ? ' filled' : ''}" data-ob="tile:${esc(t.id)}">`
       + `<span class="ob-tile-head"><b>${esc(t.title)}</b>${tileFilled(t) ? icon.checkSm : ''}</span><span>${esc(t.blurb)}</span></button>`).join('')}</div></div>`
-    + foot(sendable ? `<span class="ob-note">${ob.unsent.size} saved, not sent to ${esc(agentShort())} yet</span>` : '',
-      `${button('send', busy ? '<span class="spin"></span>Sending' : `Send to ${esc(agentShort())}`, 'btn', busy || !sendable)}${button('done', 'Done', 'btn accent')}`);
+    + foot(sendable ? `<span class="ob-note">${ob.unsent.size} saved, not sent to Rocco yet</span>` : '',
+      `${button('send', busy ? '<span class="spin"></span>Sending' : `Send to Rocco`, 'btn', busy || !sendable)}${button('done', 'Done', 'btn accent')}`);
 }
 
 function tileHTML() {

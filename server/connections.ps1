@@ -54,9 +54,9 @@ function Get-TemplateConnection([bool]$refresh) {
 	$newer = @($releases | Where-Object { -not (Invoke-GitText $RepoDir merge-base --is-ancestor $_ main).ok })
 	if (-not $newer) { return Conn 'Project' 'Template' 'ok' $current $short[0] "On the newest template release, $($short[0]) (as of the last check)." '' '' }
 	$notes = @($newer | Select-Object -First 5 | ForEach-Object { "$($_ -replace '^template/', '')`n$((@(Invoke-Git $RepoDir tag -l $_ '--format=%(contents)') -join "`n").Trim())" }) -join "`n`n"
-	$item = Conn 'Project' 'Template' 'update' $current $short[0] "Template $($short[0]) is out; this game is on $(if ($current) { $current } else { 'an earlier version' })." "Ask $((Get-Agent).short) to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md)." ''
+	$item = Conn 'Project' 'Template' 'update' $current $short[0] "Template $($short[0]) is out; this game is on $(if ($current) { $current } else { 'an earlier version' })." "Ask Rocco to bring it in: it merges the release and keeps this game's own docs (TEMPLATE.md)." ''
 	$item | Add-Member release ([pscustomobject]@{ tag = $releases[0]; notes = $notes })
-	Add-Action $item 'ask' "Ask $((Get-Agent).short) to update" @{ note = "Update from template to $($releases[0]) (TEMPLATE.md `"Taking an update`")." }
+	Add-Action $item 'ask' "Ask Rocco to update" @{ note = "Update from template to $($releases[0]) (TEMPLATE.md `"Taking an update`")." }
 }
 
 # The template, GitHub, the commit check, and this project's Lync servers.
@@ -170,11 +170,11 @@ function Get-LibraryConnections([bool]$refresh) {
 		$patched = if ($l.patches -and $l.patches -notmatch '^(none|no|-)$') { "local patches: $($l.patches)" } else { 'no local patches' }
 		$detail = "$(if ($repo) { "github.com/$repo" } else { $l.source }) $Dot $patched"
 		if (-not $l.recorded) {
-			Add-Action (Conn 'Libraries' $l.name 'warn' $version $latest "In $($l.found.path), but not in ARCHITECTURE.md." 'Record its version, source and local patches in ARCHITECTURE.md "Vendored libraries" (CODING.md).' '') 'ask' "Ask $((Get-Agent).short)" @{ note = "Record $($l.name) in ARCHITECTURE.md `"Vendored libraries`": its version, source and local patches (CODING.md `"Third-party code`")." }
+			Add-Action (Conn 'Libraries' $l.name 'warn' $version $latest "In $($l.found.path), but not in ARCHITECTURE.md." 'Record its version, source and local patches in ARCHITECTURE.md "Vendored libraries" (CODING.md).' '') 'ask' "Ask Rocco" @{ note = "Record $($l.name) in ARCHITECTURE.md `"Vendored libraries`": its version, source and local patches (CODING.md `"Third-party code`")." }
 		} elseif ($l.found -and $l.found.version -and $l.version -and (Get-VersionText $l.found.version) -ne (Get-VersionText $l.version)) {
-			Add-Action (Conn 'Libraries' $l.name 'warn' $l.found.version $latest "ARCHITECTURE.md says $($l.version), but src has $($l.found.version)." 'Correct the version in ARCHITECTURE.md "Vendored libraries".' '') 'ask' "Ask $((Get-Agent).short)" @{ note = "Correct $($l.name)'s version in ARCHITECTURE.md `"Vendored libraries`": src has $($l.found.version)." }
+			Add-Action (Conn 'Libraries' $l.name 'warn' $l.found.version $latest "ARCHITECTURE.md says $($l.version), but src has $($l.found.version)." 'Correct the version in ARCHITECTURE.md "Vendored libraries".' '') 'ask' "Ask Rocco" @{ note = "Correct $($l.name)'s version in ARCHITECTURE.md `"Vendored libraries`": src has $($l.found.version)." }
 		} elseif ($latest -and (Test-Newer $latest $version)) {
-			Add-Action (Conn 'Libraries' $l.name 'update' $version $latest $detail "$((Get-Agent).short) updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md `"Third-party code`")." '') 'ask' "Ask $((Get-Agent).short) to update" @{ note = "Update $($l.name) from $version to $latest (CODING.md `"Third-party code`")." }
+			Add-Action (Conn 'Libraries' $l.name 'update' $version $latest $detail "Rocco updates it: vendors the new release, re-applies any local patches, and updates ARCHITECTURE.md (CODING.md `"Third-party code`")." '') 'ask' "Ask Rocco to update" @{ note = "Update $($l.name) from $version to $latest (CODING.md `"Third-party code`")." }
 		} else {
 			Conn 'Libraries' $l.name 'ok' $version $latest $detail '' ''
 		}
@@ -380,7 +380,7 @@ function Get-StudioMcpItem {
 	$m = Test-StudioMcp
 	if ($m.registered) { return Conn 'Roblox' 'Studio MCP' 'ok' '' '' "Registered as Roblox_Studio in $($m.agent.name)" '' '' }
 	$item = Conn 'Roblox' 'Studio MCP' 'warn' '' '' "Not registered as Roblox_Studio in $($m.agent.name), so workers get no Studio tools." "Register it under that exact name, in $($m.file) (WORKSTATION.md)." ''
-	Add-Action $item 'ask' "Ask $($m.agent.short)" @{ note = "Register the Roblox Studio MCP in $($m.agent.name) as Roblox_Studio (WORKSTATION.md `"Setting up a PC`", step 2)." }
+	Add-Action $item 'ask' "Ask Rocco" @{ note = "Register the Roblox Studio MCP in $($m.agent.name) as Roblox_Studio (WORKSTATION.md `"Setting up a PC`", step 2)." }
 }
 
 # ---- ElevenLabs: linked by the user in Connections, kept as ELEVENLABS_API_KEY in their environment ----

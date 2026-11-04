@@ -7,7 +7,6 @@ import { icon } from '../lib/icons.js';
 import { agoText } from '../lib/format.js';
 import { api } from '../api.js';
 import { toast } from '../ui/toast.js';
-import { agentShort } from '../agent.js';
 import { go } from '../router.js';
 import { openTask } from './workboard.js';
 
@@ -85,8 +84,8 @@ function directionsHTML(t) {
   const can = t.codex && !running;
   const reason = !t.codex ? 'Concepts are made with Codex, which isn\'t on this PC (Connections)' : running ? 'Wait for the concepts being made' : `Make ${COUNT} concepts with Codex`;
   return `<div class="panel"><div class="panel-head">${icon.sparkle}Directions to try<span class="sp"></span>`
-    + `<button class="mini" id="thumbsAsk">Ask ${esc(agentShort())} for new directions</button></div>`
-    + (t.ownDirections ? '' : `<div class="th-note">Rocco's starting points, until ${esc(agentShort())} suggests some for this game from its docs and numbers.</div>`)
+    + `<button class="mini" id="thumbsAsk">Ask Rocco for new directions</button></div>`
+    + (t.ownDirections ? '' : `<div class="th-note">Starting points, until Rocco suggests some for this game from its docs and numbers.</div>`)
     + runHTML(t)
     + `<div class="th-dirs">${(t.directions || []).map(d => `<div class="th-dir"><b>${esc(d.name)}</b>${d.why ? `<span class="th-why">${esc(d.why)}</span>` : ''}`
       + `<details class="th-prompt"><summary>Prompt</summary><p>${esc(d.prompt)}</p></details>`
@@ -130,7 +129,7 @@ async function use(file) {
   try {
     const r = await api.useConcept(file);
     closeThumbView();
-    toast(`${r.task} is in Up next: ${agentShort()} puts it on the game page`, 'var(--violet)');
+    toast(`${r.task} is in Up next: Rocco puts it on the game page`, 'var(--violet)');
     await loadThumbnails();
   } catch (e) { toast(e.message, 'var(--red)'); }
 }
@@ -139,7 +138,7 @@ async function ask(button) {
   button.disabled = true;
   try {
     const r = await api.askDirections();
-    toast(`${r.task} is in Up next: ${agentShort()} suggests directions for this game`, 'var(--violet)');
+    toast(`${r.task} is in Up next: Rocco suggests directions for this game`, 'var(--violet)');
   } catch (e) { toast(e.message, 'var(--red)'); }
   button.disabled = false;
 }

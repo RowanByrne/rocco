@@ -5,7 +5,6 @@ import { state, emit } from './state.js';
 import { api } from './api.js';
 import { toast } from './ui/toast.js';
 import { notify } from './notify.js';
-import { agentShort } from './agent.js';
 
 const POLL_MS = 2500;
 let lastJson = '';
@@ -60,7 +59,7 @@ function apply(s) {
     t.fresh = true;
     if (t.kind === 'question') { if (was && t.status === 'ready') tell(`Answered: ${t.title}`, t, 'var(--claude)'); }
     else if (!was && t.kind === 'plan') tell(`Plan to approve: ${t.title}`, t, 'var(--violet)');
-    else if (!was && t.status === 'inbox') tell(`${agentShort()} spotted: ${t.title}`, t, 'var(--claude)');
+    else if (!was && t.status === 'inbox') tell(`Rocco spotted: ${t.title}`, t, 'var(--claude)');
     else if (was && t.status === 'ready') tell(`Ready to test: ${t.title}`, t);
     else if (was && t.status === 'stuck') tell(`Needs your answer: ${t.title}`, t, 'var(--amber)');
   }
