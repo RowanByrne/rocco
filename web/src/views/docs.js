@@ -111,7 +111,7 @@ async function reopen() {
 
 // A path from the repo root, the tail of a longer path (template\repo\docs\...), or a file name only one doc has
 // (or the one in the open doc's own folder).
-function docRef(text, base) {
+export function docRef(text, base) {
   const docs = state.docs?.docs || [];
   const paths = new Set(docs.map(d => d.path));
   const parts = text.replace(/\\/g, '/').split('/').filter(p => p && p !== '.' && p !== '..');

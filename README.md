@@ -2,8 +2,9 @@
 
 Rocco is the web app for making games from this template. One Rocco serves every project in the RoDev folder.
 
-- **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval, each with its steps, a summary of what it builds and leaves out, Read the spec when it has one, Change it and Ask (a box that keeps what you type through the board's refreshes), and × to dismiss it (with a few seconds to undo); the inbox, where things the agent spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options, and the last answer sends them all (with a few seconds to undo; in the task's sheet, Enter sends a typed one); Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed. A task to test has Approve, and a box that's always open for sending it back: say what's wrong, with screenshots pasted, dropped or attached (and drawn on, as in the note box), and Enter sends it back to the conductor, the screenshots named in the message. Every task's sheet has Delete in its header (a second click confirms, with a few seconds to undo): a deleted plan takes its unfinished tasks with it, and work that's running or not merged yet goes to the conductor to stop (`[cancel]`, once Undo has passed). What's already merged stays in Main.
+- **Workboard:** a note box for playtest notes (typed, or spoken), screenshots (pasted, dropped, or captured straight from Studio) with a pen to mark them up, and a type (bug, tweak, idea, or question: something you just need to know, answered right under the note box); feature plans waiting for approval, each with its steps, a summary of what it builds and leaves out, Read the spec when it has one, Change it and Ask (a box that keeps what you type through the board's refreshes), and × to dismiss it (with a few seconds to undo); the inbox, where things the agent spotted wait for the user to queue or dismiss; three columns (To test, Stuck, Working); and Up next, the queue in order, which the user can drag but never ahead of a task it waits on. Stuck cards ask their questions on the card, with play buttons for sound options, and the last answer sends them all (with a few seconds to undo; in the task's sheet, Enter sends a typed one); Working cards show their latest steps and take follow-ups. Each task's sheet shows what it changed, and its **session** ("A card's session", below): everything its agent did and said, live, with your words and Rocco's in between. Typing in it sends its agent a message (Enter), and the sheet stays open, like a session. A task to test has Approve, and a box that's always open for sending it back: say what's wrong, with screenshots pasted, dropped or attached (and drawn on, as in the note box), and Enter sends it back to the conductor, the screenshots named in the message. Every task's sheet has Delete in its header (a second click confirms, with a few seconds to undo): a deleted plan takes its unfinished tasks with it, and work that's running or not merged yet goes to the conductor to stop (`[cancel]`, once Undo has passed). What's already merged stays in Main.
   - **The conductor** is your agent's session that handles the board. The status line above the note box says whether one is listening (watching the board with `rocco.ps1 wait`), working (and on what), or not running ("The conductor in Rocco", below). When you hand something over (a note, an answer, an approved plan) and none is running, Rocco opens your agent in its own window (minimized in the taskbar) as the conductor, on what's waiting; **Start** does the same for work already waiting. Tasks left Working with no conductor running were cut off (its window closed): **Carry on** opens a new one that picks them up from the board and the lanes.
+- **What agents write** (Rocco's messages and questions, answers, summaries, steps to try, plan summaries) shows as Markdown, with a terminal's habits tidied as it's shown: ALL-CAPS lead-ins turn bold in sentence case, `--` turns into a dash, and commit hashes drop out of sentences. A task's id shows as its name and opens it; a doc's path opens the doc. The text itself stays as written.
 - **History:** the build live on Roblox and earlier releases, main's recent commits (bookmark any of them), the branches not yet merged, and a card per lane (busy ones first) showing what's been done in it. A lane holding commits main doesn't have yet shows "Checking before main": the conductor checks merges and its own fixes in a lane before they reach main, so the Main place is yours.
 - **Docs:** every Markdown file in the repo, by folder; hover one for its first lines and sections. Open one to read it (mentions of other docs open them), ask your agent to change it (a note in Up next), or edit it and push: the edit is committed on main as you, only that file, and pushed, with GitHub's main merged in first. A doc that changed since you opened it isn't overwritten without asking. In a game, the template's own docs (AGENTS.md "Template-owned files", and `rocco/`) can't be edited here; your agent changes them through the template. **Add game details** opens the onboarding's detail tiles for the open game.
 - **Onboarding:** New project is a short survey, and it opens by itself the first time Rocco runs in a RoDev folder with no games yet. The first choice is a new game, or one already made: on GitHub, in a folder, in a place file, or only in Studio. Then come the name and code, and questions one at a time; every answer is free text and optional. The questions are the template's `tools/onboarding.json`, so they change with the docs they fill. The project is made in the background while you answer (`new-project.ps1`, with `-Existing` for a game already made). A survey left half-way is kept in the browser.
@@ -92,6 +93,7 @@ _tools\rocco\
     projects.ps1         projects, lanes, Main, the user, new projects, background jobs
     conductor.ps1        whether a conductor is running for a project, opening one, and Claude Code's hooks for it
     thread.ps1           the conductor's thread: its messages, questions, steps and milestones, and what the user sends it
+    sessions.ps1         a card's session: its agent's session files (Claude Code), found and read as they grow
     hook-post.ps1        Claude Code's background hooks: pass a step, a message or what the user typed to Rocco
     lanes.ps1            how many lanes this PC runs, recording it, and opening them: places, checkouts, Lync, Studio
     connections.ps1      project links, this PC's tools, and Rocco's own updates
@@ -124,10 +126,11 @@ _tools\rocco\
       voice.js           speech to text
       notify.js          desktop notifications
       mascot.js          Rocco, the little guy above the note box
+      prose.js           what agents write, shown as Markdown: task ids as names, doc paths as links
       demo.js            sample data
-      lib/               dom, format, icons, brands (logos), storage, markdown (for reading docs)
+      lib/               dom, format, icons, brands (logos), storage, markdown (docs and what agents write), tidy (a terminal's habits, for reading)
       ui/                menu, popover, sheet, toast, sortable (drag to reorder)
-      views/             workboard, composer, conductor (status line, questions, history), history, docs, updates, thumbnails, connections, settings
+      views/             workboard, session (a card's session), composer, conductor (status line, questions, history), history, docs, updates, thumbnails, connections, settings
       dialogs/           onboarding (new projects, detail tiles), markup (draw on a screenshot), palette (Ctrl+K)
 ```
 
@@ -146,6 +149,14 @@ You follow the conductor in Rocco, not in its window.
   After 20 minutes with no answer, a question stays open in Rocco, and its answer comes later through `wait`; a permission prompt goes back to the agent's own window, and Rocco offers **Show its window**. So does the status line when the agent is asking something before any hook runs: the first time it opens in a folder, it asks whether you trust it.
 - **Any other agent**, or a Claude Code you started yourself, uses the commands: `doing`, `say`, and `ask` with no task (Commands). Rocco adds the milestones and what you send either way.
 - **Files:** `thread.jsonl`, where every writer (the server, the commands, the hooks) only appends a line, and a question's state comes from the lines after it; `activity.jsonl`, its steps. Past 1 MB, the oldest lines go, once each time Rocco runs, keeping anything still open.
+
+## A card's session
+
+A task's sheet shows its agent's session word for word, the way a coding agent's own app does: its messages, each tool it ran folded into a line (open one to see what went in and what came back, screenshots included), the brief Rocco's conductor gave it, and what you and Rocco said on the card, in time order. A card at work opens at its latest step and follows along; the tools it's running stay open until you fold them.
+
+- **Where it comes from:** Claude Code keeps each worker's session as a file, `<config>\projects\<folder>\<conductor's session>\subagents\agent-<id>.jsonl` (config is `%USERPROFILE%\.claude`, or `CLAUDE_CONFIG_DIR`), and a session started in a lane under that lane's folder. A session is a task's when the conductor named the task for it, or when its agent ran a Rocco command on the task (`set`, `ask`, `log`). Only files written since the task was made are read, and only what's new after that.
+- **Typing in the card** sends its agent your words through the conductor (`[followup]`, or `[reopen]` for a task to test), which passes them to the worker that has the task (CONDUCTOR.md), so its session goes on with them.
+- **Other agents** keep their sessions elsewhere, so their cards show what was said on the card, the same way.
 
 ## Commands
 
@@ -195,6 +206,8 @@ All on `http://localhost:34860`. `?p=<project>` names the project: its folder in
 | `GET /api/docs?p=` | Every Markdown file in the repo: title, preview, sections, last change, uncommitted or not, template-owned or not |
 | `GET /api/docs/file?p=&path=` | One doc: its text, a hash of it, and its last commit |
 | `GET /api/tasks/<id>/changes?p=` | The files a task changed: its merge into main, else its branch against main |
+| `GET /api/tasks/<id>/sessions?p=` | Its agent's sessions, oldest first: `key`, the conductor's name for it, its agent type, when it started, and its size in bytes |
+| `GET /api/tasks/<id>/session?p=&key=&from=` | One session's whole lines from byte `from`, as Claude Code wrote them (JSON lines); the `X-Next` header is where to ask from next. Only a session of that task |
 | `GET /files/<task>/<file>?p=` | A screenshot or a sound option |
 | `GET /api/jobs/<id>` | A new project's progress |
 | `GET /api/actions/runs/<run>` | An update running in its own window: `{ running, ok, label }` |

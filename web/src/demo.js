@@ -385,6 +385,39 @@ export async function order(ids) {
   return { ok: true };
 }
 
+// A card's agent session (server/sessions.ps1): the camera fix's worker, as Claude Code writes it, a line per entry.
+function demoSession() {
+  const lines = [], at = m => ago(m);
+  const user = (m, content) => lines.push({ type: 'user', timestamp: at(m), message: { role: 'user', content } });
+  const said = (m, text) => lines.push({ type: 'assistant', timestamp: at(m), message: { role: 'assistant', content: [{ type: 'text', text }] } });
+  let n = 0;
+  const tool = (m, name, input, result, error = false) => {
+    const id = `toolu_demo${++n}`;
+    lines.push({ type: 'assistant', timestamp: at(m), message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+    if (result !== undefined) lines.push({ type: 'user', timestamp: at(m - 0.2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: result, is_error: error }] } });
+  };
+  user(12, 'You are the worker for **T-046: "Camera clips into walls."**\n\nLane 3, branch `agent/camera-clip`. The user\'s note: *camera goes inside the walls in the hallway by the shop*.\n\nRead `docs/workflow/WORKER.md` and `TESTING.md` first. Report on the card as you go: `rocco.ps1 set T-046 -Step "..."`.');
+  tool(11.8, 'Bash', { command: 'git -C lanes/lane3 switch -c agent/camera-clip origin/main', description: 'Start the branch in lane 3' }, "Switched to a new branch 'agent/camera-clip'");
+  tool(11.5, 'Read', { file_path: 'E:\\Games\\Sample\\lanes\\lane3\\src\\client\\Camera\\Occlusion.luau' }, '1\tlocal Occlusion = {}\n2\t-- Pulls the camera in when a wall is behind the player\n3\tfunction Occlusion.update(camera, head)\n4\t\tlocal back = head.CFrame.LookVector * -1\n…');
+  said(10, "Found it. The camera only checks for walls **behind the head**, so in a narrow hallway a wall at the side slips between the camera and you.\n\nThe fix: cast a ray from the head to where the camera wants to be, and pull it in to the first hit.");
+  tool(9, 'Edit', { file_path: 'E:\\Games\\Sample\\lanes\\lane3\\src\\client\\Camera\\Occlusion.luau', old_string: 'local back = head.CFrame.LookVector * -1', new_string: 'local toCamera = camera.CFrame.Position - head.Position\nlocal hit = workspace:Raycast(head.Position, toCamera, params)' }, 'The file has been updated.');
+  tool(7, 'mcp__Roblox_Studio__start_stop_play', { mode: 'start_play' }, 'Playtest started in DEMO-Lane3');
+  tool(6, 'mcp__Roblox_Studio__execute_luau', { code: 'return require(game.ReplicatedStorage.Tests.CameraWalls).run()' }, 'hallway spots: 6\nclipped: 0\nworst gap to wall: 0.4 studs');
+  said(4, 'Tested **6 spots** in the hallway by the shop: the camera stays out of the walls in all of them.\n\n| Spot | Before | After |\n|---|---|---|\n| By the shop door | clipped | clear |\n| Corner by the stairs | clipped | clear |');
+  tool(3, 'mcp__Roblox_Studio__screen_capture', {}, [{ type: 'text', text: 'Captured the viewport' }]);
+  tool(1, 'Bash', { command: 'rocco.ps1 set T-046 -Step "Testing 6 hallway spots" -Progress 70', description: 'Report progress on the card' });
+  return lines.map(l => JSON.stringify(l)).join('\n') + '\n';
+}
+
+export async function sessions(id) {
+  return id === 'T-046' ? [{ key: 'agent-demo', desc: 'Camera clips into walls (T-046)', type: 'roblox-dev-standard', started: ago(12), size: demoSession().length }] : [];
+}
+
+export async function session(id, key, from) {
+  const text = demoSession();
+  return from ? { text: '', next: from } : { text, next: text.length };
+}
+
 export async function changes(id) {
   const t = find(id);
   if (!t?.branch) return { source: '', url: '', files: [] };

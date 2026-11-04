@@ -12,10 +12,12 @@ let openKey = null;
 export const openSheetKey = () => openKey;
 
 // tools: buttons in the header, by the close button (a task's Delete).
-export function showSheet(key, { color, chip, id = '', body, foot = '', tools = '' }) {
+// wide: room for a card's session.
+export function showSheet(key, { color, chip, id = '', body, foot = '', tools = '', wide = false }) {
   hidePopover();
   closeMenus();
   openKey = key;
+  sheet.classList.toggle('wide', wide);
   sheet.style.setProperty('--c', color);
   $('#sChip').innerHTML = `<span class="chip"><i></i>${esc(chip)}</span>`;
   $('#sId').textContent = id;

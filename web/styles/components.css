@@ -79,3 +79,32 @@
 .toast-action { height: 26px; margin: -3px -6px -3px 4px; padding: 0 10px; border: 0; border-radius: 7px; font-size: 12.5px; font-weight: 600;
   color: var(--accent-text); background: rgba(124,108,255,.14); }
 .toast-action:hover { background: rgba(124,108,255,.24); }
+
+/* A card's sheet with its session: room to read it. */
+.sheet.wide { width: min(680px, calc(100vw - 20px)); }
+
+/* What agents write (src/prose.js): Markdown, set for reading in a message or a card. */
+.prose { white-space: normal; overflow-wrap: anywhere; }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p { margin: 0 0 8px; }
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 { margin: 12px 0 4px; font-size: 1em; font-weight: 600; color: var(--text); }
+.prose h1, .prose h2 { font-size: 1.08em; }
+.prose ul, .prose ol { margin: 2px 0 8px; padding-left: 20px; }
+.prose li { margin: 2px 0; }
+.prose li > ul, .prose li > ol { margin-bottom: 2px; }
+.prose strong { font-weight: 600; color: var(--text); }
+.prose code { padding: 1px 5px; border-radius: 5px; font-family: var(--mono); font-size: .9em; background: rgba(255,255,255,.07); }
+.prose pre { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; overflow-x: auto; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; background: rgba(0,0,0,.3); }
+.prose pre code { padding: 0; background: none; }
+.prose blockquote { margin: 4px 0 8px; padding-left: 10px; border-left: 2px solid var(--stroke-2); color: var(--text-2); }
+.prose hr { margin: 10px 0; border: 0; border-top: 1px solid var(--stroke-2); }
+.prose a { color: var(--accent-text); }
+.prose .md-table { margin: 4px 0 8px; overflow-x: auto; }
+.prose table { border-collapse: collapse; font-size: .92em; }
+.prose th, .prose td { padding: 4px 9px; border: 1px solid var(--stroke-2); text-align: left; vertical-align: top; }
+.prose th { font-weight: 600; background: var(--glass-2); }
+/* A task's name where an agent wrote its id: opens the card. */
+.task-ref { display: inline-block; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; padding: 0 6px; border-radius: 6px;
+  color: var(--text); text-decoration: none; white-space: nowrap; background: var(--glass-3); border: 1px solid var(--stroke); }
+.task-ref:hover { background: rgba(124,108,255,.18); border-color: rgba(124,108,255,.35); }

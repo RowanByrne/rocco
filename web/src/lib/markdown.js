@@ -4,8 +4,10 @@ import { esc } from './dom.js';
 
 // o.docRef(mention, base): the doc a mention like `WORKFLOW.md` or docs/game/GDD.md names, or ''.
 // o.href(path): that doc's address in the app. o.base: the open doc's path, for relative links.
+// o.task(id): what a task id like T-049 shows as (a link to it), or '' to leave it. o.breaks: a line break inside a
+// paragraph stays one, as in a message.
 export function markdown(src, o = {}) {
-  const opts = { docRef: () => '', href: path => `#docs/${encodeURI(path)}`, base: '', ...o };
+  const opts = { docRef: () => '', href: path => `#docs/${encodeURI(path)}`, base: '', task: () => '', breaks: false, ...o };
   let lines = String(src ?? '').replace(/\r\n?/g, '\n').split('\n');
   let front = '';
   if (lines[0] === '---') {
@@ -60,7 +62,7 @@ function blocks(lines, o) {
     // A paragraph runs until a blank line or another block.
     const para = [line.trim()];
     for (i++; i < lines.length && lines[i].trim() && !startsBlock(lines, i); i++) para.push(lines[i].trim());
-    html += `<p>${inline(para.join(' '), o)}</p>`;
+    html += `<p>${o.breaks ? para.map(l => inline(l, o)).join('<br>') : inline(para.join(' '), o)}</p>`;
   }
   return html;
 }
@@ -146,21 +148,27 @@ function itemHTML(lines, o) {
 
 const TOKEN = /(`+)([\s\S]*?[^`])\1(?!`)|(!?)\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|<(https?:\/\/[^\s>]+)>/g;
 
+// Code and links stand in as a mark while the rest is read, so bold can wrap them: **`Width` is 50**.
+const MARK = '';
+
 function inline(src, o) {
-  let out = '', last = 0;
-  for (const m of src.matchAll(TOKEN)) {
-    out += prose(src.slice(last, m.index), o);
-    if (m[1]) out += code(m[2].replace(/^ (.+) $/, '$1'), o);
-    else if (m[6]) out += `<a href="${esc(m[6])}" target="_blank" rel="noreferrer">${esc(m[6])}</a>`;
-    else out += link(m[4], m[5], !!m[3], o);
-    last = m.index + m[0].length;
-  }
-  return out + prose(src.slice(last), o);
+  const tokens = [];
+  const masked = src.replace(TOKEN, (...m) => { tokens.push(m); return MARK; });
+  let k = 0;
+  return prose(masked, o).replace(//g, () => tokenHTML(tokens[k++], o));
+}
+
+function tokenHTML(m, o) {
+  if (m[1]) return code(m[2].replace(/^ (.+) $/, '$1'), o);
+  if (m[6]) return `<a href="${esc(m[6])}" target="_blank" rel="noreferrer">${esc(m[6])}</a>`;
+  return link(m[4], m[5], !!m[3], o);
 }
 
 const docLink = (path, inner, o) => `<a class="doc-ref" href="${esc(o.href(path))}" data-doc="${esc(path)}">${inner}</a>`;
 
 function code(text, o) {
+  const task = /^T-\d{3,}$/.test(text) && o.task(text);
+  if (task) return task;
   const path = /\.md\b/i.test(text) ? o.docRef(text, o.base) : '';
   return path ? docLink(path, `<code>${esc(text)}</code>`, o) : `<code>${esc(text)}</code>`;
 }
@@ -191,6 +199,7 @@ function prose(s, o, mentions = true) {
     .replace(/(^|[^\w])_(?=\S)([^_]*?\S)_(?!\w)/g, '$1<em>$2</em>')
     .replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
   if (!mentions) return h;
+  h = h.replace(/(^|[^\w-])(T-\d{3,})(?![\w-])/g, (all, pre, id) => { const ref = o.task(id); return ref ? pre + ref : all; });
   // A mention of another doc, like WORKFLOW.md or docs/game/GDD.md, opens it.
   h = h.replace(/(^|[^\w/\\.-])((?:[\w.-]+[\\/])*[\w-]+\.md)(?![\w])/g, (all, pre, ref) => {
     const path = o.docRef(ref, o.base);

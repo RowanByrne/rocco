@@ -286,7 +286,7 @@
 /* A task in the sheet */
 .s-title { margin: 6px 0 4px; font-size: 18px; font-weight: 600; letter-spacing: -.01em; line-height: 1.3; overflow-wrap: anywhere; }
 .s-where { font-size: 12.5px; color: var(--text-3); }
-.s-sum { margin: 16px 0 0; color: var(--text-2); white-space: pre-line; }
+.s-sum { margin: 16px 0 0; color: var(--text-2); }
 .s-spec { margin-top: 10px; }
 .s-try { margin-top: 14px; padding: 11px 13px; border-radius: var(--r); background: rgba(52,211,153,.06); border: 1px solid rgba(52,211,153,.16); }
 .s-try small { display: block; font-size: 11px; font-weight: 600; color: var(--green); margin-bottom: 3px; letter-spacing: .02em; }
@@ -321,3 +321,43 @@
 .s-row svg { color: var(--green); }
 .s-row:hover { color: var(--text); }
 .s-row .at { margin-left: auto; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* A card's session (src/views/session.js): its agent's messages, the tools it ran, and what you and Rocco said. */
+.sx { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; font-size: 13px; line-height: 1.55; }
+.sx-empty { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12.5px; }
+.sx-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; font-size: 11.5px; color: var(--text-3); }
+.sx-head .at { margin-left: auto; font-size: 11px; color: var(--text-3); }
+.sx-who { font-weight: 600; color: var(--text-2); }
+.sx-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-msg { color: var(--text); }
+.sx-msg.agent .sx-who { color: var(--accent-text); }
+.sx-msg.rocco, .sx-msg.note { padding: 8px 11px; border-radius: 12px; background: var(--glass); border: 1px solid var(--stroke); }
+.sx-msg.note { color: var(--text-2); }
+.sx-msg.you { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: 14px; border-top-right-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: rgba(124,108,255,.14); border: 1px solid rgba(124,108,255,.28); }
+.sx-msg.you .sx-head { justify-content: flex-end; }
+.sx-msg.you .sx-head .at { margin-left: 0; }
+.sx-brief { padding: 8px 11px; border-radius: 12px; background: var(--glass); border: 1px dashed var(--stroke-2); color: var(--text-2); }
+.sx-brief:not(.open) .sx-text { max-height: 6.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+.sx-more { margin-top: 4px; font-size: 12px; }
+.sx-group { font-size: 12.5px; color: var(--text-3); }
+.sx-group-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 3px 4px; border: 0; border-radius: 6px; background: none; color: var(--text-3); font-size: 12.5px; text-align: left; cursor: pointer; }
+.sx-group-head:hover { background: var(--glass); color: var(--text-2); }
+.sx-group-head svg { flex: none; transition: transform .2s; }
+.sx-group.open > .sx-group-head svg { transform: rotate(90deg); }
+.sx-group-head .at { margin-left: auto; font-size: 11px; }
+.sx-group-last { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.sx-rows { margin: 2px 0 4px 10px; padding-left: 10px; border-left: 1px solid var(--stroke-2); }
+.sx-tool-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 4px; border: 0; border-radius: 6px; background: none; color: var(--text-2); font-size: 12.5px; text-align: left; cursor: pointer; }
+.sx-tool-head:hover { background: var(--glass); color: var(--text); }
+.sx-tool-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green); opacity: .7; }
+.sx-tool.err .sx-dot { background: var(--red); }
+.sx-tool.open .sx-tool-line { white-space: normal; }
+.sx-tool-body { margin: 2px 0 8px 14px; }
+.sx-label { margin: 6px 0 3px; font-size: 11px; font-weight: 600; color: var(--text-3); }
+.sx-path { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.sx-pre { margin: 3px 0 0; max-height: 320px; overflow: auto; padding: 8px 10px; border-radius: 8px; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); background: rgba(0,0,0,.3); }
+.sx-pre.err { color: var(--red); }
+.sx-img { display: block; max-width: 100%; margin-top: 4px; border-radius: 8px; border: 1px solid var(--stroke); }
+.sx-wait { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }

@@ -9,6 +9,8 @@ import { loadProjects } from './projects.js';
 import { showView, go, syncUrl } from './router.js';
 import { initSidebar, renderSidebar, renderMe, loadMe } from './sidebar.js';
 import { initWorkboard, renderWorkboard, openTask } from './views/workboard.js';
+import { initSession } from './views/session.js';
+import { initProse } from './prose.js';
 import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType } from './views/composer.js';
 import { initConductor, renderConductor, resetConductor } from './views/conductor.js';
 import { initMascot } from './mascot.js';
@@ -113,6 +115,8 @@ document.addEventListener('keydown', e => {
   try { await loadProjects(); } catch { state.online = false; }
   initSidebar();
   initWorkboard();
+  initSession();
+  initProse();
   initComposer();
   initConductor();
   renderConductor();

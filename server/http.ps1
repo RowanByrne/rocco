@@ -89,6 +89,9 @@ function Invoke-Request($ctx) {
 		if ($path -eq '/api/docs/file') { Send-Json $ctx (Read-Doc $req.QueryString['path'] $project.template); return }
 		if ($path -eq '/api/onboarding') { Send-Json $ctx ([pscustomobject]@{ survey = (Get-Survey $RepoDir); answers = (Read-Answers) }); return }
 		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Read-Task $Matches[1])); return }
+		# Its agent's sessions (sessions.ps1), then each one's lines from where the app got to.
+		if ($path -match '^/api/tasks/(T-\d+)/sessions$') { Send-Json $ctx @(Get-TaskSessions (Read-Task $Matches[1])); return }
+		if ($path -match '^/api/tasks/(T-\d+)/session$') { Send-SessionText $ctx (Read-Task $Matches[1]) ([string]$req.QueryString['key']) ([long]$req.QueryString['from']); return }
 		# A task's screenshot or audio option.
 		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a))$' -and $Matches[2] -notmatch '\.\.') {
 			$file = Join-Path (Join-Path $TasksDir $Matches[1]) $Matches[2]

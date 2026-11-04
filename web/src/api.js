@@ -32,6 +32,13 @@ export const api = {
   // Up next in this order; the server refuses an order that puts a task before one it needs.
   order: ids => DEMO ? demo.order(ids) : post(withProject('/api/order'), { ids }),
   changes: id => DEMO ? demo.changes(id) : getJson(withProject(`/api/tasks/${id}/changes`)),
+  // A card's agent sessions (server/sessions.ps1), then one's lines from a byte offset: { text, next }.
+  sessions: id => DEMO ? demo.sessions(id) : getJson(withProject(`/api/tasks/${id}/sessions`)),
+  session: async (id, key, from) => {
+    if (DEMO) return demo.session(id, key, from);
+    const res = await request(withProject(`/api/tasks/${id}/session`, `&key=${encodeURIComponent(key)}&from=${from}`));
+    return { text: await res.text(), next: Number(res.headers.get('X-Next')) || from };
+  },
   docs: () => DEMO ? demo.docs() : getJson(withProject('/api/docs')),
   doc: path => DEMO ? demo.doc(path) : getJson(withProject('/api/docs/file', `&path=${encodeURIComponent(path)}`)),
   // The user's edit, committed on main and pushed. { conflict, hash } instead if the doc changed since base.

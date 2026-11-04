@@ -13,6 +13,8 @@ import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
 import { shotOf, imagesIn, shotsHTML, shotClick, clip } from '../ui/shots.js';
 import { showDoc } from './docs.js';
+import { prose, proseLine } from '../prose.js';
+import { startSession, scrollSessionToEnd } from './session.js';
 
 const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
@@ -77,7 +79,7 @@ function questionCardHTML(t) {
   if (!qs.length) return '';
   if (picked.length >= qs.length) return `<div class="ask-card done"><span class="spin"></span><span>Sending your answer${qs.length === 1 ? '' : 's'}</span></div>`;
   const i = picked.length, q = qs[i];
-  return `<div class="ask-card"><div class="ask-q"><span>${esc(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
+  return `<div class="ask-card"><div class="ask-q"><span>${proseLine(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
     + `<div class="opts">${(q.options || []).map(o => optionHTML(o, i, '')).join('')}</div>`
     + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
 }
@@ -131,7 +133,7 @@ function planCardHTML(p) {
   return `<div class="plan${p.fresh ? ' fresh' : ''}" style="${featureVars(p.id)}" data-id="${p.id}">`
     + `<div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span>`
     + `<button class="plan-x" data-plan-dismiss="${p.id}" title="Dismiss this plan" aria-label="Dismiss this plan">×</button></div>`
-    + `<div class="plan-title">${esc(p.title)}</div>${p.summary ? `<div class="plan-sum">${esc(p.summary)}</div>` : ''}${stepsHTML(p)}`
+    + `<div class="plan-title">${esc(p.title)}</div>${p.summary ? `<div class="plan-sum">${prose(p.summary)}</div>` : ''}${stepsHTML(p)}`
     + (p.pending === 'revise' ? '<div class="plan-note">Changes asked for · waiting for Rocco</div>' : '')
     + `<div class="plan-actions"><button class="btn-sm go" data-plan-approve="${p.id}">Approve plan</button>`
     + `<button class="btn-sm" data-plan-reply="${p.id}" data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply="${p.id}" data-mode="followup">Ask</button>`
@@ -157,7 +159,7 @@ function questionHTML(t) {
     + `<div class="qa-q" title="Open the whole thread"><span class="qa-icon">?</span><span class="qa-text">${esc(t.note || t.title)}</span>${status}</div>`
     // After "Ask more", the follow-up it's waiting on.
     + (!done && t.attempt > 1 ? `<div class="qa-follow">${esc(t.log.filter(l => l.who === 'you').at(-1)?.text || '')}</div>` : '')
-    + (done ? `<div class="qa-a">${esc(t.summary || '')}</div>`
+    + (done ? `<div class="qa-a">${prose(t.summary || '')}</div>`
       + `<div class="qa-actions"><button class="btn-sm go" data-got-it="${t.id}">${icon.check}Got it</button><button class="btn-sm" data-ask-more="${t.id}">Ask more</button></div>`
       + `<div class="qa-reply"${drafts.has(t.id) ? '' : ' hidden'}><textarea class="field" placeholder="Ask a follow-up">${esc(drafts.get(t.id)?.text || '')}</textarea>`
       + `<div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send="${t.id}">Ask</button></div></div>`
@@ -244,7 +246,7 @@ function renderBoard() {
 
 // The steps to try: one a line (rocco.ps1 set -Test "a","b").
 const stepsOf = t => String(t.test || '').split('\n').map(s => s.trim()).filter(Boolean);
-const stepsHTMLOf = steps => steps.length > 1 ? `<ul>${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>` : esc(steps[0] || '');
+const stepsHTMLOf = steps => steps.length > 1 ? `<ul>${steps.map(s => `<li>${proseLine(s)}</li>`).join('')}</ul>` : proseLine(steps[0] || '');
 const lanePart = t => t.lane ? `lane ${t.lane}` : 'conductor';
 
 // Up to n words of each text in turn, and whether any were left out.
@@ -303,14 +305,14 @@ function whereLine(t) {
 
 function questionsSheetHTML(t) {
   const picked = answers.get(t.id) || [];
-  return questionsOf(t).map((q, i) => `<div class="s-q">${esc(q.text)}</div><div class="opts">${(q.options || []).map(o => optionHTML(o, i, picked[i])).join('')}`
+  return questionsOf(t).map((q, i) => `<div class="s-q">${proseLine(q.text)}</div><div class="opts">${(q.options || []).map(o => optionHTML(o, i, picked[i])).join('')}`
     + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button></div>`).join('');
 }
 
 function sheetBody(t) {
   const meta = [typeTag(t), featureTag(t)].join('');
   let h = `<h2 class="s-title">${esc(t.title)}</h2><div class="s-where">${whereLine(t)}</div>${meta ? `<div class="c-meta">${meta}</div>` : ''}`;
-  if (t.summary) h += `<p class="s-sum">${esc(t.summary)}</p>`;
+  if (t.summary) h += `<div class="s-sum">${prose(t.summary)}</div>`;
   if (isPlan(t)) {
     h += stepsHTML(t);
     if (t.spec) h += `<div class="row s-spec">${specButton(t).replace('<span class="sp"></span>', '')}</div>`;
@@ -322,12 +324,12 @@ function sheetBody(t) {
   if (t.shots.length) h += `<div class="shots">${t.shots.map(src => `<img src="${src}" alt="Screenshot">`).join('')}</div>`;
   if (t.note && t.note !== t.title) h += `<div class="s-note">${esc(t.note)}</div>`;
   if (t.branch) h += `<div class="sec-h">What changed</div><div class="changes" id="changes"><span class="mut">Loading…</span></div>`;
-  if (t.log.length) h += `<details class="hist"><summary>${icon.chev}History · ${t.log.length}</summary><ul class="tl">${t.log.map(l =>
-    `<li class="w-${esc(l.who)}"><span class="who">${esc(l.who)}</span>${esc(l.text)}<span class="at">${hhmm(l.at)}</span></li>`).join('')}</ul></details>`;
+  // Its agent's session and the card's history, word for word (session.js).
+  h += `<div class="sec-h">Session</div><div class="sx" id="sx"><div class="sx-empty"><span class="spin"></span>Loading</div></div>`;
   return h;
 }
 
-const followUpHTML = placeholder => `<textarea class="field" id="followText" placeholder="${placeholder}"></textarea><div class="row"><span class="sp"></span><button class="btn accent" data-follow>Send follow-up</button></div>`;
+const followUpHTML = placeholder => `<textarea class="field" id="followText" placeholder="${placeholder}"></textarea><div class="row"><span class="sp"></span><button class="btn accent" data-follow>Send</button></div>`;
 
 // ---- Sending a task back: a box that's always open under To test, with screenshots like the note box ----
 
@@ -350,14 +352,29 @@ function attachReply(files) {
 async function sendBack(id) {
   const text = $('#reopenText').value.trim(), shots = [...reply.shots];
   if (!text && !shots.length) { $('#reopenText').focus(); toast("Say what's still wrong, or add a screenshot", 'var(--amber)'); return; }
-  closeSheet();
+  $('#reopenText').disabled = true;
   await attempt('send it back', async () => {
     const names = [];
     for (const s of shots) { const { name } = await api.shot(id, s.file); if (name) names.push(name); }
     await act(id, 'reopen', [text, names.length ? `Screenshots: ${names.join(', ')}` : ''].filter(Boolean).join('\n'));
     reply = { id: '', shots: [] };
     toast('Sent back to Rocco', 'var(--amber)');
+    stayOpen(id);
   });
+  if ($('#reopenText')) $('#reopenText').disabled = false;
+}
+
+function sendFollowUp(id, text) {
+  $('#followText').disabled = true;
+  attempt('send it', async () => { await act(id, 'followup', text); toast('Sent to Rocco', 'var(--violet)'); stayOpen(id); })
+    .finally(() => { if ($('#followText')) $('#followText').disabled = false; });
+}
+
+// After you send a card something, it stays open like a session: your words show in it, and what its agent does next.
+function stayOpen(id) {
+  if (openSheetKey() !== id) return;
+  openTask(id);
+  scrollSessionToEnd();
 }
 
 function sheetFoot(t) {
@@ -372,8 +389,9 @@ function sheetFoot(t) {
   if (t.status === 'ready') return replyHTML() + `<div class="row"><button class="btn go" style="flex:1" data-approve-open>${icon.checkSm}Approve</button></div>`;
   if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
   if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button></div>`;
-  if (t.status === 'working' || isPlan(t)) return followUpHTML('Add something while it works. It picks it up at its next stop.');
-  if (t.status === 'queued') return followUpHTML('Add more for when it starts');
+  if (isPlan(t)) return followUpHTML('Add something about this feature, for Rocco');
+  if (t.status === 'working') return followUpHTML('Message its agent. It reads it at its next step');
+  if (t.status === 'queued') return followUpHTML('Add more for its agent, for when it starts');
   return '';
 }
 
@@ -422,8 +440,9 @@ export function openTask(id) {
   const color = isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status];
   const chip = isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status];
   if (reply.id !== id) reply = { id, shots: [] };
-  showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: deleteHTML(t) });
+  showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: deleteHTML(t), wide: true });
   if (t.branch) loadChanges(t);
+  startSession(id);
 }
 
 function openApproved() {
@@ -641,6 +660,8 @@ export function initWorkboard() {
     if (e.key !== 'Enter' || e.shiftKey) return;
     if (e.target.id === 'answerText' && e.target.value.trim()) { e.preventDefault(); sendAnswers(openSheetKey(), e.target.value.trim()); }
     if (e.target.id === 'reopenText') { e.preventDefault(); sendBack(openSheetKey()); }
+    // A message to a card's agent, as in a session (not a plan's changes or a question's follow-up: those have buttons).
+    if (e.target.id === 'followText' && $('[data-follow]') && e.target.value.trim()) { e.preventDefault(); sendFollowUp(openSheetKey(), e.target.value.trim()); }
   });
   // Screenshots for sending a task back: pasted anywhere while its sheet is open, dropped on the box, or picked.
   document.addEventListener('paste', e => {
@@ -676,8 +697,10 @@ export function initWorkboard() {
     else if (hit('[data-follow]') || hit('[data-revise]')) {
       const text = $('#followText').value.trim();
       if (!text) { $('#followText').focus(); return; }
-      closeSheet();
-      attempt('send it', async () => { await act(id, hit('[data-revise]') ? 'revise' : 'followup', text); toast(hit('[data-revise]') ? 'Changes asked for' : 'Follow-up sent', 'var(--violet)'); });
+      if (hit('[data-revise]')) {
+        closeSheet();
+        attempt('send it', async () => { await act(id, 'revise', text); toast('Changes asked for', 'var(--violet)'); });
+      } else sendFollowUp(id, text);
     } else if (hit('[data-plan-approve]')) {
       closeSheet();
       attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); });

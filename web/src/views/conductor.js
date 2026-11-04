@@ -11,6 +11,7 @@ import { toast } from '../ui/toast.js';
 import { notify } from '../notify.js';
 import { agentName } from '../agent.js';
 import { go } from '../router.js';
+import { prose, proseLine } from '../prose.js';
 
 let shown = false;           // the history is open
 let history = null;          // { stamp, items, steps }
@@ -109,7 +110,7 @@ function askHTML(ask) {
   return `<div class="c-ask${ask.expired ? ' late' : ''}" data-ask-card="${ask.id}">`
     + `<div class="c-ask-head"><span class="c-who">Rocco asks</span>${q.header ? `<span class="c-tag">${esc(q.header)}</span>` : ''}`
     + `${ask.questions.length > 1 ? `<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : ''}<span class="c-at">${hhmm(ask.at)}</span></div>`
-    + `<div class="c-ask-q">${esc(q.text)}</div>`
+    + `<div class="c-ask-q">${proseLine(q.text)}</div>`
     + (q.options?.length ? `<div class="opts">${q.options.map(opt).join('')}</div>` : '')
     + `<div class="ask-foot">${q.multi ? `<button class="btn-sm go" data-c-multi="${ask.id}"${ticked.length ? '' : ' disabled'}>Send these</button>` : ''}`
     + `<button class="linkish" data-c-skip="${ask.id}">Let Rocco decide</button>`
@@ -168,33 +169,6 @@ async function showWindow() {
 
 // ---- The history ----
 
-// Messages from the conductor: escaped, then a little Markdown (bold, code, lists, links).
-function richText(text) {
-  const inline = s => s.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  const parts = esc(text).split(/```[\w-]*\n?/);
-  return parts.map((part, i) => {
-    if (i % 2) return `<pre>${part.replace(/\n$/, '')}</pre>`;
-    let out = '', list = '';
-    const close = () => { if (list) { out += `</${list}>`; list = ''; } };
-    for (const line of part.split('\n')) {
-      const bullet = line.match(/^\s*[-*]\s+(.*)$/), number = line.match(/^\s*\d+[.)]\s+(.*)$/), head = line.match(/^#{1,4}\s+(.*)$/);
-      if (bullet || number) {
-        const kind = bullet ? 'ul' : 'ol';
-        if (list !== kind) { close(); out += `<${kind}>`; list = kind; }
-        out += `<li>${inline((bullet || number)[1])}</li>`;
-      } else {
-        close();
-        if (head) out += `<p class="h">${inline(head[1])}</p>`;
-        else if (line.trim()) out += `<p>${inline(line)}</p>`;
-        else out += '<p class="gap"></p>';
-      }
-    }
-    close();
-    return out;
-  }).join('');
-}
-
 const ACT = {
   note: 'Note', question: 'Question', answer: 'Answer', reopen: 'Sent back', followup: 'Follow-up', approve: 'Approved',
   'approve-plan': 'Approved the plan', revise: 'Asked for changes', queue: 'Queued', remove: 'Deleted', undo: 'Took back',
@@ -209,7 +183,7 @@ function rowHTML(e, all) {
       const long = String(e.text || '').length > 700 || String(e.text || '').split('\n').length > 14;
       return `<div class="h-msg them"><div class="h-head"><span class="h-who">Rocco</span>${e.re ? `<span class="h-re"${taskLink(e.task)}>re: ${esc(e.re)}</span>` : ''}${at}`
         + `<button class="linkish h-reply" data-reply="${e.id}">Reply</button></div>`
-        + `<div class="h-text${long ? ' clamp' : ''}">${richText(e.text)}</div>${long ? '<button class="linkish h-more" data-more>Show all</button>' : ''}</div>`;
+        + `<div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${long ? '<button class="linkish h-more" data-more>Show all</button>' : ''}</div>`;
     }
     case 'message':
       return `<div class="h-msg you"><div class="h-head">${e.via === 'terminal' ? `<span class="h-re">In Rocco's window</span>` : ''}${at}</div><div class="h-text">${esc(e.text)}</div></div>`;
@@ -218,7 +192,7 @@ function rowHTML(e, all) {
     case 'asked': {
       const reply = all.find(x => x.kind === 'answered' && x.to === e.id);
       return `<div class="h-q"><div class="h-head"><span class="h-who">Rocco asked</span>${at}</div>`
-        + e.questions.map((q, i) => `<div class="h-qq">${esc(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${reply ? esc(reply.answers?.[i] ?? '') : 'Waiting for your answer'}</div>`).join('') + '</div>';
+        + e.questions.map((q, i) => `<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${reply ? esc(reply.answers?.[i] ?? '') : 'Waiting for your answer'}</div>`).join('') + '</div>';
     }
     case 'permission': {
       const d = all.find(x => x.kind === 'decided' && x.to === e.id), gone = all.find(x => x.kind === 'expired' && x.to === e.id);
