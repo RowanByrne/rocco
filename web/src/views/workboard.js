@@ -217,12 +217,45 @@ export function renderWorkboard() {
   state.tasks.forEach(t => { t.fresh = false; });
 }
 
+// The steps to try: one a line (rocco.ps1 set -Test "a","b").
+const stepsOf = t => String(t.test || '').split('\n').map(s => s.trim()).filter(Boolean);
+const stepsHTMLOf = steps => steps.length > 1 ? `<ul>${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>` : esc(steps[0] || '');
+const lanePart = t => t.lane ? `lane ${t.lane}` : 'conductor';
+
+// Up to n words of each text in turn, and whether any were left out.
+function cutWords(texts, n) {
+  let cut = false;
+  const out = [];
+  for (const text of texts) {
+    const words = String(text).split(/\s+/).filter(Boolean);
+    if (n <= 0) { if (words.length) cut = true; continue; }
+    if (words.length > n) { out.push(words.slice(0, n).join(' ') + '…'); cut = true; } else out.push(words.join(' '));
+    n -= words.length;
+  }
+  return { out: out.filter(Boolean), cut };
+}
+
+// The hover: what the card is now, in a few lines. Rocco keeps a summary and a test to 30 words each (rocco.ps1
+// Assert-CardText); a card written before that is cut short here, and its sheet has it all.
 function summaryHTML(t) {
   const head = label => `<div class="ph"><span class="sdot" style="--c:${COLOR[t.status]}"></span>${label}</div>`;
+  const words = 30, more = '<div class="pmore">Open it for the rest</div>';
+  const sum = cutWords([t.summary || ''], words);
   switch (t.status) {
-    case 'ready': return head('Ready to test') + esc(t.summary) + (t.test ? `<div class="try">${esc(t.test)}</div>` : '');
-    case 'stuck': return head('Needs your answer') + esc(questionsOf(t).map(q => q.text).join(' · '));
-    case 'working': return head(`${esc(t.step || 'Working')} · Lane ${t.lane}`) + (t.summary ? esc(t.summary) : 'No report yet');
+    case 'ready': {
+      const test = cutWords(stepsOf(t), words);
+      return head(`Ready to test · ${place(t)}`)
+        + (sum.out.length ? `<div class="pl">What changed</div><div class="pt">${esc(sum.out[0])}</div>` : '')
+        + (test.out.length ? `<div class="try"><div class="pl">Try</div>${stepsHTMLOf(test.out)}</div>` : '')
+        + (sum.cut || test.cut ? more : '');
+    }
+    case 'stuck': {
+      const qs = cutWords(questionsOf(t).map(q => q.text), words * 2);
+      return head('Needs your answer') + `<div class="pt">${esc(qs.out.join(' · '))}</div>` + (qs.cut ? more : '');
+    }
+    case 'working':
+      return head(`${esc(t.step || 'Working')} · ${lanePart(t)} · ${minsSince(t.startedAt)}m`)
+        + `<div class="pt">${sum.out.length ? esc(sum.out[0]) : 'No report yet'}</div>` + (sum.cut ? more : '');
   }
   return '';
 }
@@ -235,7 +268,7 @@ function whereLine(t) {
   switch (t.status) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
     case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
-    case 'working': return `Lane ${t.lane} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
+    case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
     case 'queued': return esc(t.waiting || 'Queued');
     case 'inbox': return `${agentShort()} spotted this. Queue it to have it done.`;
     case 'done': return `Approved at ${hhmm(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
@@ -259,7 +292,7 @@ function sheetBody(t) {
     const kids = childrenOf(t);
     if (kids.length) h += `<div class="sec-h">Tasks</div>${kids.map(k => `<div class="s-row" data-id="${k.id}"><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${esc(k.title)}</span><span class="at">${NAMES[k.status] || ''}</span></div>`).join('')}`;
   }
-  if (t.status === 'ready' && t.test) h += `<div class="s-try"><small>Try</small>${esc(t.test)}</div>`;
+  if (t.status === 'ready' && t.test) h += `<div class="s-try"><small>Try</small>${stepsHTMLOf(stepsOf(t))}</div>`;
   if (t.status === 'stuck') h += questionsSheetHTML(t);
   if (t.shots.length) h += `<div class="shots">${t.shots.map(src => `<img src="${src}" alt="Screenshot">`).join('')}</div>`;
   if (t.note && t.note !== t.title) h += `<div class="s-note">${esc(t.note)}</div>`;

@@ -4,6 +4,13 @@
 $Statuses = 'inbox', 'queued', 'working', 'stuck', 'ready', 'done', 'removed'
 $Types = 'bug', 'tweak', 'idea', 'feature', 'question'
 $ToConductor = 'Waiting for the conductor'
+# Once the conductor has read a note (show), so the user can tell it from one it hasn't seen. {0}: the agent.
+$ReadIt = '{0} has read it'
+# What a card shows has to fit it: a title on one line, and a summary and a test the hover shows whole.
+$TitleMax = 50
+$WordsMax = 30
+
+function Get-WordCount([string]$text) { @("$text" -split '\s+' | Where-Object { $_ }).Count }
 # How long the app offers Undo (its toast, and a moment more), and so how long a deleted task's work waits before the
 # conductor hears it should stop.
 $UndoSeconds = 6

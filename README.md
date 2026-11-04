@@ -154,8 +154,8 @@ The agent keeps the Workboard current with `rocco.ps1`. Run from a project's `re
 | | |
 |---|---|
 | `list [-Pending]` | Open tasks in Up next order; `-Pending`: only what waits on the conductor |
-| `show T-012` | One task in full |
-| `new -Title "..." [-Type bug] [-Plan T-020] [-After T-011]` | Add a task to Up next. `-Plan`: part of that feature. `-After`: it needs those done first, so the user can't drag it ahead of them |
+| `show T-012` | One task in full. On a note waiting for the conductor (`[plan]`), it ends with what comes first (`set -Title "..." -Status working`, so the card leaves Up next), and Up next tells the user it's been read |
+| `new -Title "..." [-Note "..."] [-Type bug] [-Plan T-020] [-After T-011]` | Add a task to Up next. `-Plan`: part of that feature. `-After`: it needs those done first, so the user can't drag it ahead of them |
 | `suggest -Title "..." [-Summary "why"]` | Put something the agent spotted in the inbox |
 | `plan -Title "..." -Summary "..." -Steps "title\|lane\|tier",... [-Spec docs/game/features/x.md]` | A feature plan for the user to approve or change. `-Spec` is the feature's spec in the repo: its card links it (Read the spec). The summary keeps its line breaks. When they ask for changes, `set T-020 -Summary "..." -Steps ...` revises it, then `clear`. A plan always waits for the user |
 | `ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]` | Ask the user; more `ask`s while it's stuck add questions. Options are a few words each, like "A lap" or "An open pad": the detail goes in the question, since the card shows two lines of an option at most. `-Audio` files (one per option, in order) get play buttons |
@@ -166,6 +166,7 @@ The agent keeps the Workboard current with `rocco.ps1`. Run from a project's `re
 | `hook permission\|question` | Claude Code's hooks for a conductor Rocco opened: they wait for the user's answer in Rocco and hand it back |
 | `reply T-012 -Text "..."` | Answer a question the user asked from the note box (`list` marks them QUESTION). It shows under the note box until they click Got it, or Ask more, which sends it back |
 | `set T-012 -Status working -Lane 3 -Step "..." [-Progress 40]` | Where a task stands. A worker's `log` lines show live on its card |
+| `set T-012 -Status ready -Where main -Summary "..." -Test "Drive a lap","Drift the hairpin"` | Ready to test: what changed, and the steps to try (one a line on the card). What a card shows has to fit it, so these are refused, with what to do instead: a title over 50 characters (from `new`, `plan`, `suggest` or `set`; a plan's steps too), and a task's summary or test over 30 words each. A feature plan's summary and a setup card's aren't limited. The detail goes in `log` |
 | `log T-012 -Text "..." [-Who worker]` | Add to a task's history |
 | `clear T-012` | What the user asked of it (a plan, answer, reopen, merge, cancel, follow-ups) is handled. `set` on a deleted task fails, which is how a worker hears its task was deleted |
 | `wait [-Timeout 540]` | The conductor between jobs: returns as soon as something waits on it, listed as `list -Pending` lists it, or after `-Timeout` seconds. Rocco shows the conductor listening meanwhile, and opens no other. Claude Code runs it as a background command and is woken when it returns; an agent without background commands runs it with `-Timeout`, again and again |

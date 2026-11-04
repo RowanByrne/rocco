@@ -20,6 +20,9 @@
 #   rocco.ps1 say -Text "..."          a message to the user (a report, anything you'd tell them): Rocco's history
 #   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
+#   rocco.ps1 set T-012 -Status ready -Where main -Summary "what changed" -Test "Drive a lap","Drift the hairpin"
+#                                      what a card shows has to fit it: a title is 50 characters at most (one line), a
+#                                      task's summary and its test (the steps to try) 30 words each. The detail goes in log
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
 #   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, cancel, follow-ups) is handled
@@ -33,7 +36,7 @@ param(
 	[Parameter(Position = 0)] [string]$Command = 'serve',
 	[Parameter(Position = 1)] [string]$Id,
 	[string]$Title, [string]$Note, [string]$Status, [int]$Lane = -1, [string]$Branch, [string]$Where,
-	[string]$Step, [string]$Summary, [string]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string]$Waiting,
+	[string]$Step, [string]$Summary, [string[]]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string]$Waiting,
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
 	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [int]$Port = 34860,
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
@@ -71,7 +74,7 @@ function Write-Pending($rows, $thread) {
 	if (@($rows).Count) { Format-Tasks $rows }
 	foreach ($e in $thread.pending) { Format-ThreadItem $e $thread }
 }
-$PendingHead = 'Waiting on you (show each, then handle it as CONDUCTOR.md "The Workboard" says; clear a C- message or answer once you''ve acted on it):'
+$PendingHead = 'Waiting on you. Show each, then handle it as CONDUCTOR.md "The Workboard" says: a note you take on gets set -Title "<a few words>" -Status working first, so it leaves Up next. Clear a C- message or answer once you''ve acted on it:'
 
 # The text of doing and say: -Text, or the first word after the command.
 function Get-Words { if ($Text) { $Text } else { $Id } }
@@ -83,6 +86,29 @@ function ConvertTo-Steps([string[]]$steps) {
 		[pscustomobject]@{ title = $f[0].Trim(); lane = $(if ($f.Count -gt 1 -and $f[1].Trim() -match '^\d+$') { [int]$f[1] } else { $null }); tier = $(if ($f.Count -gt 2) { $f[2].Trim() } else { '' }) }
 	})
 }
+
+# What a card shows has to fit it, so it's checked before anything changes: a title on one line, and (for a task, not
+# a feature plan or a setup card) a summary and a test the hover shows whole. The rest has its own place.
+function Assert-CardText([bool]$words) {
+	if ($Title -and $Title.Length -gt $TitleMax) {
+		throw "That title is $($Title.Length) characters; a card shows $TitleMax on one line. Titles are a few words that name it, like `"Keep the baseplate in playtests`": the detail goes in -Note or -Summary."
+	}
+	# A plan's steps each become a task (new), with its title.
+	$long = @(if ($Steps) { ConvertTo-Steps $Steps | Where-Object { $_.title.Length -gt $TitleMax } })
+	if ($long.Count) { throw "The step `"$($long[0].title)`" is $($long[0].title.Length) characters; each step becomes a card, so name it in a few words ($TitleMax at most)." }
+	if (-not $words) { return }
+	$n = Get-WordCount $Summary
+	if ($n -gt $WordsMax) {
+		throw "That summary is $n words; the card's hover shows $WordsMax. Say what changed in a sentence or two. The detail goes in log (the card's History), a report in say, and a choice for the user in ask."
+	}
+	$n = Get-WordCount ($Test -join ' ')
+	if ($n -gt $WordsMax) {
+		throw "That test is $n words; the card's hover shows $WordsMax. Give the few steps to try, a few words each: -Test `"Drive a lap`",`"Drift the hairpin`". The detail goes in log."
+	}
+}
+
+# -Test: the steps to try, one a line.
+function Join-Steps { (@($Test) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join "`n" }
 
 # The fields new and set share.
 function Set-Common($t) {
@@ -169,7 +195,7 @@ switch ($Command) {
 		foreach ($s in Get-List $t.shots) { "Screenshot: $(Join-Path $dir $s)" }
 		if ($t.step) { "Step:       $($t.step)" }
 		if ($t.summary) { "Summary:    $($t.summary)" }
-		if ($t.test) { "Test:       $($t.test)" }
+		foreach ($line in "$($t.test)" -split "`n" | Where-Object { $_ }) { "Test:       $line" }
 		foreach ($s in Get-List $t.steps) { "Plan step:  $($s.title)  (lane $($s.lane), $($s.tier))" }
 		foreach ($q in Get-List $t.questions) { "Question:   $($q.text)  [$((@($q.options) | ForEach-Object { $_.label + $(if ($_.audio) { " ($($_.audio))" }) }) -join ' | ')]" }
 		if ($t.waiting) { "Waiting:    $($t.waiting)" }
@@ -180,10 +206,17 @@ switch ($Command) {
 			'History:'
 			foreach ($e in $t.log) { '  {0}  {1,-9} {2}' -f (Format-Time $e.at), $e.who, $e.text }
 		}
+		# A note for the conductor to take on: Up next tells the user it's been read, and the conductor what comes first.
+		if ($t.pending -eq 'plan' -and $t.status -eq 'queued') {
+			if ($t.waiting -eq $ToConductor) { Set-Field $t 'waiting' ($ReadIt -f (Get-Agent).short); Save-Task $t }
+			''
+			"Taking it on? First: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
+		}
 	}
 
 	'new' {
 		if (-not $Title) { throw 'new needs -Title.' }
+		Assert-CardText $false
 		$t = New-Task $Title $(if ($Note) { $Note } else { $Title }) $(if ($Status) { $Status } else { 'queued' }) 'task'
 		Set-Common $t
 		if ($Waiting) { Set-Field $t 'waiting' $Waiting }
@@ -193,6 +226,7 @@ switch ($Command) {
 
 	'suggest' {
 		if (-not $Title) { throw 'suggest needs -Title.' }
+		Assert-CardText $false
 		$t = New-Task $Title $(if ($Note) { $Note } else { $Title }) 'inbox' 'suggestion'
 		if ($Summary) { Set-Field $t 'summary' $Summary }
 		Set-Common $t
@@ -204,6 +238,7 @@ switch ($Command) {
 	'plan' {
 		if (-not $Title) { throw 'plan needs -Title.' }
 		if (-not $Steps) { throw 'plan needs -Steps "title|lane|tier", one per task.' }
+		Assert-CardText $false
 		$t = New-Task $Title $Title 'inbox' 'plan' 'feature'
 		Set-Field $t 'feature' $true
 		if ($Summary) { Set-Field $t 'summary' $Summary }
@@ -241,15 +276,17 @@ switch ($Command) {
 		$t = Read-Task $Id
 		# A worker finds out here (set -Step) that the user deleted its task.
 		if ($t.status -eq 'removed' -and $Status -ne 'removed') { throw ($DeletedText -f $t.id) }
+		Assert-CardText ($t.kind -ne 'plan' -and -not ($t.PSObject.Properties['auto'] -and $t.auto))
 		$before = $t.status
 		if ($Status) {
 			if ($Status -notin $Statuses) { throw "Status must be one of: $($Statuses -join ', ')." }
 			Set-Status $t $Status
 		}
 		if ($Where -and $Where -notin 'main', 'lane') { throw "Where must be 'main' (merged, test in Main) or 'lane' (on its branch, test in the lane's place)." }
-		foreach ($name in 'Title', 'Branch', 'Where', 'Step', 'Summary', 'Test', 'Waiting') {
+		foreach ($name in 'Title', 'Branch', 'Where', 'Step', 'Summary', 'Waiting') {
 			if ($PSBoundParameters.ContainsKey($name)) { Set-Field $t $name.ToLower() $PSBoundParameters[$name] }
 		}
+		if ($PSBoundParameters.ContainsKey('Test')) { Set-Field $t 'test' (Join-Steps) }
 		# One question in one go; ask adds more, with audio.
 		if ($Question) { Set-Field $t 'questions' @(); Add-Question $t $Question @($Options) @($Audio) }
 		if ($Lane -ge 0) { Set-Field $t 'lane' $(if ($Lane -eq 0) { $null } else { $Lane }) }

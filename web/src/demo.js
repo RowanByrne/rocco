@@ -43,7 +43,7 @@ function seed(id) {
     tasks: [
       { ...base, id: 'T-038', status: 'ready', type: 'bug', lane: 2, attempt: 2, title: 'Daily reward claimable twice after rejoin', shots: [picture(200)],
         note: 'daily reward lets me claim twice if i leave and rejoin quick', summary: 'The claim saves before the reward is given now.',
-        test: 'Claim, leave, rejoin within 5 s. It should show the countdown.', branch: 'agent/daily-reward',
+        test: 'Claim the reward, leave and rejoin within 5 s\nThe countdown shows, not a second reward', branch: 'agent/daily-reward',
         log: [{ who: 'conductor', at: ago(59), text: 'Lane 2.' }, { who: 'worker', at: ago(42), text: 'Saves on claim instead of on autosave.' },
           { who: 'you', at: ago(21), text: 'Still happens if I rejoin really fast.' },
           { who: 'worker', at: ago(6), text: 'Save lands before the reward, and loading waits for the session lock. 20 fast rejoins: no double claims.' },
@@ -52,7 +52,10 @@ function seed(id) {
         summary: 'Prices shrink to fit on phone.', test: 'Open the shop at phone size. Prices stay on one line.', branch: 'agent/shop-price-fit',
         log: [{ who: 'conductor', at: ago(31), text: 'Lane 4.' }, { who: 'worker', at: ago(17), text: 'Labels shrink to fit. Checked phone, tablet, desktop.' }, { who: 'conductor', at: ago(5), text: 'Merged.' }] },
       { ...base, id: 'T-044', status: 'ready', type: 'feature', feature: true, where: 'lane', lane: 5, attempt: 3, branch: 'feature/pet-follow', title: 'Pets follow the player',
-        note: 'pets should follow you around, not just sit at spawn', summary: 'Pets follow, and teleport to you if they fall 40+ studs behind.', test: 'Equip a pet, run, jump off the tower.',
+        note: 'pets should follow you around, not just sit at spawn',
+        // Written before Rocco kept these short: the hover cuts it, and the sheet has it all.
+        summary: 'Pets follow you everywhere now. They path around obstacles with the same navigation the NPCs use, and when one falls more than 40 studs behind (off the tower, through a wall, or after you teleport) it catches up in under a second by teleporting to a free spot right behind you, so it never lands inside you or in a wall.',
+        test: 'Equip any pet and run a long loop around spawn, then jump off the tower and check it lands near you. Then teleport to the shop and check it arrives with you. Try it with two pets equipped as well, since they share the follow spots and could overlap.',
         log: [{ who: 'conductor', at: ago(170), text: 'Feature branch, lane 5.' }, { who: 'you', at: ago(100), text: 'They lag way behind when I run.' },
           { who: 'you', at: ago(46), text: 'They get stuck when I jump off the tower.' }, { who: 'worker', at: ago(9), text: 'Teleport when 40+ studs behind. Always catches up within 1 s.' }] },
 
@@ -86,10 +89,14 @@ function seed(id) {
         note: 'my alt shows 0 coins on the leaderboard till it rejoins', followups: 1, pending: 'followup', branch: 'agent/leaderboard-zero',
         log: [{ who: 'conductor', at: ago(6), text: 'Lane 1.' }, { who: 'worker', at: ago(5), text: 'Leaderstats are made before the data loads.' },
           { who: 'you', at: ago(2), text: 'Gems do the same thing, check those too.' }] },
+      // The conductor on a note itself: no lane.
+      { ...base, id: 'T-054', status: 'working', type: 'bug', kind: 'note', startedAt: ago(3), step: 'Playtesting in Main', title: 'Keep the baseplate in playtests',
+        note: "put the baseplate back when you playtest it shouldn't disapear", summary: 'The playground hid it whenever a track was in the place.',
+        log: [{ who: 'conductor', at: ago(3), text: 'On it myself: one file.' }] },
       { ...base, id: 'T-048', status: 'queued', type: 'tweak', kind: 'note', order: 1, after: ['T-047'], title: 'Sort leaderboard by level', note: 'leaderboard should sort by level', waiting: 'After T-047 (same file)' },
       { ...base, id: 'T-049', status: 'queued', type: 'tweak', kind: 'task', order: 2, after: ['T-043'], title: 'Coin pickup sound too loud', note: 'coin pickup sound is way too loud', waiting: 'After T-043 (same file)' },
       { ...base, id: 'T-050', status: 'queued', type: 'bug', kind: 'note', order: 4, pending: 'plan', waiting: 'Waiting for the conductor', title: "NPC dialog runs off the bubble when it's long", note: "npc dialog runs off the bubble when it's long", shots: [picture(120)] },
-      { ...base, id: 'T-051', status: 'queued', type: 'bug', kind: 'note', order: 5, pending: 'plan', waiting: 'Waiting for the conductor', title: 'FPS drops near the spawn fountain', note: 'fps drops near the spawn fountain' },
+      { ...base, id: 'T-051', status: 'queued', type: 'bug', kind: 'note', order: 5, pending: 'plan', waiting: 'Claude has read it', title: 'FPS drops near the spawn fountain', note: 'fps drops near the spawn fountain' },
       { ...base, id: 'T-052', status: 'inbox', type: 'tweak', kind: 'suggestion', title: 'Shop button overlaps the health bar on small phones', note: 'Shop button overlaps the health bar on small phones',
         summary: 'Spotted while fixing the shop prices (T-041).' },
       { ...base, id: 'T-053', status: 'inbox', type: 'idea', kind: 'suggestion', title: 'Daily reward claims have no analytics event', note: 'Daily reward claims have no analytics event',
