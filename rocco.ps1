@@ -32,7 +32,8 @@
 #   rocco.ps1 show C-1a2b3c / clear C-1a2b3c   a message or answer the user sent the conductor; clear: it's read
 #   rocco.ps1 wait [-Timeout 540]      the conductor watching the board: returns when something waits on it (as list
 #                                      -Pending), or after -Timeout seconds. Rocco shows it listening meanwhile
-#   rocco.ps1 hook permission|question  Claude Code's hooks, for a conductor Rocco opened (server\conductor.ps1)
+#   rocco.ps1 hook permission|question|stop   Claude Code's hooks, for a conductor Rocco opened (server\conductor.ps1).
+#                                      stop: it can't end a turn while something waits on it, or with no wait running
 #   rocco.ps1 lanes [-Count 3]         open this PC's lanes: makes any missing lane, the Main and lane places, starts
 #                                      Lync for each (no window) and opens them in Studio. -Count: record this PC's number first
 param(
@@ -82,6 +83,30 @@ function Write-Pending($rows, $thread) {
 	if (@($rows).Count) { Format-Tasks $rows }
 	foreach ($e in $thread.pending) { Format-ThreadItem $e $thread }
 }
+# The conductor ending a turn (Claude Code's Stop hook, for a conductor Rocco opened): not while something waits on it,
+# and not with nothing watching the board, or the user's next note sits unseen until they prompt it. Says what to do
+# instead ({"decision":"block"}). After three goes in a row it lets the turn end, and tells the user.
+function Test-ConductorStop($in) {
+	$state = Join-Path (Get-ThreadDir) 'stop-check.json'
+	$tries = 0
+	if ($in.stop_hook_active -and (Test-Path $state)) { try { $tries = [int]([IO.File]::ReadAllText($state, $Utf8) | ConvertFrom-Json).tries } catch { } }
+	$rows = @(Get-PendingTasks)
+	$thread = Get-ThreadState
+	$reason = if ($rows.Count -or $thread.pending.Count) {
+		"Before you stop, handle what waits on you, as CONDUCTOR.md `"What waits on you`" says:`n$((Write-Pending $rows $thread) -join "`n")`nThen, if nothing is watching the board, start $WaitCommand."
+	} elseif (-not (Wait-ForWatch 20)) {
+		"Before you stop: nothing is watching the board, so the user's next note, answer or send-back would sit unseen until they prompt you. Start $WaitCommand."
+	} else { '' }
+	if (-not $reason -or $tries -ge 3) {
+		if ($reason) { Add-Event "The conductor stopped $(if ($rows.Count -or $thread.pending.Count) { 'with work still waiting on it' } else { 'with nothing watching the board' }): type anything in its window to wake it" }
+		Remove-Item $state -ErrorAction SilentlyContinue
+		return ''
+	}
+	New-Item -ItemType Directory -Force (Split-Path $state) | Out-Null
+	[IO.File]::WriteAllText($state, (ConvertTo-Json -InputObject @{ tries = $tries + 1; at = (Now) }), $Utf8)
+	ConvertTo-Json -Compress -InputObject ([ordered]@{ decision = 'block'; reason = $reason })
+}
+
 $PendingHead = 'Waiting on you. Show each, then handle it as CONDUCTOR.md "The Workboard" says: a note you take on gets set -Title "<a few words>" -Status working first, so it leaves Up next. Clear a C- message or answer once you''ve acted on it:'
 
 # The text of doing and say: -Text, or the first word after the command.
@@ -401,6 +426,7 @@ switch ($Command) {
 		$out = switch ($Id) {
 			'permission' { Wait-Permission $in }
 			'question' { Wait-Question $in }
+			'stop' { Test-ConductorStop $in }
 			default { throw "Unknown hook '$Id'." }
 		}
 		if ($out) {

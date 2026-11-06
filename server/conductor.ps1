@@ -98,6 +98,7 @@ $InRocco = 'Rocco shows the user what you do, your messages, your questions (Ask
 #   PermissionRequest, and PreToolUse on AskUserQuestion: rocco.ps1 hook waits for the user's answer in Rocco
 #   PreToolUse (every tool), Stop, UserPromptSubmit: server\hook-post.ps1 passes the step, its last message, or what the
 #   user typed in its window to Rocco, in the background
+#   Stop: rocco.ps1 hook stop keeps it from ending a turn while something waits on it, or with no wait watching the board
 # Written at each launch, so its paths follow the RoDev folder wherever it is.
 function Write-ConductorHooks {
 	$id = Split-Path $Root -Leaf
@@ -111,7 +112,7 @@ function Write-ConductorHooks {
 			[ordered]@{ matcher = 'AskUserQuestion'; hooks = @(& $command (& $wait 'question') $false) },
 			[ordered]@{ matcher = '*'; hooks = @(& $command (& $post 'tool') $true) }
 		)
-		Stop = @([ordered]@{ hooks = @(& $command (& $post 'stop') $true) })
+		Stop = @([ordered]@{ hooks = @((& $command (& $post 'stop') $true), (& $command (& $wait 'stop') $false)) })
 		UserPromptSubmit = @([ordered]@{ hooks = @(& $command (& $post 'prompt') $true) })
 	} }
 	$file = Join-Path (Get-ThreadDir) 'claude-settings.json'
@@ -159,7 +160,8 @@ function Show-ConductorWindow {
 
 # What every conductor Rocco opens is told after its first job: keep watching the board. Rocco's README has the command,
 # so this works whatever template release the game is on.
-$WatchBoard = 'Then keep watching the Workboard: ..\..\_tools\rocco\rocco.ps1 wait returns as soon as something new waits on you (..\..\_tools\rocco\README.md, Commands).'
+$WaitCommand = '..\..\_tools\rocco\rocco.ps1 wait as a background command (with Claude Code: run_in_background, and no -Timeout; an agent without background commands: -Timeout 540): it returns, and wakes you, the moment something new waits on you. Start it again each time it returns, once you have handled what it listed'
+$WatchBoard = "Then keep watching the Workboard: run $WaitCommand (..\..\_tools\rocco\README.md, Commands)."
 
 # Tasks left Working with no conductor running: a conductor that stopped mid-round (its window closed, the PC restarted),
 # and the workers it ran with it.
@@ -179,6 +181,17 @@ function Request-Conductor {
 		"Handle anything else waiting on you too (rocco.ps1 list -Pending). $WatchBoard"
 	} else { "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $WatchBoard" }
 	try { Open-Conductor $prompt | Out-Null; $agent.name } catch { '' }
+}
+
+# Whether a wait is watching the board: one just started may take a few seconds to say so.
+function Wait-ForWatch([int]$seconds) {
+	$until = (Get-Date).AddSeconds($seconds)
+	while ($true) {
+		$c = Read-Conductor
+		if ($c -and $c.waiting -and ((Get-Date) - [datetime]$c.at).TotalSeconds -lt 20) { return $true }
+		if ((Get-Date) -ge $until) { return $false }
+		Start-Sleep -Seconds 1
+	}
 }
 
 # rocco.ps1 wait: marks the conductor as listening while it waits, so Rocco shows it, and doesn't open another.
