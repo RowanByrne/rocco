@@ -49,6 +49,40 @@ function Set-Status($t, [string]$status) {
 	Set-Field $t 'status' $status
 }
 
+# ---- Where to test a task: what git says, not what an agent remembers ----
+
+# 'main' once the Main place has a task's branch (its commits are in repo\'s HEAD, which Lync serves to Main), 'branch'
+# while they aren't, '' when it has no branch or git can't tell. A branch that's gone counts as in main when a merge
+# naming it is (merged branches are deleted).
+function Get-BranchPlace($t) {
+	$b = "$($t.branch)".Trim()
+	if (-not $b -or -not (Test-Path (Join-Path $RepoDir '.git'))) { return '' }
+	$ErrorActionPreference = 'Continue'
+	$tip = ''
+	foreach ($ref in "refs/heads/$b", "refs/remotes/origin/$b") {
+		$x = git -C $RepoDir rev-parse --verify -q "$ref^{commit}" 2>$null
+		if ($LASTEXITCODE -eq 0 -and $x) { $tip = "$x".Trim(); break }
+	}
+	if ($tip) {
+		git -C $RepoDir merge-base --is-ancestor $tip HEAD 2>$null
+		if ($LASTEXITCODE -eq 0) { return 'main' }
+		if ($LASTEXITCODE -eq 1) { return 'branch' }
+		return ''
+	}
+	$merge = git -C $RepoDir log -1 --merges --format=%h -F "--grep=$b" HEAD 2>$null
+	if ($merge) { 'main' } else { '' }
+}
+
+function Assert-TestPlace($t) {
+	$place = Get-BranchPlace $t
+	if ($t.where -eq 'main' -and $place -eq 'branch') {
+		throw "$($t.branch) isn't in the Main place yet: its commits aren't in repo\'s main. Merge it and push it (CONDUCTOR.md `"Checking in a lane`"), git pull in repo\, then set it ready. For the user to try it before it merges: -Where lane."
+	}
+	if ($t.where -eq 'lane' -and $place -eq 'main') {
+		throw "$($t.branch) is already merged, and the Main place has it: -Where main. Where to test is checked against git, so a card can't send the user to a lane that no longer holds the work."
+	}
+}
+
 # ---- Waiting for a lane: a task the conductor parked while every lane was busy (set -ForLane) ----
 
 $LaneWait = 'A free lane'

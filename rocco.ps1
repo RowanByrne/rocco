@@ -355,6 +355,8 @@ switch ($Command) {
 		if ($Steps) { Set-Field $t 'steps' (ConvertTo-Steps $Steps) }
 		if ($Order -ge 0) { Set-Field $t 'order' $Order }
 		Set-Common $t
+		# Where to test it is checked against git: an agent with an old picture can't send the user to the wrong place.
+		if ($t.status -eq 'ready' -and ($Status -eq 'ready' -or $PSBoundParameters.ContainsKey('Where') -or $PSBoundParameters.ContainsKey('Branch'))) { Assert-TestPlace $t }
 		Save-Task $t
 		# A step task approved, taken back or deleted: its plan follows. One just linked to a plan puts it under way.
 		if ($Plan) { Open-Plan $Plan }
