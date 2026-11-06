@@ -25,6 +25,8 @@
 #                                      what a card shows has to fit it: a title is 50 characters at most (one line), a
 #                                      task's summary and its test (the steps to try) 30 words each. The detail goes in log
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
+#   rocco.ps1 set T-012 -ForLane       every lane is busy: it waits in Up next, and wait hands it back ([lane]) the
+#                                      moment one is free. new takes -ForLane too. Starting it ends the wait
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
 #   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, cancel, follow-ups) is handled
 #   rocco.ps1 show C-1a2b3c / clear C-1a2b3c   a message or answer the user sent the conductor; clear: it's read
@@ -39,7 +41,7 @@ param(
 	[string]$Title, [string]$Note, [string]$Status, [int]$Lane = -1, [string]$Branch, [string]$Where,
 	[string]$Step, [string]$Summary, [string[]]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string]$Waiting,
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
-	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [int]$Port = 34860,
+	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [switch]$ForLane, [int]$Port = 34860,
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
 	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
@@ -56,6 +58,8 @@ function Format-Tasks($rows) {
 		$wants = if ($t.pending) { "[$($t.pending)]" } else { '' }
 		$extra = @()
 		if ($t.kind -eq 'plan') { $extra += 'PLAN' }
+		if ($t.pending -eq 'lane') { $extra += "lane $($t.freeLane) is free: set $($t.id) -Status working -Lane $($t.freeLane)" }
+		elseif (Test-WaitsForLane $t) { $extra += 'waiting for a free lane' }
 		if ($t.kind -eq 'question') { $extra += 'QUESTION: answer with reply' }
 		if ($t.plan) { $extra += "in $($t.plan)" }
 		if (@(Get-List $t.after).Count) { $extra += "after $((Get-List $t.after) -join ',')" }
@@ -67,7 +71,10 @@ function Format-Tasks($rows) {
 # (cancel), once the app's Undo has had its chance.
 function Get-PendingTasks {
 	$undoGone = (Get-Date).AddSeconds(-$UndoSeconds)
-	@(Get-Tasks | Where-Object { $_.pending -and ($_.status -ne 'removed' -or ($_.pending -eq 'cancel' -and (-not $_.undo -or [datetime]$_.undo.at -lt $undoGone))) })
+	$tasks = @(Get-Tasks)
+	@($tasks | Where-Object { $_.pending -and ($_.status -ne 'removed' -or ($_.pending -eq 'cancel' -and (-not $_.undo -or [datetime]$_.undo.at -lt $undoGone))) })
+	# A task parked for a lane (set -ForLane), once one is free.
+	Get-LaneReady $tasks
 }
 
 # Everything that waits on the conductor, as list -Pending and wait print it: tasks, then what the user sent it.
@@ -213,6 +220,15 @@ switch ($Command) {
 			''
 			"Taking it on? First: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}
+		# Waiting for a lane: whether one is free now.
+		if (Test-WaitsForLane $t) {
+			$free = @(Get-LaneReady @(Get-Tasks) | Where-Object { $_.id -eq $t.id })
+			''
+			if ($free.Count) { "Lane $($free[0].freeLane) is free: set $($t.id) -Status working -Lane $($free[0].freeLane) -Step `"...`", and give the worker its id." }
+			else { 'Every lane is busy: wait hands it back ([lane]) the moment one is free.' }
+		}
+		# Every lane busy for a task you're about to start.
+		if ($t.status -eq 'queued' -and $t.pending -in 'plan', 'reopen' -and -not @(Get-FreeLanes @(Get-Tasks)).Count) { ''; "Every lane is busy. To start it when one frees: set $($t.id) -ForLane (wait hands it back as [lane])." }
 		# A feature plan is never worked as a card: its steps are tasks, which the plan's chip counts.
 		if ($t.kind -eq 'plan') {
 			$perStep = "a task per step, new -Title `"<step>`" -Plan $($t.id) [-After T-0xx], and give each worker its step's id"
@@ -229,6 +245,7 @@ switch ($Command) {
 		$t = New-Task $Title $(if ($Note) { $Note } else { $Title }) $(if ($Status) { $Status } else { 'queued' }) 'task'
 		Set-Common $t
 		if ($Waiting) { Set-Field $t 'waiting' $Waiting }
+		if ($ForLane) { Set-LaneWait $t $Waiting }
 		Save-Task $t
 		# A plan's step: the plan is under way (approved, if the user said so in words).
 		if ($Plan) { Open-Plan $Plan }
@@ -300,6 +317,9 @@ switch ($Command) {
 		foreach ($name in 'Title', 'Branch', 'Where', 'Step', 'Summary', 'Waiting') {
 			if ($PSBoundParameters.ContainsKey($name)) { Set-Field $t $name.ToLower() $PSBoundParameters[$name] }
 		}
+		# Every lane busy: it waits in Up next until wait hands it back. Starting it, or giving it a lane, ends the wait.
+		if ($ForLane) { Set-LaneWait $t $Waiting }
+		elseif ($t.PSObject.Properties['waitingFor'] -and $t.waitingFor -and ($t.status -ne 'queued' -or $Lane -gt 0)) { Clear-LaneWait $t }
 		if ($PSBoundParameters.ContainsKey('Test')) { Set-Field $t 'test' (Join-Steps) }
 		# One question in one go; ask adds more, with audio.
 		if ($Question) { Set-Field $t 'questions' @(); Add-Question $t $Question @($Options) @($Audio) }

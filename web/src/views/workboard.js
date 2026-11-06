@@ -195,7 +195,7 @@ function queueHTML() {
       + `${src ? `<span class="q-src" style="--sc:${src[1]}">${src[0]}</span>` : ''}`
       // A task waiting on another shows that, with the reason on hover; the rest show what they wait for.
       + (deps.length ? `<span class="q-dep" title="${esc(t.waiting || `Needs ${deps.join(', ')} done first`)}">${icon.lock}After ${deps.join(', ')}</span>`
-        : `<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${esc(t.waiting || 'Queued')}</span></span>`) + '</div>';
+        : `<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${esc(waitText(t) || 'Queued')}</span></span>`) + '</div>';
   };
   // Whether a conductor is there to pick things up is the status line above the note box (conductor.js).
   return `<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? '<span class="q-hint">Drag to reorder</span>' : ''}</div>`
@@ -247,6 +247,14 @@ function renderBoard() {
 // The steps to try: one a line (rocco.ps1 set -Test "a","b").
 const stepsOf = t => String(t.test || '').split('\n').map(s => s.trim()).filter(Boolean);
 const stepsHTMLOf = steps => steps.length > 1 ? `<ul>${steps.map(s => `<li>${proseLine(s)}</li>`).join('')}</ul>` : proseLine(steps[0] || '');
+// A task parked for a lane (rocco.ps1 set -ForLane): whether one is free now, counted as the sidebar counts them.
+function waitText(t) {
+  if (t.waitingFor !== 'lane') return t.waiting;
+  const count = state.meta.lanes?.count || 0;
+  const held = new Set(state.tasks.filter(x => x.lane && (x.status === 'working' || x.status === 'stuck' || (x.where === 'lane' && (x.status === 'ready' || x.status === 'queued')))).map(x => x.lane));
+  const free = Array.from({ length: count }, (_, i) => i + 1).filter(n => !held.has(n));
+  return free.length ? `Lane ${free[0]} is free: Rocco starts it next` : `Waiting for a free lane: all ${count} are busy`;
+}
 const lanePart = t => t.lane ? `lane ${t.lane}` : 'conductor';
 
 // Up to n words of each text in turn, and whether any were left out.
@@ -296,7 +304,7 @@ function whereLine(t) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
     case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
     case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
-    case 'queued': return esc(t.waiting || 'Queued');
+    case 'queued': return esc(waitText(t) || 'Queued');
     case 'inbox': return `Rocco spotted this. Queue it to have it done.`;
     case 'done': return `Approved at ${hhmm(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
   }

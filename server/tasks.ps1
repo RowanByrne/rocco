@@ -43,6 +43,42 @@ function Set-Status($t, [string]$status) {
 	Set-Field $t 'status' $status
 }
 
+# ---- Waiting for a lane: a task the conductor parked while every lane was busy (set -ForLane) ----
+
+$LaneWait = 'A free lane'
+function Test-WaitsForLane($t) { $t.status -eq 'queued' -and $t.PSObject.Properties['waitingFor'] -and $t.waitingFor -eq 'lane' }
+
+# This PC's lanes that no task holds, as the sidebar sees them: none at work or stuck in it, or held for testing there.
+function Get-FreeLanes($tasks) {
+	$held = @($tasks | Where-Object { $_.lane -and ($_.status -in 'working', 'stuck' -or ($_.where -eq 'lane' -and $_.status -in 'ready', 'queued')) } | ForEach-Object { [int]$_.lane })
+	$count = [int](Get-Lanes).count
+	@(if ($count) { 1..$count | Where-Object { $_ -notin $held } })
+}
+
+# Parked tasks whose lane is free: one per free lane, in Up next order, each given its lane (not saved).
+function Get-LaneReady($tasks) {
+	$byId = @{}; foreach ($x in $tasks) { $byId[$x.id] = $x }
+	$parked = @($tasks | Where-Object { (Test-WaitsForLane $_) -and -not $_.pending -and
+		-not @(Get-List $_.after | Where-Object { $byId[$_] -and $byId[$_].status -notin 'done', 'removed' }).Count } |
+		Sort-Object { if ($_.order) { [int]$_.order } else { 9999 } }, id)
+	if (-not $parked.Count) { return @() }
+	$free = @(Get-FreeLanes $tasks)
+	@(for ($i = 0; $i -lt [Math]::Min($free.Count, $parked.Count); $i++) { Set-Field $parked[$i] 'pending' 'lane'; Set-Field $parked[$i] 'freeLane' $free[$i]; $parked[$i] })
+}
+
+# Parks a task until a lane is free. What the user asked of it has been read, so wait stops returning it until then.
+function Set-LaneWait($t, [string]$waiting) {
+	if ($t.status -ne 'queued') { Set-Status $t 'queued' }
+	Set-Field $t 'waitingFor' 'lane'
+	Set-Field $t 'waiting' $(if ($waiting) { $waiting } else { $LaneWait })
+	if ($t.pending -in 'plan', 'answer', 'reopen', 'approved', 'question') { Set-Field $t 'pending' '' }
+}
+
+function Clear-LaneWait($t) {
+	Set-Field $t 'waitingFor' ''
+	if ($t.waiting -eq $LaneWait) { Set-Field $t 'waiting' '' }
+}
+
 # The end of Up next.
 function Get-NextOrder {
 	1 + [int](@(Get-Tasks | Where-Object { $_.status -eq 'queued' -and $_.order }) | ForEach-Object { [int]$_.order } | Measure-Object -Maximum).Maximum
