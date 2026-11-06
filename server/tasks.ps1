@@ -273,12 +273,16 @@ function Sync-Plan([string]$id) {
 	if (-not $id) { return }
 	try { $p = Read-Task $id } catch { return }
 	if ($p.kind -ne 'plan' -or $p.status -notin 'queued', 'done') { return }
-	$kids = @(Get-Tasks | Where-Object { $_.plan -eq $id -and $_.status -ne 'removed' })
+	$all = @(Get-Tasks | Where-Object { $_.plan -eq $id })
+	$kids = @($all | Where-Object { $_.status -ne 'removed' })
+	# A step whose task was deleted (by the user, or folded into another) is dropped, not waiting: it still counts
+	# toward every step being covered, so the plan can finish.
+	$dropped = $all.Count - $kids.Count
 	$approved = @($kids | Where-Object { $_.status -eq 'done' }).Count
-	$finished = $kids.Count -gt 0 -and $approved -eq $kids.Count -and $kids.Count -ge @(Get-List $p.steps).Count
+	$finished = $kids.Count -gt 0 -and $approved -eq $kids.Count -and ($kids.Count + $dropped) -ge @(Get-List $p.steps).Count
 	if ($finished -and $p.status -ne 'done') {
 		Set-Status $p 'done'
-		Add-Log $p 'conductor' 'Every step approved, so the feature is done.'
+		Add-Log $p 'conductor' $(if ($dropped) { 'Every step approved or dropped, so the feature is done.' } else { 'Every step approved, so the feature is done.' })
 		Save-Task $p
 		Add-Event "Feature done: $($p.title)" $p.id
 	} elseif (-not $finished -and $p.status -eq 'done') {

@@ -31,8 +31,15 @@ const answered = () => openQuestions().filter(t => t.status === 'ready');
 const approvedWork = () => approvedToday().filter(t => !isPlan(t) && !isQuestion(t));
 const queue = () => work('queued').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id));
 const plansToApprove = () => state.tasks.filter(t => isPlan(t) && t.status === 'inbox');
-const features = () => state.tasks.filter(t => isPlan(t) && ['queued', 'working', 'stuck', 'ready'].includes(t.status));
+// Features under way: not one whose every step was deleted, which has nothing left to show (planCount, below).
+const features = () => state.tasks.filter(t => isPlan(t) && ['queued', 'working', 'stuck', 'ready'].includes(t.status) && planCount(t).total > 0);
 const childrenOf = plan => state.tasks.filter(t => t.plan === plan.id && t.status !== 'removed');
+// A plan's count, as the server finishes it (tasks.ps1 Sync-Plan): its tasks done, out of its steps, or its tasks if
+// there are more. A step whose task was deleted is dropped, not waiting.
+function planCount(p) {
+  const all = state.tasks.filter(t => t.plan === p.id), kids = all.filter(t => t.status !== 'removed');
+  return { done: kids.filter(k => k.status === 'done').length, total: Math.max(kids.length, (p.steps || []).length - (all.length - kids.length)) };
+}
 const unfinishedDeps = t => (t.after || []).filter(id => { const d = byId(id); return d && d.status !== 'done' && d.status !== 'removed'; });
 
 // Questions for the user: the list, or the older single question.
@@ -146,9 +153,9 @@ function planCardHTML(p) {
 
 function featuresHTML() {
   return features().map(p => {
-    const kids = childrenOf(p), done = kids.filter(k => k.status === 'done').length, total = Math.max(kids.length, (p.steps || []).length, 1);
+    const { done, total } = planCount(p);
     return `<button class="feat" style="${featureVars(p.id)}" data-id="${p.id}" title="${esc(p.title)}"><span class="feat-dot"></span><span class="feat-name">${esc(p.title)}</span>`
-      + `<span class="feat-bar"><i style="width:${Math.round(done / total * 100)}%"></i></span><span class="feat-count">${done}/${total}</span></button>`;
+      + `<span class="feat-bar"><i style="width:${Math.round(done / Math.max(total, 1) * 100)}%"></i></span><span class="feat-count">${done}/${total}</span></button>`;
   }).join('');
 }
 
@@ -300,7 +307,7 @@ function summaryHTML(t) {
 // ---- A task in the sheet ----
 
 function whereLine(t) {
-  if (isPlan(t)) return t.status === 'inbox' ? 'Feature plan · waiting for your OK' : `Feature · ${childrenOf(t).filter(k => k.status === 'done').length} of ${Math.max(childrenOf(t).length, (t.steps || []).length)} done`;
+  if (isPlan(t)) return t.status === 'inbox' ? 'Feature plan · waiting for your OK' : `Feature · ${planCount(t).done} of ${planCount(t).total} done`;
   if (isQuestion(t)) return t.status === 'ready' ? 'Answered' : t.status === 'done' ? `Got it at ${hhmm(t.doneAt)}` : 'Waiting for an answer';
   switch (t.status) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
