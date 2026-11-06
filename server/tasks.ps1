@@ -39,6 +39,8 @@ function Set-Status($t, [string]$status) {
 		# card's bar and its step show this attempt. Back from Stuck it carries on where it was.
 		$fresh = $status -eq 'working' -and $t.status -ne 'stuck'
 		if ($status -eq 'queued' -or $fresh) { Set-Field $t 'progress' $null; Set-Field $t 'step' '' }
+		# Sent back: what the last attempt said it changed, and what to try, aren't this one's.
+		if ($fresh -and [int]$t.attempt -gt 1) { Set-Field $t 'summary' ''; Set-Field $t 'test' '' }
 		if ($fresh) { Set-Field $t 'startedAt' (Now) }
 		if ($status -eq 'done') { Set-Field $t 'doneAt' (Now) }
 		# Picking a task back up handles what the user asked of it; a follow-up stays until it's read (clear).

@@ -19,7 +19,8 @@
 #                                      wait returns the answer ([answer] C-xxxxxx)
 #   rocco.ps1 doing "Merging the trade window"   what the conductor is doing now: Rocco's status line
 #   rocco.ps1 say -Text "..."          a message to the user (a report, anything you'd tell them): Rocco's history
-#   rocco.ps1 reply T-012 -Text "..."   answer a question the user asked (shows under the note box)
+#   rocco.ps1 reply T-012 -Text "..."   answer the user: a question card shows it under the note box (and turns
+#                                      answered); on any other card it goes in the card's session, which stays put
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
 #   rocco.ps1 set T-012 -Status ready -Where main -Summary "what changed" -Test "Drive a lap","Drift the hairpin"
 #                                      what a card shows has to fit it: a title is 50 characters at most (one line), a
@@ -381,13 +382,18 @@ switch ($Command) {
 	'reply' {
 		if (-not $Text) { throw 'reply needs -Text.' }
 		$t = Read-Task $Id
-		Set-Field $t 'summary' $Text
-		Set-Status $t 'ready'
-		Set-Field $t 'pending' ''
-		Set-Field $t 'waiting' ''
+		# A question card is answered: it shows under the note box. On any other card the answer goes in its session,
+		# and the card stays where it is (a question typed into a working card doesn't make it ready to test).
+		if ($t.kind -eq 'question') {
+			Set-Field $t 'summary' $Text
+			Set-Status $t 'ready'
+			Set-Field $t 'pending' ''
+			Set-Field $t 'waiting' ''
+		}
 		Add-Log $t $(if ($PSBoundParameters.ContainsKey('Who')) { $Who } else { 'conductor' }) $Text
 		Save-Task $t
 		Add-Thread 'said' @{ text = $Text; task = $t.id; re = $t.title } | Out-Null
+		if ($t.kind -ne 'question') { "Answered on $($t.id)'s card; it stays $($t.status). Pass anything for its worker on to it, then clear $($t.id)." }
 	}
 
 	'clear' {
