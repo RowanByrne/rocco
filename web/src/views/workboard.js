@@ -343,7 +343,12 @@ function sheetRest(t) {
   return h;
 }
 
-const followUpHTML = placeholder => `<textarea class="field" id="followText" placeholder="${placeholder}"></textarea><div class="row"><span class="sp"></span><button class="btn accent" data-follow>Send</button></div>`;
+// The round send button, as on the note box: Enter does the same.
+const sendButton = (attr, label) => `<button type="button" class="send" ${attr} title="${label} (Enter)" aria-label="${label}">`
+  + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button>';
+
+const followUpHTML = placeholder => `<div class="reply msg"><textarea class="field" id="followText" placeholder="${placeholder}"></textarea>`
+  + `<div class="row"><span class="sp"></span>${sendButton('data-follow', 'Send')}</div></div>`;
 
 // ---- Sending a task back: a box that's always open under To test, with screenshots like the note box ----
 
@@ -352,7 +357,7 @@ let reply = { id: '', shots: [] }; // the sheet's task, and the screenshots goin
 const replyHTML = () => `<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotsHTML(reply.shots)}</div>`
   + `<textarea class="field" id="reopenText" placeholder="Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back"></textarea>`
   + `<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button>`
-  + `<input type="file" id="replyInput" accept="image/*" multiple hidden></div></div>`;
+  + `<input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span>${sendButton('data-reopen', 'Send it back')}</div></div>`;
 
 function attachReply(files) {
   const added = files.map(shotOf).filter(Boolean);
@@ -441,10 +446,14 @@ async function loadChanges(t) {
     const c = await api.changes(t.id);
     const box = $('#changes');
     if (!box || openSheetKey() !== t.id) return;
+    // Reading at the end of the session, it stays there as this fills in above.
+    const body = $('#sBody'), fromEnd = body.scrollHeight - body.scrollTop;
+    const atEnd = fromEnd - body.clientHeight < 40;
     box.innerHTML = c.files.length
       ? c.files.map(f => `<div class="chg"><span class="chg-path">${esc(f.path)}</span><span class="chg-add">+${f.added}</span><span class="chg-del">−${f.removed}</span></div>`).join('')
         + `<div class="chg-foot">${c.source === 'merged' ? 'As merged into main' : 'On its branch, against main'}${c.url ? ` · <a href="${esc(c.url)}" target="_blank" rel="noreferrer">View on GitHub</a>` : ''}</div>`
       : '<span class="mut">No changes found for its branch yet.</span>';
+    if (atEnd) body.scrollTop = body.scrollHeight;
   } catch { /* the sheet just keeps "Loading…" */ }
 }
 

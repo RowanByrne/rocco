@@ -175,9 +175,9 @@ async function tick(id) {
       view.stamp = stamp;
       const first = !view.loaded;
       view.loaded = true;
-      // A card at work opens at its latest step, like a session; any other at its top.
+      // A card opens at the end of its session, like a chat; its top stays in view above (workboard.js).
       render(!first);
-      if (first && t?.status === 'working') $('#sBody').scrollTop = $('#sBody').scrollHeight;
+      if (first) $('#sBody').scrollTop = $('#sBody').scrollHeight;
     }
   } catch { /* the sidebar shows the server is offline; try again next time */ }
   if (view?.id === id) view.timer = setTimeout(() => tick(id), POLL);
