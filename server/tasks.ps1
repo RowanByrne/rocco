@@ -35,7 +35,11 @@ function Set-Status($t, [string]$status) {
 		if ($t.status -ne 'done') { Add-Log $t 'conductor' 'Done. It needs no review, so it approved itself.' }
 	}
 	if ($t.status -ne $status) {
-		if ($status -eq 'working') { Set-Field $t 'startedAt' (Now) }
+		# Back to Up next (sent back, queued again), or a fresh start: the last attempt's progress and step go, so the
+		# card's bar and its step show this attempt. Back from Stuck it carries on where it was.
+		$fresh = $status -eq 'working' -and $t.status -ne 'stuck'
+		if ($status -eq 'queued' -or $fresh) { Set-Field $t 'progress' $null; Set-Field $t 'step' '' }
+		if ($fresh) { Set-Field $t 'startedAt' (Now) }
 		if ($status -eq 'done') { Set-Field $t 'doneAt' (Now) }
 		# Picking a task back up handles what the user asked of it; a follow-up stays until it's read (clear).
 		if ($status -in 'working', 'stuck', 'ready' -and $t.pending -in 'plan', 'answer', 'reopen', 'approved', 'question') { Set-Field $t 'pending' '' }

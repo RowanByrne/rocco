@@ -86,7 +86,9 @@ function questionCardHTML(t) {
 
 function workingHTML(t) {
   if (!settings().liveSteps) return '';
-  const done = t.log.filter(l => l.who === 'worker').slice(-3);
+  // This attempt's steps: a task sent back starts its list again.
+  const since = Date.parse(t.startedAt) || 0;
+  const done = t.log.filter(l => l.who === 'worker' && (Date.parse(l.at) || 0) >= since).slice(-3);
   return `<ol class="steps">${done.map(l => `<li>${icon.check}<span>${esc(l.text)}</span></li>`).join('')}`
     + `<li class="now"><span class="spin"></span><span>${esc(t.step || 'Working')}</span></li></ol>`;
 }
