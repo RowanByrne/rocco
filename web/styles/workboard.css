@@ -361,3 +361,8 @@
 .sx-pre.err { color: var(--red); }
 .sx-img { display: block; max-width: 100%; margin-top: 4px; border-radius: 8px; border: 1px solid var(--stroke); }
 .sx-wait { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }
+
+/* A task's sheet: its top (what it is, what to try, Approve, its questions) stays in view while the rest scrolls. */
+.s-top { position: sticky; top: -8px; z-index: 2; max-height: 48vh; overflow-y: auto; margin: -8px -20px 0; padding: 8px 20px 14px;
+  background: rgba(17,18,26,.9); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); border-bottom: 1px solid var(--stroke); }
+.s-approve { display: flex; justify-content: center; width: 100%; margin-top: 12px; }

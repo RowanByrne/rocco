@@ -309,7 +309,15 @@ function questionsSheetHTML(t) {
     + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button></div>`).join('');
 }
 
+// The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
 function sheetBody(t) {
+  return `<div class="s-top">${sheetTop(t)}</div>${sheetRest(t)}`;
+}
+
+// A task to test is approved from what to try; sending it back is the box at the foot.
+const approveHTML = t => isQuestion(t) ? '' : `<button class="btn go s-approve" data-approve-open>${icon.checkSm}Approve</button>`;
+
+function sheetTop(t) {
   const meta = [typeTag(t), featureTag(t)].join('');
   let h = `<h2 class="s-title">${esc(t.title)}</h2><div class="s-where">${whereLine(t)}</div>${meta ? `<div class="c-meta">${meta}</div>` : ''}`;
   if (t.summary) h += `<div class="s-sum">${prose(t.summary)}</div>`;
@@ -319,8 +327,14 @@ function sheetBody(t) {
     const kids = childrenOf(t);
     if (kids.length) h += `<div class="sec-h">Tasks</div>${kids.map(k => `<div class="s-row" data-id="${k.id}"><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${esc(k.title)}</span><span class="at">${NAMES[k.status] || ''}</span></div>`).join('')}`;
   }
-  if (t.status === 'ready' && t.test) h += `<div class="s-try"><small>Try</small>${stepsHTMLOf(stepsOf(t))}</div>`;
+  if (t.status === 'ready' && t.test) h += `<div class="s-try"><small>Try</small>${stepsHTMLOf(stepsOf(t))}${approveHTML(t)}</div>`;
+  else if (t.status === 'ready') h += approveHTML(t);
   if (t.status === 'stuck') h += questionsSheetHTML(t);
+  return h;
+}
+
+function sheetRest(t) {
+  let h = '';
   if (t.shots.length) h += `<div class="shots">${t.shots.map(src => `<img src="${src}" alt="Screenshot">`).join('')}</div>`;
   if (t.note && t.note !== t.title) h += `<div class="s-note">${esc(t.note)}</div>`;
   if (t.branch) h += `<div class="sec-h">What changed</div><div class="changes" id="changes"><span class="mut">Loading…</span></div>`;
@@ -338,7 +352,7 @@ let reply = { id: '', shots: [] }; // the sheet's task, and the screenshots goin
 const replyHTML = () => `<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotsHTML(reply.shots)}</div>`
   + `<textarea class="field" id="reopenText" placeholder="Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back"></textarea>`
   + `<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button>`
-  + `<input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span><button class="btn warm" data-reopen>Send back</button></div></div>`;
+  + `<input type="file" id="replyInput" accept="image/*" multiple hidden></div></div>`;
 
 function attachReply(files) {
   const added = files.map(shotOf).filter(Boolean);
@@ -386,7 +400,7 @@ function sheetFoot(t) {
   }
   if (isPlan(t) && t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-plan-approve="${t.id}">Approve plan</button></div>`
     + `<textarea class="field" id="followText" placeholder="Want changes? Say what, then send"></textarea><div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
-  if (t.status === 'ready') return replyHTML() + `<div class="row"><button class="btn go" style="flex:1" data-approve-open>${icon.checkSm}Approve</button></div>`;
+  if (t.status === 'ready') return replyHTML();
   if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
   if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button></div>`;
   if (isPlan(t)) return followUpHTML('Add something about this feature, for Rocco');
