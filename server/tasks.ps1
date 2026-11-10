@@ -185,11 +185,12 @@ function Get-Tasks {
 	@($tasks)
 }
 
-# ---- Questions for the user, with options that can carry an audio file to play ----
+# ---- Questions for the user, with options that can carry an audio file to play or a picture to see ----
 
 # A question round: a new round replaces the old questions, later questions in the same round add to it.
-function Add-Question($t, [string]$text, [string[]]$options, [string[]]$audio) {
+function Add-Question($t, [string]$text, [string[]]$options, [string[]]$audio, [string[]]$images = @(), [string[]]$show = @()) {
 	$dir = Get-TaskDir $t.id
+	$options = @($options | Where-Object { $_ })
 	$opts = for ($i = 0; $i -lt @($options).Count; $i++) {
 		$sound = ''
 		if ($audio -and $i -lt $audio.Count -and $audio[$i]) {
@@ -200,11 +201,116 @@ function Add-Question($t, [string]$text, [string[]]$options, [string[]]$audio) {
 				Copy-Item -LiteralPath $source -Destination (Join-Path $dir $sound) -Force
 			} else { $sound = [IO.Path]::GetFileName($source) }
 		}
-		[pscustomobject]@{ label = $options[$i]; audio = $sound }
+		[pscustomobject]@{ label = $options[$i]; audio = $sound; image = '' }
 	}
-	$question = [pscustomobject]@{ text = $text; options = @($opts) }
+	$question = [pscustomobject]@{ text = $text; options = @($opts); images = @() }
+	Add-Pictures $question $images $show @() $dir ''
 	$keep = if ($t.status -eq 'stuck') { Get-List $t.questions } else { @() }
 	Set-Field $t 'questions' (@($keep) + $question)
+}
+
+# ---- Pictures on a question: concepts to pick from, or a model to approve ----
+# An option can show a picture (the garage concept to build from), and so can the question itself (the gray model,
+# from the front and the side). They come from ask's -Images (one per option) and -Show (the question's), or from
+# what the question says: a path to an image, or a file name from a folder it names ("the concepts are in
+# ..\art\generated\garage\: garage-01 to garage-04"). Each is copied beside the question (the task's folder, or the
+# conductor's files\<id>\), so it still shows when the art moves on.
+
+$PicturePattern = '\.(png|jpe?g|gif|webp)$'
+
+# A path as the agent wrote it: whole, or from where it ran, the repo or the game's folder. $null when there's nothing.
+function Resolve-NamedPath([string]$p) {
+	if (-not $p -or $p.Length -gt 260) { return $null }
+	try {
+		$tries = if ($p -match '^[A-Za-z]:[\\/]') { @($p) } else { @((Join-Path $PWD.ProviderPath $p), (Join-Path $RepoDir $p), (Join-Path $Root $p)) }
+		foreach ($x in $tries) { if (Test-Path -LiteralPath $x) { return (Resolve-Path -LiteralPath $x).ProviderPath.TrimEnd('\') } }
+	} catch { }
+	$null
+}
+
+# The files and folders some text names. A path in a sentence runs on into the words after it, so each is cut back a
+# word at a time until it's one that exists.
+function Find-NamedPaths([string]$text) {
+	if (-not $text) { return @() }
+	$found = New-Object Collections.ArrayList
+	$rx = [regex]'(?<![\w.\\/:-])(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\w-]+[\\/])[^\r\n"<>|*?`]*'
+	$pos = 0
+	for ($n = 0; $n -lt 16 -and $pos -lt $text.Length; $n++) {
+		$m = $rx.Match($text, $pos)
+		if (-not $m.Success) { break }
+		$s = $m.Value; $hit = $null; $try = ''
+		for ($k = 0; $k -lt 24 -and $s -and -not $hit; $k++) {
+			$try = $s.TrimEnd(' ', '.', ',', ';', ':', ')', "'")
+			$hit = Resolve-NamedPath $try
+			if (-not $hit) { $cut = $try.LastIndexOfAny([char[]]' (,;'); if ($cut -le 0) { break }; $s = $try.Substring(0, $cut) }
+		}
+		if ($hit) { [void]$found.Add($hit); $pos = $m.Index + [Math]::Max(1, $try.Length) }
+		else { $next = $text.IndexOfAny([char[]]" `t`r`n", $m.Index); $pos = if ($next -lt 0) { $text.Length } else { $next + 1 } }
+	}
+	@($found | Select-Object -Unique)
+}
+
+function Test-Picture([string]$p) { $p -match $PicturePattern -and (Test-Path -LiteralPath $p -PathType Leaf) -and (Get-Item -LiteralPath $p).Length -le 30MB }
+
+# The pictures in $pool whose name (with or without its extension) the text mentions, in the order it mentions them.
+function Find-PoolNames([string]$text, [string[]]$pool) {
+	$hits = foreach ($f in @($pool)) {
+		$stem = [IO.Path]::GetFileNameWithoutExtension($f)
+		if ($stem.Length -lt 3) { continue }
+		$m = [regex]::Match([string]$text, '(?<![\w-])' + [regex]::Escape($stem) + '(?![\w-])', 'IgnoreCase')
+		if ($m.Success) { [pscustomobject]@{ at = $m.Index; file = $f } }
+	}
+	@($hits | Sort-Object at | ForEach-Object { $_.file })
+}
+
+# Fills in $q's pictures: each option's image and the question's own images, as names under $dir with $url before
+# them (what the app asks for). $images: one per option, in order. $show: the question's. $extra: more text per option
+# to look for paths in (AskUserQuestion's previews).
+function Add-Pictures($q, [string[]]$images, [string[]]$show, [string[]]$extra, [string]$dir, [string]$url) {
+	$given = {
+		param($list, $what)
+		@($list | Where-Object { $_ } | ForEach-Object {
+			$p = Resolve-NamedPath $_
+			if (-not $p -or -not (Test-Picture $p)) { throw "$what`: no picture at '$_' (a .png, .jpg, .gif or .webp under 30 MB)." }
+			$p
+		})
+	}
+	$images = @(& $given $images '-Images')
+	$show = @(& $given $show '-Show')
+	$opts = @($q.options)
+	if ($images.Count -and $images.Count -ne $opts.Count) {
+		throw "-Images is one picture per option, in order: $($opts.Count) option(s), $($images.Count) picture(s). Pictures for the question itself go in -Show."
+	}
+	$named = @(Find-NamedPaths $q.text)
+	$folders = @($named | Where-Object { Test-Path -LiteralPath $_ -PathType Container })
+	$loose = @($named | Where-Object { Test-Picture $_ })
+	$pool = @(@($folders) + @($loose | ForEach-Object { Split-Path $_ }) | Select-Object -Unique | ForEach-Object {
+		Get-ChildItem -LiteralPath $_ -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match $PicturePattern } |
+			Sort-Object Name | Select-Object -First 40 | ForEach-Object { $_.FullName }
+	})
+	$tag = '{0:x4}' -f (Get-Random -Maximum 65536)
+	$copied = @{}
+	$copy = {
+		param($p)
+		if (-not $copied.ContainsKey($p)) {
+			New-Item -ItemType Directory -Force $dir | Out-Null
+			$name = 'pic-{0}-{1}-{2}' -f $tag, ($copied.Count + 1), ([IO.Path]::GetFileName($p) -replace '[^\w.-]', '-')
+			Copy-Item -LiteralPath $p -Destination (Join-Path $dir $name) -Force
+			$copied[$p] = $url + $name
+		}
+		$copied[$p]
+	}
+	$used = @{}
+	for ($i = 0; $i -lt $opts.Count; $i++) {
+		$o = $opts[$i]
+		$say = "$($o.label) $($o.detail) $(if ($extra -and $i -lt $extra.Count) { $extra[$i] })"
+		$pic = if ($images.Count) { $images[$i] } else { @(@(Find-NamedPaths $say | Where-Object { Test-Picture $_ }) + @(Find-PoolNames $say $pool))[0] }
+		if ($pic) { $o.image = & $copy $pic; $used[$pic] = $true }
+	}
+	$own = @(@($show) + @($loose) + @(Find-PoolNames $q.text $pool) | Where-Object { $_ -and -not $used.ContainsKey($_) } | Select-Object -Unique)
+	# A folder it names, with no picture picked out of it: the whole folder.
+	if (-not $own.Count -and -not $used.Count -and $folders.Count) { $own = @($pool | Select-Object -First 8) }
+	$q.images = @($own | Select-Object -First 8 | ForEach-Object { & $copy $_ })
 }
 
 # ---- Undo: approve, answer, queue and dismiss can be taken back for a little while ----

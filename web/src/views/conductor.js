@@ -1,6 +1,7 @@
 // The conductor in Rocco (README.md "The conductor in Rocco"): a status line above the note box that says what it's
-// doing; its questions and permission requests, answered above the note box; and its history, which slides open from
-// the status line, everything below moving down to make room. The data is its thread (server/thread.ps1).
+// doing; its questions and permission requests above the note box, each question with its pictures and its own answer
+// box; and its history, which slides open from the status line, everything below moving down to make room. The data
+// is its thread (server/thread.ps1).
 import { state, on, emit } from '../state.js';
 import { $, esc } from '../lib/dom.js';
 import { hhmm } from '../lib/format.js';
@@ -12,12 +13,14 @@ import { notify } from '../notify.js';
 import { agentName } from '../agent.js';
 import { go } from '../router.js';
 import { prose, proseLine } from '../prose.js';
+import { picsHTML, picOptionHTML, openPicsFrom } from '../ui/pics.js';
 
 let shown = false;           // the history is open
 let history = null;          // { stamp, items, steps }
 let loading = false;
-let mode = null;             // what the note box sends: { kind: 'answer', id } or { kind: 'reply', to }, else a note
-let dismissed = '';          // the question the user switched the note box away from (×)
+let mode = null;             // what the note box sends: { kind: 'reply', to }, else a note
+let shownAsks = '';          // what the questions above the note box show now, so an unchanged one isn't redrawn
+const typed = new Map();     // question id -> what the user is typing in its answer box, kept across redraws
 const picks = new Map();     // question id -> answers picked so far, one per question
 const unfolded = new Set();  // step groups the user opened, by their first step's time
 const seen = new Set();      // open questions and requests already announced
@@ -30,45 +33,30 @@ const openAsks = () => opened().filter(e => e.kind === 'asked');
 const openPermissions = () => opened().filter(e => e.kind === 'permission');
 const firstLine = text => String(text || '').split('\n').map(s => s.trim()).find(Boolean) || '';
 
-// ---- The note box: a note, or an answer or reply to the conductor ----
-
-// The question the note box answers: the first open one the user hasn't switched away from.
-function currentAsk() { return openAsks().find(e => e.id !== dismissed) || null; }
+// ---- The note box: a note, or a reply to one of the conductor's messages ----
+// Its questions aren't answered here: each has its own answer box, on the question.
 
 export function noteMode() {
-  if (mode?.kind === 'reply') return { kind: 'reply', label: `Replying to Rocco`, placeholder: `Reply to Rocco` };
-  const ask = currentAsk();
-  if (ask) {
-    const i = (picks.get(ask.id) || []).length, q = ask.questions[i] || ask.questions[0];
-    return { kind: 'answer', id: ask.id, label: `Answering Rocco`, detail: q?.text || '', placeholder: 'Your answer, or pick one above' };
-  }
-  return null;
+  return mode?.kind === 'reply' ? { kind: 'reply', label: `Replying to Rocco`, placeholder: `Reply to Rocco` } : null;
 }
 
 // Back to a plain note (the chip's ×, or picking a note type).
 export function leaveMode() {
-  const m = noteMode();
-  if (m?.kind === 'answer') dismissed = m.id;
   mode = null;
   renderNoteMode();
 }
 
 // What the user typed, sent in the note box's mode. Returns false when it's a plain note.
 export async function sendInMode(text) {
-  const m = noteMode();
-  if (!m) return false;
-  if (m.kind === 'reply') {
-    const to = mode.to;
-    mode = null;
-    renderNoteMode();
-    try {
-      const r = await api.conductorMessage(text, to);
-      await refresh();
-      toast(`Sent to Rocco${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--claude)');
-    } catch (e) { toast(`Couldn't send it: ${e.message}`, 'var(--red)'); throw e; }
-    return true;
-  }
-  await answer(m.id, text);
+  if (!noteMode()) return false;
+  const to = mode.to;
+  mode = null;
+  renderNoteMode();
+  try {
+    const r = await api.conductorMessage(text, to);
+    await refresh();
+    toast(`Sent to Rocco${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--claude)');
+  } catch (e) { toast(`Couldn't send it: ${e.message}`, 'var(--red)'); throw e; }
   return true;
 }
 
@@ -84,38 +72,64 @@ function renderNoteMode() {
 // ---- Answering its questions ----
 
 // One answer per question: a picked option (several, for a multi-select), the user's words, or "your call".
-async function answer(id, typed) {
+// Returns false when it couldn't be sent.
+async function answer(id, given) {
   const ask = openAsks().find(e => e.id === id);
-  if (!ask) return;
+  if (!ask) return false;
   const got = [...(picks.get(id) || [])];
-  if (typed) got.push(typed);
-  if (got.length < ask.questions.length) { picks.set(id, got); renderAsks(); renderNoteMode(); return; }
+  if (given) got.push(given);
+  multi.delete(id);
+  if (got.length < ask.questions.length) { picks.set(id, got); renderAsks(); focusAnswer(id); return true; }
   picks.delete(id);
   const text = ask.questions.map((q, i) => `${q.text.trim()} ${got[i]}`).join('\n');
+  let ok = true;
   try {
     const r = await api.conductorAnswer(id, got, text);
     await refresh();
     toast(`Answer sent to Rocco${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
-  } catch (e) { picks.set(id, got.slice(0, -1)); toast(`Couldn't send the answer: ${e.message}`, 'var(--red)'); }
+  } catch (e) { ok = false; picks.set(id, got.slice(0, -1)); toast(`Couldn't send the answer: ${e.message}`, 'var(--red)'); }
   renderAll();
+  return ok;
+}
+
+// The question's answer box: what's typed, with what's ticked on a multi-select. Enter or its send button.
+async function sendTyped(id) {
+  const words = (typed.get(id) || '').trim(), ticked = multi.get(id) || [];
+  const value = [ticked.join(', '), words].filter(Boolean).join('. ');
+  if (!value) { focusAnswer(id); return; }
+  typed.delete(id);
+  if (!await answer(id, value)) { typed.set(id, words); renderAsks(true); }
 }
 
 const multi = new Map(); // question id -> labels ticked on a multi-select question
+const sendIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>';
 
 function askHTML(ask) {
   const got = picks.get(ask.id) || [], i = got.length, q = ask.questions[i];
   if (!q) return `<div class="c-ask done"><span class="spin"></span>Sending your answer</div>`;
   const ticked = multi.get(ask.id) || [];
-  const opt = o => `<button class="opt${ticked.includes(o.label) ? ' on' : ''}" data-c-pick="${esc(o.label)}" data-ask="${ask.id}"${o.detail ? ` title="${esc(o.detail)}"` : ''}><span>${esc(o.label)}</span></button>`;
+  const attrs = o => `data-c-pick="${esc(o.label)}" data-ask="${ask.id}"`;
+  const opt = o => o.image ? picOptionHTML(o, api.conductorFile(o.image), attrs(o), ticked.includes(o.label))
+    : `<button class="opt${ticked.includes(o.label) ? ' on' : ''}" ${attrs(o)}${o.detail ? ` title="${esc(o.detail)}"` : ''}><span>${esc(o.label)}</span></button>`;
+  const pictured = (q.options || []).some(o => o.image);
   return `<div class="c-ask${ask.expired ? ' late' : ''}" data-ask-card="${ask.id}">`
     + `<div class="c-ask-head"><span class="c-who">Rocco asks</span>${q.header ? `<span class="c-tag">${esc(q.header)}</span>` : ''}`
     + `${ask.questions.length > 1 ? `<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : ''}<span class="c-at">${hhmm(ask.at)}</span></div>`
     + `<div class="c-ask-q">${proseLine(q.text)}</div>`
-    + (q.options?.length ? `<div class="opts">${q.options.map(opt).join('')}</div>` : '')
+    + `<div data-pic-set data-ask="${ask.id}">${picsHTML((q.images || []).map(api.conductorFile))}`
+    + (q.options?.length ? `<div class="opts${pictured ? ' with-pics' : ''}">${q.options.map(opt).join('')}</div>` : '') + '</div>'
+    + `<div class="c-reply"><textarea data-c-input="${ask.id}" rows="1" placeholder="${q.options?.length ? (q.multi ? 'Tick some, or type your answer' : 'Or type your answer') : 'Type your answer'}" aria-label="Your answer to Rocco"></textarea>`
+    + `<button type="button" class="send" data-c-send="${ask.id}" title="Send your answer" aria-label="Send your answer">${sendIcon}</button></div>`
     + `<div class="ask-foot">${q.multi ? `<button class="btn-sm go" data-c-multi="${ask.id}"${ticked.length ? '' : ' disabled'}>Send these</button>` : ''}`
     + `<button class="linkish" data-c-skip="${ask.id}">Let Rocco decide</button>`
-    + `${i ? `<button class="linkish" data-c-back="${ask.id}">Back</button>` : ''}`
-    + `<span class="c-hint">${q.options?.length ? 'Or type an answer below' : 'Type your answer below'}</span></div></div>`;
+    + `${i ? `<button class="linkish" data-c-back="${ask.id}">Back</button>` : ''}</div></div>`;
+}
+
+const grow = box => { box.style.height = 'auto'; box.style.height = box.scrollHeight + 'px'; };
+
+function focusAnswer(id) {
+  const box = $('#condAsks').querySelector(`[data-c-input="${id}"]`);
+  if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
 }
 
 function permissionHTML(p) {
@@ -128,8 +142,19 @@ function permissionHTML(p) {
 const elsewhereHTML = list => list.length ? `<div class="c-perm late"><div class="c-ask-head"><span class="c-who">Rocco is waiting for your OK in its window</span></div>`
   + `<div class="c-ask-q">${esc(list.at(-1).text)}</div><div class="c-perm-btns"><button class="btn-sm" data-show-window>Show its window</button></div></div>` : '';
 
-function renderAsks() {
-  $('#condAsks').innerHTML = openPermissions().map(permissionHTML).join('') + elsewhereHTML(conductor().elsewhere || []) + openAsks().map(askHTML).join('');
+// Redrawn only when what it shows changed (the board refreshes every few seconds), keeping what's typed in each
+// answer box and where the caret was.
+function renderAsks(force = false) {
+  const box = $('#condAsks');
+  const html = openPermissions().map(permissionHTML).join('') + elsewhereHTML(conductor().elsewhere || []) + openAsks().map(askHTML).join('');
+  if (html === shownAsks && !force) return;
+  shownAsks = html;
+  const active = document.activeElement?.closest?.('[data-c-input]');
+  const caret = active ? { id: active.dataset.cInput, start: active.selectionStart, end: active.selectionEnd } : null;
+  box.innerHTML = html;
+  for (const input of box.querySelectorAll('[data-c-input]')) { input.value = typed.get(input.dataset.cInput) || ''; if (input.value) grow(input); }
+  const again = caret && box.querySelector(`[data-c-input="${caret.id}"]`);
+  if (again) { again.focus(); again.setSelectionRange(caret.start, caret.end); }
 }
 
 // ---- The status line ----
@@ -192,7 +217,12 @@ function rowHTML(e, all) {
     case 'asked': {
       const reply = all.find(x => x.kind === 'answered' && x.to === e.id);
       return `<div class="h-q"><div class="h-head"><span class="h-who">Rocco asked</span>${at}</div>`
-        + e.questions.map((q, i) => `<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${reply ? esc(reply.answers?.[i] ?? '') : 'Waiting for your answer'}</div>`).join('') + '</div>';
+        + e.questions.map((q, i) => {
+          // The picture of the option picked, when it had one.
+          const pic = reply && (q.options || []).find(o => o.image && o.label === reply.answers?.[i])?.image;
+          return `<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${pic ? `<img class="h-pic" src="${esc(api.conductorFile(pic))}" alt="" loading="lazy">` : ''}`
+            + `${reply ? esc(reply.answers?.[i] ?? '') : 'Waiting for your answer'}</div>`;
+        }).join('') + '</div>';
     }
     case 'permission': {
       const d = all.find(x => x.kind === 'decided' && x.to === e.id), gone = all.find(x => x.kind === 'expired' && x.to === e.id);
@@ -289,15 +319,14 @@ function renderAll() {
 export function renderConductor() {
   // A question that's gone (answered elsewhere, or the project changed) leaves nothing behind.
   const ids = new Set(openAsks().map(e => e.id));
-  for (const id of [...picks.keys()]) if (!ids.has(id)) picks.delete(id);
-  if (dismissed && !ids.has(dismissed)) dismissed = '';
+  for (const map of [picks, typed, multi]) for (const id of [...map.keys()]) if (!ids.has(id)) map.delete(id);
   announce();
   renderAll();
   if (shown && history?.stamp !== conductor().stamp) loadHistory();
 }
 
 // A different project: its own thread.
-export function resetConductor() { history = null; mode = null; dismissed = ''; picks.clear(); seen.clear(); first = true; }
+export function resetConductor() { history = null; mode = null; shownAsks = ''; picks.clear(); typed.clear(); multi.clear(); seen.clear(); first = true; }
 
 export function initConductor() {
   on('conductor', renderConductor);
@@ -313,18 +342,31 @@ export function initConductor() {
       } catch (err) { toast(`Couldn't start the conductor: ${err.message}`, 'var(--red)'); }
     }
   });
-  $('#condAsks').addEventListener('click', async e => {
+  // An option picked: on a multi-select it's ticked, otherwise it's the answer (with the last question, sent).
+  const pickOption = (id, label) => {
+    const ask = openAsks().find(a => a.id === id), q = ask?.questions[(picks.get(id) || []).length];
+    if (!q) return;
+    if (q.multi) {
+      const t = multi.get(id) || [];
+      multi.set(id, t.includes(label) ? t.filter(x => x !== label) : [...t, label]);
+      renderAsks();
+    } else answer(id, label);
+  };
+  const box = $('#condAsks');
+  box.addEventListener('input', e => {
+    const input = e.target.closest('[data-c-input]');
+    if (input) { typed.set(input.dataset.cInput, input.value); grow(input); }
+  });
+  box.addEventListener('keydown', e => {
+    const input = e.target.closest('[data-c-input]');
+    if (input && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendTyped(input.dataset.cInput); }
+  });
+  box.addEventListener('click', async e => {
     const hit = s => e.target.closest(s);
-    if (hit('[data-c-pick]')) {
-      const b = hit('[data-c-pick]'), ask = openAsks().find(a => a.id === b.dataset.ask);
-      const q = ask?.questions[(picks.get(ask.id) || []).length];
-      if (!q) return;
-      if (q.multi) {
-        const t = multi.get(ask.id) || [], label = b.dataset.cPick;
-        multi.set(ask.id, t.includes(label) ? t.filter(x => x !== label) : [...t, label]);
-        renderAsks();
-      } else answer(ask.id, b.dataset.cPick);
-    } else if (hit('[data-c-multi]')) {
+    if (hit('[data-pic-src]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pickOption(set.dataset.ask, label));
+    else if (hit('[data-c-pick]')) pickOption(hit('[data-c-pick]').dataset.ask, hit('[data-c-pick]').dataset.cPick);
+    else if (hit('[data-c-send]')) sendTyped(hit('[data-c-send]').dataset.cSend);
+    else if (hit('[data-c-multi]')) {
       const id = hit('[data-c-multi]').dataset.cMulti, t = multi.get(id) || [];
       multi.delete(id);
       if (t.length) answer(id, t.join(', '));
@@ -332,7 +374,8 @@ export function initConductor() {
     else if (hit('[data-c-back]')) {
       const id = hit('[data-c-back]').dataset.cBack;
       picks.set(id, (picks.get(id) || []).slice(0, -1));
-      renderAsks(); renderNoteMode();
+      multi.delete(id);
+      renderAsks();
     } else if (hit('[data-allow]') || hit('[data-deny]')) {
       const allow = !!hit('[data-allow]'), id = (hit('[data-allow]') || hit('[data-deny]')).dataset[allow ? 'allow' : 'deny'];
       hit('.c-perm')?.classList.add('sending');

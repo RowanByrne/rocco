@@ -83,6 +83,11 @@ function Invoke-Request($ctx) {
 			$file = Join-Path $Root "art\generated\$($Matches[1] -replace '/', '\')"
 			if (Test-Path -LiteralPath $file -PathType Leaf) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
 		}
+		# A picture on one of the conductor's questions (thread.ps1 Get-AskFilesDir).
+		if ($decoded -match '^/files/conductor/(C-[0-9a-f]{6})/([\w.-]+\.(png|jpe?g|gif|webp))$' -and $Matches[2] -notmatch '\.\.') {
+			$file = Join-Path (Get-AskFilesDir $Matches[1]) $Matches[2]
+			if (Test-Path -LiteralPath $file -PathType Leaf) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
+		}
 		if ($path -eq '/api/connections') { Send-Json $ctx (Get-Connections ($req.QueryString['refresh'] -eq '1')); return }
 		if ($path -eq '/api/history') { Send-Json $ctx (Get-History); return }
 		if ($path -eq '/api/docs') { Send-Json $ctx (Get-Docs $project.template); return }

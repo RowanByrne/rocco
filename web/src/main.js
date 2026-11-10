@@ -28,6 +28,7 @@ import { openPalette, paletteOpen, closePalette } from './dialogs/palette.js';
 import { markupOpen, closeMarkup } from './dialogs/markup.js';
 import { closeSheet, openSheetKey } from './ui/sheet.js';
 import { closeMenus, menuOpen } from './ui/menu.js';
+import { picViewOpen, closePicView } from './ui/pics.js';
 
 // The project in the address, else the last one opened here (demo mode keeps its own sample projects).
 state.project = new URLSearchParams(location.search).get('p') || (DEMO ? '' : storage.get('rocco.project')) || '';
@@ -103,6 +104,7 @@ addEventListener('hashchange', () => showView(location.hash.slice(1)));
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (markupOpen()) closeMarkup();
+  else if (picViewOpen()) closePicView();
   else if (paletteOpen()) closePalette();
   else if (onboardingOpen()) closeOnboarding();
   else if (updateEditorOpen()) closeUpdateEditor();

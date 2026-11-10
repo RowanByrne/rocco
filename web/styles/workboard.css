@@ -130,6 +130,9 @@
 .ask-q > span:first-child { flex: 1; }
 .ask-n { flex: none; font-size: 11px; font-weight: 400; color: var(--amber); }
 .ask-card .opts { margin-top: 8px; gap: 6px; }
+.ask-card .opts.with-pics { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.ask-card .pics { gap: 6px; }
+.ask-card .pics .pic-img { width: calc(50% - 3px); }
 /* On the card, two lines at most: the whole option is in its tooltip and the task's sheet */
 .ask-card .opt { min-height: 28px; padding: 5px 10px; font-size: 12.5px; }
 .ask-card .opt span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }

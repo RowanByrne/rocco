@@ -37,7 +37,7 @@ export function start() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 }
 
-// Task files (screenshots, audio options) by name become addresses; data: and blob: ones are already addresses.
+// Task files (screenshots, audio options, pictures on questions) by name become addresses; data: and blob: ones are already addresses.
 const fileUrl = (t, name) => !name || /^(data|blob|https?):/.test(name) ? name : api.file(t.id, name);
 
 function apply(s) {
@@ -51,7 +51,8 @@ function apply(s) {
     options: t.options || [],
     log: t.log || [],
     shots: (t.shots || []).map(name => fileUrl(t, name)),
-    questions: (t.questions || []).map(q => ({ ...q, options: (q.options || []).map(o => ({ ...o, audio: fileUrl(t, o.audio) })) })),
+    questions: (t.questions || []).map(q => ({ ...q, images: (q.images || []).map(name => fileUrl(t, name)),
+      options: (q.options || []).map(o => ({ ...o, audio: fileUrl(t, o.audio), image: fileUrl(t, o.image) })) })),
   }));
   if (loaded) for (const t of state.tasks) {
     const was = before.get(t.id);

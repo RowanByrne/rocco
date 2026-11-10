@@ -74,6 +74,12 @@ function seed(id) {
         log: [{ who: 'worker', at: ago(12), text: 'Needs two rules: the shop mid-trade, and the countdown length.' }] },
       { ...base, id: 'T-055', status: 'queued', type: 'feature', kind: 'task', plan: 'T-040', after: ['T-045'], order: 3, title: 'Trade history', waiting: 'After T-045' },
 
+      // A model at its gate: the question's own pictures to look at (ask -Show).
+      { ...base, id: 'T-059', status: 'stuck', type: 'feature', lane: 8, title: 'Shop counter model', note: 'a counter for the shop',
+        summary: 'The gray model is built from the picked concept.',
+        questions: [{ text: 'The gray model, from the front and the side. Build the textures on it?', images: [scene(150), scene(170)],
+          options: [{ label: 'Looks right' }, { label: 'Change it' }] }],
+        log: [{ who: 'worker', at: ago(6), text: 'Gray model done, waiting at the gate.' }] },
       { ...base, id: 'T-043', status: 'stuck', type: 'bug', lane: 7, title: 'Sword swing has no sound', note: 'no sound when i swing the sword',
         summary: 'The old sound was deleted from the store. Found three replacements.',
         questions: [
@@ -141,6 +147,13 @@ function sampleThread() {
     { id: 'C-000009', at: at(31), who: 'conductor', kind: 'said', text: "**Done**\n- Daily reward can't be claimed twice: it saves on claim now (T-038, lane 2).\n- Shop prices fit on phones (T-041).\n\n**Flagged**\n- The trade countdown has no sound yet. I'll ask you which one when it's built.\n- `T-046` found the camera only checks walls behind the head; the fix is in progress." },
     { id: 'C-000010', at: at(28), who: 'you', kind: 'message', text: 'nice. do the camera next', via: 'rocco' },
     { id: 'C-000011', at: at(4), who: 'rocco', kind: 'event', text: 'Ready to test: Daily reward claimable twice after rejoin', task: 'T-038' },
+    // Concepts to pick from: each option has its picture (server/tasks.ps1 Add-Pictures).
+    { id: 'C-000014', at: at(3), who: 'conductor', kind: 'asked', via: 'hook', questions: [
+      { text: 'Which shop interior should the room be built from? The four concepts are in ..\\art\\generated\\shop-concept\\.', header: 'Shop look', multi: false, images: [],
+        options: [{ label: '1: Dusk market', detail: 'shop-01: warm orange lamps, wooden stalls, a big counter up front', image: scene(24) },
+          { label: '2: Neon arcade', detail: 'shop-02: dark blue and magenta, glass cases along the walls', image: scene(250) },
+          { label: '3: Sunny bazaar', detail: 'shop-03: bright yellow awnings, crates and plants', image: scene(52) },
+          { label: '4: Clean showroom', detail: 'shop-04: white and grey, items on plinths, room for menus', image: scene(200) }] }] },
     { id: 'C-000012', at: at(2), who: 'conductor', kind: 'asked', via: 'hook', questions: [
       { text: 'The trade countdown needs a sound when it ends. Which one?', header: 'Trade sound', multi: false,
         options: [{ label: 'Soft chime', detail: 'A short two-note chime' }, { label: 'Cash register', detail: 'Ka-ching, a bit louder' }, { label: 'None', detail: 'Silent, the window just closes' }] },

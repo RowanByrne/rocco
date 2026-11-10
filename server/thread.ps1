@@ -6,7 +6,8 @@
 #
 # A thread line: { id, at, who (conductor, you, rocco), kind, ... }. Kinds:
 #   said        the conductor's message: text [, task, re]
-#   asked       its question(s): questions [{ text, header, options [{ label, detail }], multi }], via (hook, command)
+#   asked       its question(s): questions [{ text, header, options [{ label, detail, image }], multi, images }],
+#               via (hook, command). image and images are pictures in files\<id>\, as <id>/<file>
 #   answered    the user's answer: to (the asked id), answers [one per question], text
 #   permission  a permission request (Claude Code): tool, text, detail, worker
 #   decided     the user's decision on one: to, allow
@@ -21,6 +22,9 @@ function Get-ThreadFile { Join-Path (Get-ThreadDir) 'thread.jsonl' }
 function Get-ActivityFile { Join-Path (Get-ThreadDir) 'activity.jsonl' }
 
 function New-ThreadId { 'C-{0:x6}' -f (Get-Random -Maximum 16777216) }
+
+# A question's pictures (tasks.ps1 Add-Pictures), served as /files/conductor/<id>/<file>.
+function Get-AskFilesDir([string]$id) { Join-Path (Get-ThreadDir) "files\$id" }
 
 # One line, appended in a single write that Windows keeps whole when several processes append at once.
 function Add-Line([string]$file, $entry) {
@@ -181,6 +185,16 @@ function Limit-Thread {
 		[IO.File]::WriteAllLines($thread, [string[]]$lines, $Utf8)
 		$script:LineCache.Remove($thread)
 	}
+	# Pictures for questions past the history's week, unless the question is still open.
+	$files = Join-Path (Get-ThreadDir) 'files'
+	if (Test-Path -LiteralPath $files) {
+		$old = @(Get-ChildItem -LiteralPath $files -Directory | Where-Object { $_.LastWriteTime -lt $keepFrom.AddDays(-1) })
+		if ($old.Count) {
+			$open = @{}
+			foreach ($e in @((Get-ThreadState).open)) { $open[$e.id] = $true }
+			$old | Where-Object { -not $open.ContainsKey($_.Name) } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+		}
+	}
 }
 
 # ---- What the history shows ----
@@ -278,11 +292,15 @@ function Wait-Permission($in) {
 # PreToolUse on AskUserQuestion: the questions show in Rocco, and the user's answers go back as the tool's answers.
 # No answer in time: the question stays open in Rocco, and its answer comes through wait later.
 function Wait-Question($in) {
+	$id = New-ThreadId
 	$qs = @(@($in.tool_input.questions) | ForEach-Object {
-		[ordered]@{ text = [string]$_.question; header = [string]$_.header; multi = [bool]$_.multiSelect
-			options = @(@($_.options) | ForEach-Object { [ordered]@{ label = [string]$_.label; detail = [string]$_.description } }) }
+		$q = [ordered]@{ text = [string]$_.question; header = [string]$_.header; multi = [bool]$_.multiSelect
+			options = @(@($_.options) | ForEach-Object { [ordered]@{ label = [string]$_.label; detail = [string]$_.description; image = '' } }); images = @() }
+		# The pictures it names show with it (tasks.ps1 Add-Pictures). One that can't be found is left out.
+		try { Add-Pictures $q @() @() @(@($_.options) | ForEach-Object { [string]$_.preview }) (Get-AskFilesDir $id) "$id/" } catch { }
+		$q
 	})
-	$e = Add-Thread 'asked' @{ questions = $qs; via = 'hook' }
+	$e = Add-Thread 'asked' @{ id = $id; questions = $qs; via = 'hook' }
 	$answer = Wait-ThreadReply $e.id 'answered' $HookWait
 	if (-not $answer) {
 		Add-Thread 'expired' @{ to = $e.id } 'rocco' | Out-Null

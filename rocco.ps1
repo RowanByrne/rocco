@@ -15,8 +15,11 @@
 #                                      which the card links (set -Spec changes it)
 #   rocco.ps1 ask T-012 -Question "..." -Options "A","B" [-Audio a.ogg,b.ogg]   ask the user (the task turns Stuck).
 #                                      Options are a few words each; the detail goes in the question
-#   rocco.ps1 ask -Question "..." [-Options "A","B"]   with no task: the conductor asks the user, above their note box;
-#                                      wait returns the answer ([answer] C-xxxxxx)
+#                                      [-Images a.png,b.png] one picture per option, to pick from (concepts);
+#                                      [-Show front.png,side.png] pictures for the question itself (a model to approve).
+#                                      An image path, or a folder and file names, in the question show by themselves
+#   rocco.ps1 ask -Question "..." [-Options "A","B"] [-Images ...] [-Show ...]   with no task: the conductor asks the
+#                                      user, above their note box; wait returns the answer ([answer] C-xxxxxx)
 #   rocco.ps1 doing "Merging the trade window"   what the conductor is doing now: Rocco's status line
 #   rocco.ps1 say -Text "..."          a message to the user (a report, anything you'd tell them): Rocco's history
 #   rocco.ps1 reply T-012 -Text "..."   answer the user: a question card shows it under the note box (and turns
@@ -41,7 +44,7 @@ param(
 	[Parameter(Position = 0)] [string]$Command = 'serve',
 	[Parameter(Position = 1)] [string]$Id,
 	[string]$Title, [string]$Note, [string]$Status, [int]$Lane = -1, [string]$Branch, [string]$Where,
-	[string]$Step, [string]$Summary, [string[]]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string]$Waiting,
+	[string]$Step, [string]$Summary, [string[]]$Test, [string]$Question, [string[]]$Options, [string[]]$Audio, [string[]]$Images, [string[]]$Show, [string]$Waiting,
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
 	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [switch]$ForLane, [int]$Port = 34860,
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
@@ -231,7 +234,7 @@ switch ($Command) {
 		if ($t.summary) { "Summary:    $($t.summary)" }
 		foreach ($line in "$($t.test)" -split "`n" | Where-Object { $_ }) { "Test:       $line" }
 		foreach ($s in Get-List $t.steps) { "Plan step:  $($s.title)  (lane $($s.lane), $($s.tier))" }
-		foreach ($q in Get-List $t.questions) { "Question:   $($q.text)  [$((@($q.options) | ForEach-Object { $_.label + $(if ($_.audio) { " ($($_.audio))" }) }) -join ' | ')]" }
+		foreach ($q in Get-List $t.questions) { "Question:   $($q.text)  [$((@($q.options) | ForEach-Object { $_.label + $(if ($_.audio) { " ($($_.audio))" }) + $(if ($_.image) { " (picture $($_.image))" }) }) -join ' | ')]$(if (@($q.images).Count) { "  pictures: $(@($q.images) -join ', ')" })" }
 		if ($t.waiting) { "Waiting:    $($t.waiting)" }
 		if ([int]$t.followups) { "Follow-ups: $($t.followups) from the user since the last clear (latest 'you' lines below)" }
 		$notes = Join-Path $dir 'notes.md'
@@ -307,14 +310,16 @@ switch ($Command) {
 		if (-not $Question) { throw 'ask needs -Question.' }
 		if (-not $Id) {
 			# The conductor's own question: above the note box, and its answer comes back through wait.
-			$q = [ordered]@{ text = $Question; header = ''; multi = $false; options = @($Options | Where-Object { $_ } | ForEach-Object { [ordered]@{ label = $_; detail = '' } }) }
-			$e = Add-Thread 'asked' @{ questions = @($q); via = 'command' }
+			$cid = New-ThreadId
+			$q = [ordered]@{ text = $Question; header = ''; multi = $false; options = @($Options | Where-Object { $_ } | ForEach-Object { [ordered]@{ label = $_; detail = ''; image = '' } }); images = @() }
+			Add-Pictures $q @($Images) @($Show) @() (Get-AskFilesDir $cid) "$cid/"
+			$e = Add-Thread 'asked' @{ id = $cid; questions = @($q); via = 'command' }
 			"$($e.id) asked, above the user's note box. Their answer comes back through wait, as an [answer]."
 		} else {
 			$t = Read-Task $Id
 			# A plan's question would show nowhere: it's asked on the step's task.
 			if ($t.kind -eq 'plan') { throw ($PlanNotWorked -f $t.id) }
-			Add-Question $t $Question @($Options) @($Audio)
+			Add-Question $t $Question @($Options) @($Audio) @($Images) @($Show)
 			Set-Status $t 'stuck'
 			Save-Task $t
 			Add-Event "Needs your answer: $($t.title)" $t.id
@@ -348,7 +353,7 @@ switch ($Command) {
 		elseif ($t.PSObject.Properties['waitingFor'] -and $t.waitingFor -and ($t.status -ne 'queued' -or $Lane -gt 0)) { Clear-LaneWait $t }
 		if ($PSBoundParameters.ContainsKey('Test')) { Set-Field $t 'test' (Join-Steps) }
 		# One question in one go; ask adds more, with audio.
-		if ($Question) { Set-Field $t 'questions' @(); Add-Question $t $Question @($Options) @($Audio) }
+		if ($Question) { Set-Field $t 'questions' @(); Add-Question $t $Question @($Options) @($Audio) @($Images) @($Show) }
 		if ($Lane -ge 0) { Set-Field $t 'lane' $(if ($Lane -eq 0) { $null } else { $Lane }) }
 		if ($Progress -ge 0) { Set-Field $t 'progress' ([Math]::Min(100, $Progress)) }
 		# A revised feature plan (the user asked for changes): its new steps.

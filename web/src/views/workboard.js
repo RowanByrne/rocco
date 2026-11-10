@@ -12,6 +12,7 @@ import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
 import { shotOf, imagesIn, shotsHTML, shotClick, clip } from '../ui/shots.js';
+import { picsHTML, picOptionHTML, openPicsFrom } from '../ui/pics.js';
 import { showDoc } from './docs.js';
 import { prose, proseLine } from '../prose.js';
 import { startSession, scrollSessionToEnd } from './session.js';
@@ -75,8 +76,13 @@ function play(url, button) {
   player.play().catch(() => { button.classList.remove('playing'); toast("Couldn't play that sound", 'var(--red)'); });
 }
 
-const optionHTML = (o, i, picked) => `<span class="opt-wrap"><button class="opt${picked === o.label ? ' on' : ''}" data-pick="${esc(o.label)}" data-q="${i}" title="${esc(o.label)}"><span>${esc(o.label)}</span></button>`
-  + `${o.audio ? `<button class="speaker" data-play="${esc(o.audio)}" title="Play" aria-label="Play ${esc(o.label)}">${icon.speaker}</button>` : ''}</span>`;
+const speakerHTML = o => o.audio ? `<button class="speaker" data-play="${esc(o.audio)}" title="Play" aria-label="Play ${esc(o.label)}">${icon.speaker}</button>` : '';
+// An option: a button to pick, with a play button for a sound, or a picture to see bigger (ui/pics.js).
+const optionHTML = (o, i, picked) => o.image ? picOptionHTML(o, o.image, `data-pick="${esc(o.label)}" data-q="${i}"`, picked === o.label, speakerHTML(o))
+  : `<span class="opt-wrap"><button class="opt${picked === o.label ? ' on' : ''}" data-pick="${esc(o.label)}" data-q="${i}" title="${esc(o.label)}"><span>${esc(o.label)}</span></button>${speakerHTML(o)}</span>`;
+// A question's pictures and options, as one set for the picture viewer.
+const optionsHTML = (q, i, picked, extra = '') => `<div data-pic-set data-q="${i}">${picsHTML(q.images)}`
+  + `<div class="opts${(q.options || []).some(o => o.image) ? ' with-pics' : ''}">${(q.options || []).map(o => optionHTML(o, i, picked)).join('')}${extra}</div></div>`;
 
 // ---- Columns ----
 
@@ -87,7 +93,7 @@ function questionCardHTML(t) {
   if (picked.length >= qs.length) return `<div class="ask-card done"><span class="spin"></span><span>Sending your answer${qs.length === 1 ? '' : 's'}</span></div>`;
   const i = picked.length, q = qs[i];
   return `<div class="ask-card"><div class="ask-q"><span>${proseLine(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
-    + `<div class="opts">${(q.options || []).map(o => optionHTML(o, i, '')).join('')}</div>`
+    + optionsHTML(q, i, '')
     + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
 }
 
@@ -322,8 +328,8 @@ function whereLine(t) {
 
 function questionsSheetHTML(t) {
   const picked = answers.get(t.id) || [];
-  return questionsOf(t).map((q, i) => `<div class="s-q">${proseLine(q.text)}</div><div class="opts">${(q.options || []).map(o => optionHTML(o, i, picked[i])).join('')}`
-    + `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button></div>`).join('');
+  return questionsOf(t).map((q, i) => `<div class="s-q">${proseLine(q.text)}</div>`
+    + optionsHTML(q, i, picked[i], `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button>`)).join('');
 }
 
 // The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
@@ -646,7 +652,9 @@ export function initWorkboard() {
   view.addEventListener('click', e => {
     const hit = selector => e.target.closest(selector);
     const card = hit('[data-id]')?.dataset.id;
-    if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
+    // A task's pictures (the conductor's questions handle their own).
+    if (hit('[data-pic-src]') && hit('[data-pic-set][data-q]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pick(card, +set.dataset.q, label));
+    else if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
     else if (hit('[data-plan-spec]')) showDoc(hit('[data-plan-spec]').dataset.planSpec);
     else if (hit('[data-pick]')) pick(card, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-back]')) { answers.set(card, (answers.get(card) || []).slice(0, -1)); renderWorkboard(); }
@@ -726,7 +734,8 @@ export function initWorkboard() {
   $('#sheet').addEventListener('click', e => {
     const el = e.target, hit = selector => el.closest(selector);
     const id = openSheetKey();
-    if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
+    if (hit('[data-pic-src]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pick(id, +set.dataset.q, label));
+    else if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
     else if (hit('[data-plan-spec]')) { closeSheet(); showDoc(hit('[data-plan-spec]').dataset.planSpec); }
     else if (hit('[data-pick]')) pick(id, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-answer]')) sendAnswers(id, $('#answerText').value.trim());

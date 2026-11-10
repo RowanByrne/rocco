@@ -58,6 +58,40 @@
 .modal-card::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 150px; pointer-events: none;
   background: radial-gradient(70% 100% at 20% 0%, rgba(124,108,255,.18), transparent); }
 .modal-card > * { position: relative; }
+
+/* Pictures on a question (ui/pics.js): the question's own in a row, and options that are pictures to pick from */
+.pics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pics .pic-img { width: 168px; }
+.pic-img { display: block; padding: 0; overflow: hidden; aspect-ratio: 16 / 10; border-radius: 10px; border: 1px solid var(--stroke-2); background: #000;
+  cursor: zoom-in; transition: border-color .15s, transform .15s; }
+.pic-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pic-img:hover { border-color: rgba(251,191,36,.5); }
+.opts.with-pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-items: start; }
+.opts.with-pics > .opt, .opts.with-pics > .opt-wrap { align-self: end; }
+.pic-opt { display: grid; gap: 6px; min-width: 0; }
+.pic-opt.on .pic-img { border-color: rgba(251,191,36,.7); box-shadow: 0 0 0 2px rgba(251,191,36,.35); }
+.pic-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.pic-row .opt { flex: 1; min-width: 0; }
+
+/* A picture, big */
+.modal-card.pic-view { width: min(1100px, 100%); padding: 14px; }
+.pv-stage { position: relative; }
+.pv-img { display: block; width: 100%; max-height: 72vh; object-fit: contain; border-radius: 10px; background: #000; }
+.pv-nav { position: absolute; top: 50%; width: 40px; height: 40px; display: grid; place-items: center; margin-top: -20px; border: 0; border-radius: 50%;
+  color: #fff; background: rgba(0,0,0,.5); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.pv-nav:hover { background: rgba(0,0,0,.72); }
+.pv-nav.prev { left: 10px; }
+.pv-nav.next { right: 10px; }
+.pv-foot { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+.pv-text { flex: 1; min-width: 0; }
+.pv-text p { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.pv-n { flex: none; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.pv-foot .m-actions { margin-top: 0; }
+@media (max-width: 560px) {
+  .pv-foot { flex-wrap: wrap; }
+  .pics .pic-img { width: calc(50% - 4px); }
+  .opts.with-pics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .modal-card h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .m-sub { margin: 4px 0 18px; font-size: 12.5px; color: var(--text-3); }
 .fields { display: grid; gap: 12px; }

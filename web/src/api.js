@@ -81,6 +81,8 @@ export const api = {
   showConductor: () => DEMO ? demo.showConductor() : post(withProject('/api/conductor/show-window')),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
+  // A picture on one of the conductor's questions: '<question id>/<file>'. data: ones (the demo's) are already addresses.
+  conductorFile: rel => /^(data|blob|https?):/.test(rel) ? rel : withProject(`/files/conductor/${rel.split('/').map(encodeURIComponent).join('/')}`),
   // Updates: the calendar's cards (live/CALENDAR.md) and the game page's events.
   updates: force => DEMO ? demo.updates() : getJson(withProject('/api/updates', force ? '&refresh=1' : '')),
   saveUpdate: card => DEMO ? demo.saveUpdate(card) : post(withProject('/api/updates/save'), card),
