@@ -222,7 +222,11 @@ function progressOf(id) {
 function renderTabs() {
   const tab = (id, name, sub, vars) => html`<button class="tab${id === active ? ' on' : ''}" role="tab" aria-selected=${id === active ? 'true' : 'false'} data-thread=${id} style=${ifDefined(vars)} title=${name}><i class="tab-dot t-${toneOf(agentOf(id))}"></i><span class="tab-name">${name}</span>${
     sub ? html`<span class="tab-sub">${sub}</span>` : nothing}${unread(id) ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
-  render(html`${tab('', 'Rocco', '')}${repeat(leads(), l => l.id, l => {
+  // Rocco's own chat is the main one: a tab of its own kind, with its mark, set apart from the features' threads.
+  const main = html`<button class="tab tab-main${active === '' ? ' on' : ''}" role="tab" aria-selected=${active === '' ? 'true' : 'false'} data-thread="" title="Rocco: the main chat"><span class="tab-mark">R</span><span class="tab-name">Rocco</span><i class="tab-dot t-${toneOf(agentOf(''))}"></i>${
+    unread('') ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
+  const threads = leads();
+  render(html`${main}${threads.length ? html`<span class="tabs-sep" aria-hidden="true"></span>` : nothing}${repeat(threads, l => l.id, l => {
     const p = l.kind === 'feature' ? progressOf(l.id) : null;
     return tab(l.id, l.title, p ? `${p.done}/${p.total}` : l.id, featureVars(l.id));
   })}`, $('#threadTabs'));
@@ -464,6 +468,10 @@ function historyView() {
     const before = items.slice(0, i).reverse().find(x => !isIdle(x));
     if (before?.kind === 'said' && Date.parse(e.at) - Date.parse(before.at) < 10 * 60e3) { hidden.add(before.id); whyOf.set(e.id, before.text); }
   });
+  // A card that came from something you typed shows where it is under your message, so "Started: ..." about it
+  // says nothing new. The lines that need you (ready to test, an answer) stay.
+  const yoursTasks = new Set(items.filter(e => e.kind === 'sent' && (e.act === 'note' || e.act === 'question') && e.task).map(e => e.task));
+  for (const e of items) if (e.kind === 'event' && e.task && yoursTasks.has(e.task) && /^Started\b/.test(e.text || '')) hidden.add(e.id);
   const rows = [...items.filter(e => !hidden.has(e.id)).map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const out = [];
   let prev = ''; // the card the last line was about: a message about it right after doesn't name it again
@@ -503,10 +511,41 @@ function historyView() {
     prev = r.e.task || '';
   }
   flushIdle();
-  flushSteps();
-  return html`${out}${failed}`;
+  // The steps it's still taking are the live line's while it works: they fold into the chat once it's done.
+  if (conductor().state !== 'busy') flushSteps();
+  // At the end: what the agent is doing now, kept current every second (liveView).
+  return html`${out}${failed}<div class="h-live" id="chatLive"></div>`;
 }
 
+// ---- What it's doing right now, at the end of the chat ----
+// "··· Reading CarEntry.luau, editing CarEntry.luau, using Studio … 1m 27s": while the agent is at work, its last few
+// steps in a few words, and how long it has been at it since it last said something or you last wrote.
+
+const lower = s => s ? s[0].toLowerCase() + s.slice(1) : s;
+const took = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
+
+function liveView() {
+  const c = conductor(), history = view().history;
+  if (c.state !== 'busy' || !history || openAsks().length || openPermissions().length) return nothing;
+  // Since the last thing said, by either of you.
+  const since = history.items.filter(e => e.who === 'you' || e.kind === 'said').reduce((a, e) => (String(e.at) > a ? String(e.at) : a), '');
+  const steps = history.steps.filter(s => String(s.at) > since);
+  const names = [...new Set(steps.map(s => s.text).filter(Boolean).reverse())].slice(0, 3).reverse();
+  if (!names.length && c.doing) names.push(c.doing);
+  const from = Date.parse(steps[0]?.at || since) || Date.now();
+  return html`<span class="live-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="live-text">${names.length ? names.map((n, i) => i ? lower(n) : n).join(', ') : 'Working'} …</span><span class="live-time">${took(Date.now() - from)}</span>`;
+}
+
+function renderLive() {
+  const box = document.getElementById('chatLive');
+  if (!box) return;
+  const list = $('#condList'), atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+  render(liveView(), box);
+  box.classList.toggle('on', !!box.childElementCount);
+  if (atEnd) list.scrollTop = list.scrollHeight;
+}
+
+let lastState = ''; // the agent's state at the last draw (renderConductor)
 let toEnd = false; // the next draw ends at the chat's end, whatever was scrolled (the user just sent something)
 function stickToEnd() { toEnd = true; renderHistory(); }
 
@@ -516,6 +555,7 @@ function renderHistory(fresh = false) {
   const atEnd = toEnd || fresh || list.scrollHeight - list.scrollTop - list.clientHeight < 60;
   toEnd = false;
   render(historyView(), list);
+  renderLive();
   const mark = fresh && list.querySelector('#chatNew');
   if (mark) mark.scrollIntoView({ block: 'start' });
   else if (atEnd) list.scrollTop = list.scrollHeight;
@@ -566,6 +606,7 @@ function renderAll() {
   renderBar();
   renderAsks();
   renderNoteMode();
+  renderLive();
 }
 
 export function renderConductor() {
@@ -583,6 +624,9 @@ export function renderConductor() {
   renderAll();
   const v = view();
   if (v.history?.stamp !== conductor().stamp || v.loadError || !v.history) loadHistory();
+  // It stopped or started working: its last steps move between the live line and the chat.
+  else if (lastState !== conductor().state) renderHistory();
+  lastState = conductor().state;
 }
 
 // A different project: its own threads, and its own reply in progress.
@@ -602,6 +646,8 @@ export function resetConductor() {
 
 export function initConductor() {
   resetConductor();
+  // The live line's clock ticks while the agent works.
+  setInterval(() => { if (conductor().state === 'busy') renderLive(); }, 1000);
   on('conductor', renderConductor);
   on('project', () => renderHistory(true));
   on('prose', () => { renderAsks(); renderHistory(); renderHead(); });

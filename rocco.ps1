@@ -335,7 +335,8 @@ switch ($Command) {
 			} else { "This feature has an agent of its own, in lane $($t.lane): it makes and works its tasks, and the user talks to it in the feature's thread. It isn't yours, except to merge a step the user has approved." }
 		} elseif ($t.kind -eq 'plan') {
 			$perStep = "a task per step, new -Title `"<step>`" -Plan $($t.id) [-After T-0xx], and give each worker its step's id"
-			$hint = if ($t.status -eq 'inbox' -and $t.pending) { "It still waits for the user's OK (Approve plan on its card). If their words approve it (`"go`", `"build it`"), make $perStep; the first one approves it. Otherwise answer them, and it waits." }
+			$hint = if ($t.status -eq 'inbox' -and $t.pending -eq 'revise') { "The user asked for changes (the latest 'you' line), and they're watching the plan's card while you make them. Change it now: set $($t.id) -Summary `"...`" -Steps ... (only what they asked). Then say what you changed in a sentence, reply $($t.id) -Text `"...`" (it shows on the card and in the chat), and clear $($t.id). It waits for their OK again." }
+				elseif ($t.status -eq 'inbox' -and $t.pending) { "It still waits for the user's OK (Approve plan on its card). If their words approve it (`"go`", `"build it`"), make $perStep; the first one approves it. Otherwise answer them, and it waits." }
 				elseif ($t.pending -eq 'approved') { "Approved: make $perStep. Then clear $($t.id)." }
 				elseif ($t.status -in 'working', 'stuck', 'ready') { "It's being worked as one card, so the board shows none of it: make $perStep. That puts the plan back." }
 			if ($hint) { ''; $hint }
@@ -523,6 +524,11 @@ switch ($Command) {
 			'cancel' { Add-Event "Stopped deleted work: $($t.title)" $t.id }
 			'stop' { Add-Event "Paused: $($t.title)" $t.id }
 			'handoff' { Set-Field $t 'waiting' 'Opening its own agent' }
+			# A plan changed as asked: if nothing was said about it since, the card and the chat still get an answer.
+			'revise' {
+				if (@(Get-List $t.log)[-1].who -eq 'you') { Add-Log $t 'conductor' 'Updated the plan.' }
+				Add-Event "Updated the plan: $($t.title)" $t.id
+			}
 		}
 		Set-Field $t 'pending' ''
 		Set-Field $t 'followups' 0

@@ -156,7 +156,9 @@ function Get-ToolSummary([string]$tool, $in) {
 	$leaf = { param($p) if ($p) { Split-Path ([string]$p) -Leaf } else { '' } }
 	$short = { param($s, $n) $s = ([string]$s -split "`r?`n")[0].Trim(); if ($s.Length -gt $n) { $s.Substring(0, $n - 1) + '...' } else { $s } }
 	switch -Regex ($tool) {
-		'^(Bash|PowerShell)$' { if ($in.description) { return (& $short $in.description 90) }; return "Running $(& $short $in.command 70)" }
+		# Its own Rocco commands (claiming a note, moving a card, watching the board) are Rocco's bookkeeping: the board
+		# shows what came of them, so they're not steps the user reads.
+		'^(Bash|PowerShell)$' { if ("$($in.command)" -match 'rocco\.ps1') { return '' }; if ($in.description) { return (& $short $in.description 90) }; return "Running $(& $short $in.command 70)" }
 		'^Read$' { return "Reading $(& $leaf $in.file_path)" }
 		'^(Edit|MultiEdit)$' { return "Editing $(& $leaf $in.file_path)" }
 		'^Write$' { return "Writing $(& $leaf $in.file_path)" }
@@ -178,7 +180,7 @@ function Get-ToolSummary([string]$tool, $in) {
 # A permission request, said for the user: what it wants to do, and the exact command or file.
 function Get-PermissionText([string]$tool, $in) {
 	$what = Get-ToolSummary $tool $in
-	if (-not $what) { $what = $tool }
+	if (-not $what) { $what = if ("$($in.command)" -match 'rocco\.ps1') { 'Run a Rocco command' } else { $tool } }
 	$detail = switch -Regex ($tool) {
 		'^(Bash|PowerShell)$' { [string]$in.command }
 		'^(Read|Edit|MultiEdit|Write)$' { [string]$in.file_path }

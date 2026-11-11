@@ -243,8 +243,10 @@ export async function conductorThread(stamp, thread = '') {
 
 // The demo's agents carry on a moment after the user answers or writes.
 function carryOn(d, text, step, thread = '') {
-  setTimeout(() => { threadOf(d, thread).steps.push({ at: new Date().toISOString(), text: step }); setAgentState(d, thread, { ...agentOf(d, thread), state: 'busy', doing: step }); }, 1200);
-  setTimeout(() => { addLine(d, 'said', { text }, 'conductor', thread); setAgentState(d, thread, { ...agentOf(d, thread), state: 'listening', doing: '' }); }, 3500);
+  // A few steps over several seconds, so the chat's live line ("Reading …, editing … 4s") has something to show.
+  const more = ['Reading TradeService.luau', 'Searching for countdown', 'Using Studio: execute luau'];
+  [step, ...more].forEach((s, i) => setTimeout(() => { threadOf(d, thread).steps.push({ at: new Date().toISOString(), text: s }); setAgentState(d, thread, { ...agentOf(d, thread), state: 'busy', doing: s }); }, 800 + i * 1800));
+  setTimeout(() => { addLine(d, 'said', { text }, 'conductor', thread); setAgentState(d, thread, { ...agentOf(d, thread), state: 'listening', doing: '' }); }, 8000);
 }
 
 export async function conductorAnswer(id, answers, text, thread = '') {
@@ -563,7 +565,18 @@ export async function act(id, action, text) {
       if (t.status === 'working' || t.status === 'stuck') { t.pending = 'assign'; setTimeout(() => { if (t.pending === 'assign') Object.assign(t, { pending: '', lane: t.wantLane || t.lane }); }, 3000); }
       break;
     }
-    case 'revise': if (!text) throw new Error('Say what to change.'); t.pending = 'revise'; say(text); break;
+    case 'revise':
+      if (!text) throw new Error('Say what to change.');
+      t.pending = 'revise'; say(text);
+      // As the conductor does: the plan changes while it's open, then it says what changed, on the card and in the chat.
+      setTimeout(() => {
+        const reply = `Changed as you asked: ${text.replace(/[.!]+$/, '')}. The rest of the plan stays as it was.`;
+        t.summary = `${t.summary}\nChanged: ${text}`;
+        t.log.push({ who: 'conductor', at: new Date().toISOString(), text: reply });
+        addLine(current(), 'said', { text: reply, re: t.title, task: t.id });
+        t.pending = '';
+      }, 3000);
+      break;
     default: throw new Error(`Unknown action '${action}'.`);
   }
   return { ok: true };

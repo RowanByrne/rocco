@@ -321,7 +321,7 @@ let changes = null;                           // what it changed: { id, stamp, l
 let reply = { id: '', shots: [] };            // the screenshots going back with it
 
 function whereLine(t) {
-  if (isPlan(t)) return t.status === 'inbox' ? 'Feature plan · waiting for your OK' : `Feature · ${planCount(t).done} of ${planCount(t).total} done`;
+  if (isPlan(t)) return t.status === 'inbox' ? (t.pending === 'revise' ? 'Feature plan · Rocco is changing it' : 'Feature plan · waiting for your OK') : `Feature · ${planCount(t).done} of ${planCount(t).total} done`;
   if (isQuestion(t)) return t.status === 'ready' ? 'Answered' : t.status === 'done' ? `Got it at ${hhmm(t.doneAt)}` : 'Waiting for an answer';
   switch (t.status) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
@@ -354,11 +354,11 @@ const promoteOffer = t => t.lead && t.pending === 'handoff' ? html`<div class="s
 
 // The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
 function sheetTop(t) {
-  const kids = isPlan(t) ? childrenOf(t) : [];
+  const kids = isPlan(t) ? childrenOf(t) : [], lit = planChanged(t) ? ' just-changed' : '';
   return html`<h2 class="s-title">${t.title}</h2><div class="s-where">${whereLine(t)}</div>${effort(t)}${promoteOffer(t)}${
     hasType(t) || featureOf(t) ? html`<div class="c-meta">${typeTag(t)}${featureTag(t)}</div>` : nothing}${stepIn(t)}${
-    t.summary ? html`<div class="s-sum">${prose(t.summary)}</div>` : nothing}${
-    isPlan(t) ? html`${planSteps(t)}${t.spec ? html`<div class="row s-spec">${specButton(t)}</div>` : nothing}${
+    t.summary ? html`<div class="s-sum${lit}">${prose(t.summary)}</div>` : nothing}${
+    isPlan(t) ? html`<div class=${lit}>${planSteps(t)}</div>${t.spec ? html`<div class="row s-spec">${specButton(t)}</div>` : nothing}${
       kids.length ? html`<div class="sec-h">Tasks</div>${kids.map(k => html`<div class="s-row" data-id=${k.id}><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${k.title}</span><span class="at">${NAMES[k.status] || ''}</span></div>`)}` : nothing}` : nothing}${
     t.status === 'ready' && t.test ? html`<div class="s-try"><small>Try</small>${trySteps(stepsOf(t))}${approveButton(t)}</div>` : t.status === 'ready' ? approveButton(t) : nothing}${
     t.status === 'stuck' ? sheetQuestions(t) : nothing}`;
@@ -380,7 +380,19 @@ function sheetBody(t) {
     t.shots.length ? html`<div class="shots">${t.shots.map(src => html`<img src=${src} alt="Screenshot" class=${ui.big.has(src) ? 'big' : ''}>`)}</div>` : nothing}${
     t.note && t.note !== t.title ? html`<div class="s-note">${t.note}</div>` : nothing}${checks(t)}${
     t.branch ? html`<div class="sec-h">What changed</div><div class="changes" id="changes">${changesView(t)}</div>` : nothing
-  }<div class="sec-h">Session</div><div class="sx" id="sx"></div>`; // its agent's session and the card's history, word for word (session.js draws it)
+  }<div class="sec-h">Session</div><div class="sx" id="sx"></div>${ // its agent's session and the card's history, word for word (session.js draws it)
+    // Changes asked for on a plan: Rocco's on it, under what you asked, until it answers.
+    isPlan(t) && t.pending === 'revise' ? html`<div class="sx-wait s-revising"><span class="spin"></span>Rocco is updating the plan</div>` : nothing}`;
+}
+
+// A plan whose text just changed (Rocco revised it while it was open): the new text is lit for a moment.
+let planSeen = { id: '', stamp: '', at: 0 };
+function planChanged(t) {
+  if (!isPlan(t)) return false;
+  const stamp = JSON.stringify([t.summary, t.steps, t.title]);
+  if (planSeen.id !== t.id) planSeen = { id: t.id, stamp, at: 0 };
+  else if (planSeen.stamp !== stamp) planSeen = { id: t.id, stamp, at: Date.now() };
+  return Date.now() - planSeen.at < 2500;
 }
 
 // The round send button, as on the note box: Enter does the same. kind: follow (a message) or reopen (send it back).
@@ -398,7 +410,7 @@ function sheetFoot(t) {
     if (t.status === 'done') return nothing;
     return followUp('Add to your question');
   }
-  if (isPlan(t) && t.status === 'inbox') return html`<div class="row"><button class="btn accent" style="flex:1" data-plan-approve=${t.id}>Approve plan</button></div>${box('followText', 'Want changes? Say what, then send')}<div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
+  if (isPlan(t) && t.status === 'inbox') return html`<div class="row"><button class="btn accent" style="flex:1" data-plan-approve=${t.id}>Approve plan</button></div>${box('followText', 'Want changes? Say what, and Enter sends them')}<div class="row"><span class="sp"></span><button class="btn" data-revise title="Ask for changes (Enter)">Ask for changes</button></div>`;
   // Sending a task back: a box that's always open under To test, with screenshots like the note box.
   if (t.status === 'ready') return html`<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotThumbs(reply.shots)}</div>${
     box('reopenText', "Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back")
@@ -846,6 +858,11 @@ export function initWorkboard() {
     if (e.target.id === 'reopenText') { e.preventDefault(); sendBack(sheetTask); }
     // A message to a card's agent, as in a session (not a plan's changes or a question's follow-up: those have buttons).
     if (e.target.id === 'followText' && $('#sheet [data-send="follow"]') && e.target.value.trim()) { e.preventDefault(); sendFollowUp(sheetTask, e.target.value.trim()); }
+    // A plan's changes, and more on an answered question, go with Enter too, like a chat: the same as their button.
+    else if (e.target.id === 'followText' && e.target.value.trim()) {
+      const send = /** @type {HTMLElement | null} */ ($('#sheet [data-revise], #sheet [data-ask-more-send]'));
+      if (send) { e.preventDefault(); send.click(); }
+    }
   });
   // Screenshots for sending a task back: pasted anywhere while its sheet is open, dropped on the box, or picked.
   document.addEventListener('paste', e => {
@@ -893,9 +910,9 @@ export function initWorkboard() {
     else if (hit('[data-send="follow"]') || hit('[data-revise]')) {
       if (!text()) { $('#followText').focus(); return; }
       if (hit('[data-revise]')) {
+        // The plan stays open: Rocco's change shows in it as it lands, and its answer in the session below.
         const words = text();
-        closeSheet();
-        attempt('send it', async () => { await act(id, 'revise', words); draft.clear(`sheet:${id}`); toast('Changes asked for', 'var(--violet)'); }, id);
+        attempt('send it', async () => { await act(id, 'revise', words); draft.clear(`sheet:${id}`); stayOpen(id); }, id).then(() => backToBox(id));
       } else sendFollowUp(id, text());
     } else if (hit('[data-plan-approve]')) { closeSheet(); approvePlan(id); }
     else if (hit('[data-got-it]')) { closeSheet(); gotIt(id); }
