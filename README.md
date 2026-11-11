@@ -168,15 +168,16 @@ The middle of the Workboard is a thread: the conductor's, or, on its own tab, th
 
 ## Sorting
 
-Not everything you send becomes a card. The conductor sorts each new note first (`show` on a note says so), into one of three:
+Not everything you send becomes a card. The conductor sorts each new note first (`show` on a note says so), into one of four:
 
 | | What happens | The conductor runs |
 |---|---|---|
 | **A question** | It's answered in the chat. No card is kept. | `reply T-012 -Answer -Text "..."` |
+| **An errand** | Something to do that changes nothing in the game (open the lanes, start Studio, push main, run the checks): there's nothing to test, so it's done and said in the chat. No card is kept. | `reply T-012 -Done -Text "..."` |
 | **A fix** | A small change: a card that's done (by the conductor, or a worker in a lane) and handed back to test. | `set T-012 -Title "..." -Status working`, then as any card |
 | **A feature** | Something with decisions in it, or more than one step: a plan first, for you to approve. | `plan ...`, then `clear T-012` |
 
-The note box's **Auto** leaves the choice to it. **Fix**, **Ask** and **Feature** make it yourself (the note's `type`: `fix`, `question` or `feature`), and the conductor goes with that unless the note is plainly something else, in which case it says so. An answer that turns out to need work can still become a card (the task action `make-task`).
+An errand has no button of its own: it's only ever the conductor's call. The note box's **Auto** leaves the choice to it. **Fix**, **Ask** and **Feature** make it yourself (the note's `type`: `fix`, `question` or `feature`), and the conductor goes with that unless the note is plainly something else, in which case it says so. An answer that turns out to need work can still become a card (the task action `make-task`).
 
 ## Feature threads
 
@@ -234,7 +235,7 @@ The agent keeps the Workboard current with `rocco.ps1`. Run from a project's `re
 | `say -Text "..."` | A message to the user in Rocco's history: a report, or anything the conductor would otherwise say only in its own window |
 | `show C-1a2b3c` / `clear C-1a2b3c` | A message or answer the user sent the conductor (`list -Pending` and `wait` show them as `[message]` and `[answer]`), in full; `clear` once it's acted on |
 | `hook permission\|question\|stop` | Claude Code's hooks for a conductor Rocco opened: `permission` and `question` wait for the user's answer in Rocco and hand it back; `stop` sends the conductor back when it ends a turn with something still waiting on it, or with no `wait` running (a new one gets 20 seconds to start). After three tries in a row it lets the turn end, and says so in the history |
-| `reply T-012 -Text "..." [-Answer]` | Answer a question the user asked (`list` marks them QUESTION): it's said in the chat, and the question is closed, with no card kept. `-Answer` does the same for a note that turned out to be only a question ("Sorting"). On any other card (a question typed into a working card, say) the answer goes in the card's session and the card stays where it is |
+| `reply T-012 -Text "..." [-Answer\|-Done]` | Answer a question the user asked (`list` marks them QUESTION): it's said in the chat, and the question is closed, with no card kept. `-Answer` does the same for a note that turned out to be only a question, and `-Done` for an errand, once it's done: the text says what was done ("Sorting"). `-Done` is refused on a card with a branch: that changed something, so it's tested. On any other card (a question typed into a working card, say) the answer goes in the card's session and the card stays where it is |
 | `set T-012 -Status working -Lane 3 -Step "..." [-Progress 40]` | Where a task stands. A worker's `log` lines show live on its card |
 | `set T-012 -ForLane` | Every lane is busy: the task waits in Up next, its card says whether a lane is free ("Waiting for a free lane: all 4 are busy", then "Lane 2 is free: Rocco starts it next"), and `wait` hands it back as `[lane]` the moment one is, with the lane to use. `new -ForLane` does the same for a new task. What the user asked of it (a send-back, a note) counts as read. Starting it, or giving it a lane, ends the wait |
 | `set T-012 -Status ready -Where main -Summary "..." -Test "Drive a lap","Drift the hairpin"` | Ready to test: what changed, and the steps to try (one a line on the card). What a card shows has to fit it, so these are refused, with what to do instead: a title over 50 characters (from `new`, `plan`, `suggest` or `set`; a plan's steps too), and a task's summary or test over 30 words each. A feature plan's summary and a setup card's aren't limited. The detail goes in `log`. Where to test is checked against git for a task with a branch: `-Where main` is refused until the Main place has its commits (merged, pushed and pulled into `repo\`), and `-Where lane` once it's merged, so an agent working from an old picture can't send the user to the wrong place |

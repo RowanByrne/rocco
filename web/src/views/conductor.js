@@ -372,7 +372,7 @@ const meAvatar = () => html`<span class="h-av">${state.me?.avatar ? html`<img sr
 function taskChip(id, title = '') {
   const t = byId(id), s = t && STATUS[t.status];
   const where = !t ? '' : t.kind === 'plan' ? (t.status === 'inbox' ? 'Plan to approve' : t.status === 'done' ? 'Built' : 'Feature')
-    : t.kind === 'question' ? (t.status === 'queued' ? 'Asked' : 'Answered') : s?.[0] || '';
+    : t.kind === 'question' ? (t.status === 'queued' ? 'Asked' : 'Answered') : t.kind === 'errand' ? 'Done' : s?.[0] || '';
   return html`<button class="tchip" data-open-task=${id} style="--c:${s ? s[1] : 'var(--gray)'}" title="Open ${id}"><i class="sdot"></i><span class="tchip-name">${t?.title || title || id}</span>${where ? html`<span class="tchip-state">${where}</span>` : nothing}</button>`;
 }
 
@@ -413,7 +413,7 @@ function row(e, all) {
     case 'event': {
       // A line about a card, in the color of where the card is now.
       const t = task && byId(task), s = t && STATUS[t.status];
-      return html`<div class="h-event${task ? ' card' : ''}" data-open-task=${ifDefined(task)} style=${ifDefined(s ? `--c:${s[1]}` : undefined)}><span class="h-dot"></span><span class="h-line">${e.text}</span>${task ? replyTo(task) : nothing}${at}</div>`;
+      return html`<div class="h-event${task ? ' of-card' : ''}" data-open-task=${ifDefined(task)} style=${ifDefined(s ? `--c:${s[1]}` : undefined)}><span class="h-dot"></span><span class="h-line">${e.text}</span>${task ? replyTo(task) : nothing}${at}</div>`;
     }
   }
   return nothing;

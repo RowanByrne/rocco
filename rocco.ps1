@@ -53,6 +53,7 @@ param(
 	[switch]$Pass, [switch]$Fail, [string]$File,
 	[Alias('Thread')] [string]$ThreadId, # -Thread T-020: the thread a command is about, a feature's (or a card's) with an agent of its own (LEAD.md)
 	[switch]$Answer,  # reply: the note was only a question, and this answers it (no card is kept)
+	[switch]$Done,    # reply: the note was an errand (nothing to test), done now, and this says what was done (no card is kept)
 	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
 $ErrorActionPreference = 'Stop'
@@ -305,7 +306,7 @@ switch ($Command) {
 		if ($t.pending -eq 'plan' -and $t.status -eq 'queued') {
 			if ($t.waiting -eq $ToConductor) { Set-Field $t 'waiting' $ReadIt; Save-Task $t }
 			''
-			"Sort it first (README.md `"Sorting`"). Only a question, with nothing to change: answer it with reply $($t.id) -Answer -Text `"...`", and no card is kept. A small fix: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. A feature (it needs a plan, a decision, or several steps): post its plan (plan -Title ... -Steps ...), then set $($t.id) -Status removed. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
+			"Sort it first (README.md `"Sorting`"). Only a question, with nothing to change: answer it with reply $($t.id) -Answer -Text `"...`", and no card is kept. Something to do that changes nothing in the game, so there's nothing to test (open the lanes, start Studio, push main, run the checks): do it, then reply $($t.id) -Done -Text `"<what you did>`", and no card is kept. A small fix: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. A feature (it needs a plan, a decision, or several steps): post its plan (plan -Title ... -Steps ...), then set $($t.id) -Status removed. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}
 		# The user stepped in on its worker (the card's Pause, Resume, Start again, or its lane and worker): what to do.
 		$stepIn = switch ($t.pending) {
@@ -486,6 +487,18 @@ switch ($Command) {
 			if ($t.kind -notin 'note', 'question' -or $t.status -notin 'queued', 'inbox') { throw "-Answer is for a note that hasn't been started: $($t.id) is $($t.status)." }
 			Set-Field $t 'kind' 'question'
 			Set-Field $t 'type' 'question'
+		}
+		# -Done: an errand (open the lanes, push main): nothing changed in the game, so there's nothing to test or
+		# approve. It's finished as it's reported, in the chat, with no card kept.
+		if ($Done) {
+			if ($Answer) { throw 'Use -Answer or -Done, not both.' }
+			if ($t.kind -in 'plan', 'question' -or $t.status -in 'done', 'removed') { throw "-Done is for a note that's an errand: $($t.id) is a $($t.kind) and $($t.status)." }
+			if ($t.branch) { throw "$($t.id) has a branch ($($t.branch)): something was changed, so it's tested. Hand it back with set -Status ready." }
+			Set-Field $t 'kind' 'errand'
+			Set-Field $t 'summary' $Text
+			Set-Status $t 'done'
+			Set-Field $t 'pending' ''
+			Set-Field $t 'waiting' ''
 		}
 		# A question is answered in the chat, where it was asked: the answer is all there is to it, so it's finished,
 		# with no card to tick off. (The user can ask more, or make it a task.) On any other card the answer goes in

@@ -316,6 +316,18 @@ try {
 		Assert-Equal "$($t.kind) $($t.pending)" 'note plan' 'and it can be made a task after all'
 	}
 
+	Test 'an errand is done and said, with nothing to approve' {
+		$n = Api '/api/note' @{ text = 'open 4 lanes and main'; type = '' }
+		Rocco set $n.id -Title 'Open Main and 4 lanes' -Status working | Out-Null
+		Rocco reply $n.id -Done -Text 'Main and lanes 1 to 4 are open in Studio.' | Out-Null
+		$t = Read-TaskJson $n.id
+		Assert-Equal "$($t.kind) $($t.status) $($t.pending)" 'errand done ' 'finished, waiting on nobody'
+		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'said' -and $_.task -eq $n.id }).Count 1 'what was done is in the chat'
+		$b = @(Rocco new -Title 'A change with a branch')[0]
+		Rocco set $b -Status working -Branch 'agent/a-change' | Out-Null
+		Assert-Throws { Rocco reply $b -Done -Text 'Done.' } 'has a branch' 'a change is tested, not just done'
+	}
+
 	Test 'docs: the template''s files stay locked however the path is written' {
 		Assert ([bool](Api '/api/docs/file?path=docs/workflow/CONDUCTOR.md').locked) 'locked by its plain path'
 		Assert ([bool](Api '/api/docs/file?path=docs//workflow/CONDUCTOR.md').locked) 'locked with a doubled slash'

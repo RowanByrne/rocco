@@ -44,7 +44,8 @@ const work = status => of(status).filter(t => !isPlan(t) && !isQuestion(t) && in
 // the chat and keeps no card: rocco.ps1 reply -Answer. These are the ones it's still on.)
 const openQuestions = () => state.tasks.filter(t => isQuestion(t) && t.status !== 'done' && t.status !== 'removed' && inView(t));
 const answered = () => openQuestions().filter(t => t.status === 'ready');
-const approvedWork = () => approvedToday().filter(t => !isPlan(t) && !isQuestion(t));
+// An errand (open the lanes, push main) was done, not approved: it's said in the chat, and not counted here.
+const approvedWork = () => approvedToday().filter(t => !isPlan(t) && !isQuestion(t) && t.kind !== 'errand');
 const queue = () => work('queued').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id));
 const plansToApprove = () => state.tasks.filter(t => isPlan(t) && t.status === 'inbox' && inView(t));
 // Features under way: not one whose every step was deleted, which has nothing left to show (planCount, below).
@@ -328,7 +329,7 @@ function whereLine(t) {
     case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
     case 'queued': return t.held ? 'Paused' : waitText(t) || 'Queued';
     case 'inbox': return `Rocco spotted this. Queue it to have it done.`;
-    case 'done': return `Approved ${dayAt(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
+    case 'done': return `${t.kind === 'errand' ? 'Done' : 'Approved'} ${dayAt(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
     case 'removed': return `Deleted${t.updated ? ` ${dayAt(t.updated)}` : ''}`;
   }
   return '';

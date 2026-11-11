@@ -85,37 +85,41 @@
 .h-qa { margin: 4px 0 4px; padding-left: 10px; border-left: 2px solid rgba(var(--amber-rgb), .6); font-weight: 500; white-space: pre-wrap; }
 .h-qa.open { font-weight: 400; color: var(--text-3); font-style: italic; border-left-color: var(--stroke-2); }
 .h-pic { display: block; width: 120px; aspect-ratio: 16 / 10; margin: 4px 0; object-fit: cover; border-radius: 7px; background: #000; }
-/* A card, small, where the chat names it */
-.tchip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; height: 26px; padding: 0 9px; border-radius: 7px; font-size: 12.5px;
-  color: var(--text); background: var(--panel); border: 1px solid var(--stroke-2); transition: border-color .15s, background .15s; }
-.tchip:hover { background: var(--panel-2); border-color: color-mix(in srgb, var(--c) 55%, var(--stroke-2)); }
+/* A card, where the chat names it: its name as a link, with where it is now. No box: it reads as part of the text. */
+.tchip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 0; border: 0; background: none; font-size: 13px; color: var(--text-2); }
+.tchip .sdot { width: 6px; height: 6px; }
+.tchip:hover .tchip-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .tchip-name { min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tchip-state { flex: none; font-size: 11.5px; color: var(--c); }
-/* One line: something that happened to a card, or the agent's steps between two messages */
+.tchip-state { flex: none; font-size: 12px; color: var(--c); }
+.h-chips { margin-top: 3px; }
+/* What happened between two messages, as plain lines under the agent's name, the way a coding agent's transcript
+   shows its tool calls: a dot and a line each, the time only on hover. */
 .h-event, .h-steps { margin-left: 44px; }
-.h-event { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 30px; padding: 2px 10px; border: 1px solid var(--stroke); border-radius: 7px; font-size: 12.5px; color: var(--text-2); }
-.h-event.card { cursor: pointer; }
-.h-event.card:hover { border-color: var(--stroke-2); background: var(--panel-2); color: var(--text); }
-.h-event.mine { padding-left: 0; border-color: transparent; }
-.h-event.mine .h-dot { display: none; }
+.h-event { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 24px; font-size: 13px; color: var(--text-2); }
+.h-event.of-card { cursor: pointer; }
+.h-event.of-card:hover .h-line { color: var(--text); }
+.h-event.mine .h-dot { background: var(--text-3); opacity: .5; }
 .h-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.h-event.mine .h-line { flex: none; }
-.h-event .h-at { margin-left: auto; }
-.h-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--c, var(--text-3)); }
+.h-event.mine .h-line { flex: none; color: var(--text-3); }
+.h-event .h-at, .h-steps-head .h-at { margin-left: auto; opacity: 0; transition: opacity .15s; }
+.h-event:hover .h-at, .h-steps-head:hover .h-at { opacity: 1; }
+.h-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--c, var(--text-3)); }
 .h-event.perm .h-dot { background: var(--amber); }
-.h-verdict { flex: none; padding: 0 7px; border-radius: 99px; font-size: 11px; line-height: 18px; background: var(--glass-2); color: var(--text-3); }
-.h-verdict.v-yes { color: var(--green-text); background: rgba(var(--green-rgb), .12); }
-.h-verdict.v-no { color: var(--red-text); background: rgba(var(--red-rgb), .12); }
-.h-steps { font-size: 12.5px; color: var(--text-3); }
-.h-steps-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 2px 10px; border: 1px solid var(--stroke); border-radius: 7px; background: none;
-  color: var(--text-3); font-size: 12.5px; text-align: left; }
-.h-steps-head:hover { border-color: var(--stroke-2); background: var(--panel-2); color: var(--text-2); }
-.h-steps-head svg { flex: none; transition: transform .2s; }
+.h-verdict { flex: none; font-size: 12px; color: var(--text-3); }
+.h-verdict.v-yes { color: var(--green-text); }
+.h-verdict.v-no { color: var(--red-text); }
+.h-steps { font-size: 13px; color: var(--text-3); }
+.h-steps-head { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 24px; padding: 0; border: 0; background: none; color: var(--text-3); font-size: 13px; text-align: left; }
+.h-steps-head:hover { color: var(--text-2); }
+.h-steps-head svg { flex: none; width: 10px; margin: 0 -2px; transition: transform .2s; }
 .h-steps.open .h-steps-head svg { transform: rotate(90deg); }
 .h-steps-head > span:nth-child(2) { flex: none; }
-.h-steps-last { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
-.h-steps ul { list-style: none; margin: 4px 0 4px 14px; padding: 0 0 0 12px; border-left: 1px solid var(--stroke-2); }
+.h-steps-last { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-steps ul { list-style: none; margin: 0 0 4px 2px; padding: 0 0 0 16px; border-left: 1px solid var(--stroke-2); }
 .h-steps li { display: flex; gap: 10px; padding: 1px 0; color: var(--text-2); }
+.h-steps li .h-at { flex: none; opacity: .8; }
+/* A message after a run of lines gets its room back */
+:is(.h-event, .h-steps) + .h-msg { margin-top: 6px; }
 
 /* Under the chat: the open questions, the note box, the status line */
 .wb-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }

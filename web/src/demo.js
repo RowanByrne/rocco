@@ -128,6 +128,7 @@ function seed(id) {
           { title: 'Level bar and evolve effect in the pet menu', lane: 7, tier: 'standard' }],
         log: [{ who: 'conductor', at: ago(3), text: 'Plan ready: three tasks, on a feature branch.' }] },
 
+      { ...base, id: 'T-034', status: 'done', kind: 'errand', doneAt: ago(3), title: 'Open Main and 4 lanes', note: 'startup 4 lanes and main', summary: 'Main and lanes 1 to 4 are open in Studio, each syncing.' },
       { ...base, id: 'T-035', status: 'done', type: 'bug', doneAt: ago(80), title: 'Spawn faces a wall', note: 'you spawn facing a wall', summary: 'Spawn faces the plaza now.' },
       { ...base, id: 'T-036', status: 'done', type: 'bug', doneAt: ago(65), title: "Music toggle doesn't save", note: "music toggle doesn't save", summary: 'Saved with player data now.' },
       { ...base, id: 'T-037', status: 'done', type: 'tweak', doneAt: ago(50), title: 'Tutorial arrow points at old shop', note: 'tutorial arrow points at the old shop spot', summary: 'Arrow finds the shop by tag.' },
@@ -185,6 +186,9 @@ function sampleThread() {
     { id: 'C-000016', at: at(20), who: 'conductor', kind: 'said', text: 'Watching the board.' },
     { id: 'C-000017', at: at(16), who: 'conductor', kind: 'said', text: 'Watching.' },
     { id: 'C-000011', at: at(4), who: 'rocco', kind: 'event', text: 'Ready to test: Daily reward claimable twice after rejoin', task: 'T-038' },
+    // An errand: done and said, with no card to approve (rocco.ps1 reply -Done).
+    { id: 'C-000021', at: at(4), who: 'you', kind: 'sent', act: 'note', task: 'T-034', title: 'Open Main and 4 lanes', text: 'startup 4 lanes and main' },
+    { id: 'C-000022', at: at(3), who: 'conductor', kind: 'said', re: 'Open Main and 4 lanes', task: 'T-034', text: 'Main and lanes 1 to 4 are open in Studio, each syncing.' },
     // Concepts to pick from: each option has its picture (server/tasks.ps1 Add-Pictures).
     { id: 'C-000014', at: at(3), who: 'conductor', kind: 'asked', via: 'hook', questions: [
       { text: 'Which shop interior should the room be built from? The four concepts are in ..\\art\\generated\\shop-concept\\.', header: 'Shop look', multi: false, images: [],

@@ -297,7 +297,7 @@ function Request-Conductor {
 		"Handle anything else waiting on you too (rocco.ps1 list -Pending). $(Get-WatchText)"
 	} else { "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $(Get-WatchText)" }
 	# What Rocco itself adds to the conductor's job, whatever the game's template says (README.md "Sorting").
-	$prompt += ' Sort each new note first, as ..\..\_tools\rocco\README.md "Sorting" says: answer a question, do a small fix, or post a plan for a feature. A feature the user approves is built by an agent of its own, which Rocco opens: its tasks never wait on you, except to be merged.'
+	$prompt += ' Sort each new note first, as ..\..\_tools\rocco\README.md "Sorting" says: answer a question, just do an errand (nothing to test, no card kept), do a small fix, or post a plan for a feature. A feature the user approves is built by an agent of its own, which Rocco opens: its tasks never wait on you, except to be merged.'
 	try { Open-Conductor $prompt | Out-Null; $agent.name } catch { '' }
 }
 
