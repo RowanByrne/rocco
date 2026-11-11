@@ -10,7 +10,7 @@ import { askPermission } from '../notify.js';
 import { voiceSupported } from '../voice.js';
 import { toast } from '../ui/toast.js';
 import { state } from '../state.js';
-import { chooseAgent } from '../agent.js';
+import { chooseAgent, chooseModel, chooseEffort, modelName, effortName } from '../agent.js';
 import { resetNav } from '../sidebar.js';
 import { openAccounts } from '../dialogs/onboarding.js';
 import { api } from '../api.js';
@@ -42,7 +42,7 @@ function agents() {
   if (!a) return nothing;
   return html`<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span><span class="sp"></span><button class="mini" data-accounts>Your accounts</button></div>${
     a.agents.map(x => html`<button class="set-row agent-row${x.id === a.id ? ' on' : ''}" data-agent=${x.id} role="radio" aria-checked=${x.id === a.id ? 'true' : 'false'}><span class="radio"></span><span class="set-text"><span class="set-title">${x.name}</span><span class="set-sub">${x.installed ? 'Installed' : 'Not installed on this PC (Connections)'}</span></span></button>`)
-  }${model(a)}${
+  }${model(a)}${effort(a)}${
     row('Features get an agent of their own', `A feature you approve is built by its own ${a.short} session, in a lane it keeps, and you talk to it on its own tab above the chat. Off: the conductor builds it with its workers, and everything goes through the conductor.`,
       html`<button class="switch" role="switch" aria-checked=${a.leads !== false ? 'true' : 'false'} data-leads aria-label="Features get an agent of their own"><span></span></button>`)
   }<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
@@ -57,14 +57,19 @@ function model(a) {
   const listed = (a.models || []).includes(a.model), custom = typingModel || (!!a.model && !listed);
   return row("The conductor's model", `What ${a.name} runs on when Rocco opens it as the conductor. Its own default is whatever it's set to use by itself. A change applies to the next conductor Rocco opens.`,
     html`<span class="set-model"><select class="input set-select" data-model aria-label="The conductor's model"><option value="" ?selected=${!a.model && !custom}>${a.short}'s default</option>${
-      (a.models || []).map(m => html`<option value=${m} ?selected=${a.model === m && !custom}>${m}</option>`)}<option value=${OTHER} ?selected=${custom}>Another…</option></select>${
+      (a.models || []).map(m => html`<option value=${m} ?selected=${a.model === m && !custom}>${modelName(m)}</option>`)}<option value=${OTHER} ?selected=${custom}>Another…</option></select>${
       custom ? html`<input class="input set-select" data-model-name placeholder="A model's name" aria-label="A model's name" .value=${listed ? '' : a.model || ''}>` : nothing}</span>`);
 }
+
+// How hard it thinks, for an agent that takes an effort level (also by the note box's Send button).
+const effort = a => !a.takesEffort ? nothing : row("The conductor's effort", `How hard ${a.name} thinks when Rocco opens it. More is slower and uses more of your plan. Applies to the next one Rocco opens.`,
+  html`<select class="input set-select" data-effort aria-label="The conductor's effort"><option value="" ?selected=${!a.effort}>${a.short}'s default</option>${
+    (a.efforts || []).map(e => html`<option value=${e} ?selected=${a.effort === e}>${effortName(e)}</option>`)}</select>`);
 
 function setModel(name) {
   once('model', async () => {
     try {
-      state.agent = await api.setAgentModel(name);
+      await chooseModel(name);
       typingModel = false;
       toast(name ? `The next conductor opens on ${name}` : `The next conductor opens on ${state.agent.short}'s default`);
     } catch (err) { toast(`Couldn't set the model: ${err.message}`, 'var(--red)'); }
@@ -153,6 +158,11 @@ export function initSettings() {
       if (e.target.value === OTHER) { typingModel = true; renderSettings(); body.querySelector('[data-model-name]')?.focus(); }
       else setModel(e.target.value);
     } else if ('modelName' in e.target.dataset && e.target.value.trim()) setModel(e.target.value.trim());
+    else if ('effort' in e.target.dataset) once('effort', async () => {
+      try { await chooseEffort(e.target.value); toast(e.target.value ? `The next conductor opens at ${effortName(e.target.value).toLowerCase()} effort` : `The next conductor opens at ${state.agent.short}'s default effort`); }
+      catch (err) { toast(`Couldn't set the effort: ${err.message}`, 'var(--red)'); }
+      renderSettings();
+    });
   });
   // Recording a binding: the next combo pressed becomes it.
   document.addEventListener('keydown', e => {

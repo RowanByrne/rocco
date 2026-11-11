@@ -98,6 +98,7 @@ function Get-Conductor {
 		# session file Rocco can read.
 		if ($value.state -ne 'none') {
 			if ($c.PSObject.Properties['model'] -and $c.model) { $value | Add-Member -NotePropertyName model -NotePropertyValue "$($c.model)" }
+			if ($c.PSObject.Properties['effort'] -and $c.effort) { $value | Add-Member -NotePropertyName effort -NotePropertyValue "$($c.effort)" }
 			if ($c.PSObject.Properties['transcript'] -and $c.transcript) { $value | Add-Member -NotePropertyName usage -NotePropertyValue (Get-SessionUsage ([string]$c.transcript)) }
 		}
 	}
@@ -117,12 +118,16 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
 	# The model the user picked for the conductor in Settings, for an agent that takes one on its command line.
 	if ($agent.model -and $Agents[$agent.id].model) { $extra += $Agents[$agent.id].model, $agent.model }
+	# And how hard it thinks.
+	$effort = if ($agent.effort -and $Agents[$agent.id].effort) { $agent.effort } else { '' }
+	if ($effort) { $extra += $Agents[$agent.id].effort, $effort }
 	if (-not $dir) { $dir = $RepoDir }
 	if (-not $as) { $as = "conductor on $(Split-Path $Root -Leaf)" }
 	$window = Start-AgentWindow $dir $prompt "$($agent.name), $as" $extra @{ ROCCO_THREAD = "$($script:ThreadId)" }
 	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now)
-		hooks = $hooks; opened = (Now); model = "$($agent.model)"; transcript = ''; session = '' })
-	Add-Event "Rocco opened $($agent.name) $(if ($script:ThreadId) { 'on this' } else { 'as the conductor' })$(if ($agent.model -and $Agents[$agent.id].model) { " ($($agent.model))" })"
+		hooks = $hooks; opened = (Now); model = "$($agent.model)"; effort = $effort; transcript = ''; session = '' })
+	$on = @($(if ($agent.model -and $Agents[$agent.id].model) { $agent.model }), $effort) | Where-Object { $_ }
+	Add-Event "Rocco opened $($agent.name) $(if ($script:ThreadId) { 'on this' } else { 'as the conductor' })$(if ($on) { " ($($on -join ', '))" })"
 	$agent
 }
 

@@ -161,6 +161,11 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Set-AgentModel ([string](Read-Json $req).model)) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	# How hard the next conductor thinks (the note box's model picker, Settings).
+	if ($path -eq '/api/agent/effort') {
+		try { Send-Json $ctx (Set-AgentEffort ([string](Read-Json $req).effort)) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
 	# Whether a feature the user approves gets an agent of its own (Settings, leads.ps1).
 	if ($path -eq '/api/agent/leads') { Send-Json $ctx (Set-LeadsOn ([bool](Read-Json $req).on)); return }
 	# A background job the user gave up on (a new project, opening lanes): stopped, with whatever it started.

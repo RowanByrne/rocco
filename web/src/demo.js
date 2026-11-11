@@ -651,8 +651,16 @@ const models = {};
 let leadsOn = true;
 export async function agent() {
   const a = AGENTS.find(x => x.id === agentId), takes = a.id === 'claude';
-  return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] || '', takesModel: takes, models: takes ? ['fable', 'opus', 'sonnet', 'haiku', 'opusplan'] : [],
+  return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] ?? (takes ? 'claude-opus-5-5' : ''), takesModel: takes,
+    models: takes ? ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'opusplan'] : [],
+    effort: efforts[a.id] ?? (takes ? 'high' : ''), takesEffort: takes, efforts: takes ? ['low', 'medium', 'high', 'xhigh', 'max'] : [],
     leads: leadsOn, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+}
+const efforts = {};
+export async function setAgentEffort(effort) {
+  if (effort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) throw new Error('Effort is one of: low, medium, high, xhigh, max.');
+  efforts[agentId] = effort;
+  return agent();
 }
 export async function setLeads(on) { leadsOn = !!on; return agent(); }
 export async function setAgent(id) { agentId = id; return agent(); }

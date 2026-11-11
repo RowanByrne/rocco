@@ -9,7 +9,9 @@ $Agents = [ordered]@{
 	# (any other name the agent accepts can be typed).
 	claude = @{ name = 'Claude Code'; short = 'Claude'; exe = 'claude'; prompt = @(); mcp = '.claude.json'; studio = '"Roblox_Studio"\s*:\s*\{'
 		plan = 'A Claude Pro or Max plan, or Anthropic API credit'; install = 'claude-install'; login = 'claude-login'; hooks = '--settings'
-		model = '--model'; models = @('fable', 'opus', 'sonnet', 'haiku', 'opusplan') }
+		model = '--model'; models = @('claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'opusplan')
+		# effort: the flag that sets how hard it thinks, and the levels it takes.
+		effort = '--effort'; efforts = @('low', 'medium', 'high', 'xhigh', 'max') }
 	codex  = @{ name = 'Codex'; short = 'Codex'; exe = 'codex'; prompt = @(); mcp = '.codex\config.toml'; studio = '\[mcp_servers\.Roblox_Studio\]'
 		plan = 'A ChatGPT plan, or OpenAI API credit'; install = 'codex-update'; login = 'codex-login' }
 	gemini = @{ name = 'Gemini CLI'; short = 'Gemini'; exe = 'gemini'; prompt = @('-i'); mcp = '.gemini\settings.json'; studio = '"Roblox_Studio"\s*:\s*\{'
@@ -44,9 +46,12 @@ function Get-Agent {
 		$id = if ($Agents.Contains($chosen)) { $chosen } elseif ($installed) { $installed[0] } else { 'claude' }
 		# The conductor's model, kept per agent: '' leaves it to the agent's own default.
 		$model = if ($settings.PSObject.Properties['models'] -and $settings.models) { "$($settings.models.$id)" } else { '' }
+		# Its effort, kept per agent the same way: '' leaves it to the agent.
+		$effort = if ($settings.PSObject.Properties['efforts'] -and $settings.efforts) { "$($settings.efforts.$id)" } else { '' }
 		$script:AgentCache = @{ Read = Get-Date; Value = [pscustomobject]@{
 			id = $id; name = $Agents[$id].name; short = $Agents[$id].short; installed = ($installed -contains $id); chosen = [bool]$chosen
 			model = $model; takesModel = [bool]$Agents[$id].model; models = @($Agents[$id].models | Where-Object { $_ })
+			effort = $effort; takesEffort = [bool]$Agents[$id].effort; efforts = @($Agents[$id].efforts | Where-Object { $_ })
 			# Whether a feature the user approves gets an agent of its own (leads.ps1): on unless turned off here.
 			leads = -not ($settings.PSObject.Properties['leads'] -and $settings.leads -eq $false)
 			agents = @($Agents.Keys | ForEach-Object { [pscustomobject]@{ id = $_; name = $Agents[$_].name; short = $Agents[$_].short; installed = ($installed -contains $_) } })
@@ -80,6 +85,21 @@ function Set-AgentModel([string]$model) {
 	$models = if ($settings.PSObject.Properties['models'] -and $settings.models) { $settings.models } else { [pscustomobject]@{} }
 	$models | Add-Member -Force -NotePropertyName $agent.id -NotePropertyValue $model
 	$settings | Add-Member -Force -NotePropertyName models -NotePropertyValue $models
+	Save-RoccoSettings $settings
+	Get-Agent
+}
+
+# How hard the conductor thinks, for an agent that takes an effort level on its command line ('' for its own default).
+# Like the model, it applies to the next conductor (or feature agent) Rocco opens.
+function Set-AgentEffort([string]$effort) {
+	$agent = Get-Agent
+	$effort = "$effort".Trim().ToLower()
+	if (-not $Agents[$agent.id].effort) { throw "$($agent.name) is opened at its own effort: Rocco can't pick one for it." }
+	if ($effort -and $effort -notin $Agents[$agent.id].efforts) { throw "Effort is one of: $($Agents[$agent.id].efforts -join ', ')." }
+	$settings = Read-RoccoSettings
+	$efforts = if ($settings.PSObject.Properties['efforts'] -and $settings.efforts) { $settings.efforts } else { [pscustomobject]@{} }
+	$efforts | Add-Member -Force -NotePropertyName $agent.id -NotePropertyValue $effort
+	$settings | Add-Member -Force -NotePropertyName efforts -NotePropertyValue $efforts
 	Save-RoccoSettings $settings
 	Get-Agent
 }

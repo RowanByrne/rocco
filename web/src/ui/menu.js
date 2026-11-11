@@ -10,21 +10,22 @@ export function closeMenus() {
 }
 
 // Opens the menu, or closes it if it was already open. content: its template. up: it grows upward from the button.
-export function openMenu(menu, anchor, content, { up = false } = {}) {
+// end: its right edge lines up with the button's (a button at the right of the page, not in the sidebar).
+export function openMenu(menu, anchor, content, { up = false, end = false } = {}) {
   const wasOpen = menu.classList.contains('open');
   closeMenus();
   if (wasOpen) return;
   render(content, menu);
-  place(menu, anchor, up);
+  place(menu, anchor, up, end);
   menu.classList.add('open');
   anchor.setAttribute('aria-expanded', 'true');
 }
 
 // Below or above the button; beside it when the sidebar is collapsed to icons.
-function place(menu, anchor, up) {
+function place(menu, anchor, up, end = false) {
   const r = anchor.getBoundingClientRect();
-  const beside = document.querySelector('.app').classList.contains('collapsed');
-  menu.style.left = (beside ? r.right + 8 : r.left) + 'px';
+  const beside = !end && document.querySelector('.app').classList.contains('collapsed');
+  menu.style.left = (end ? Math.max(8, r.right - menu.offsetWidth) : beside ? r.right + 8 : r.left) + 'px';
   if (up) {
     menu.style.top = '';
     menu.style.bottom = (innerHeight - (beside ? r.bottom : r.top - 6)) + 'px';

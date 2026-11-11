@@ -16,6 +16,7 @@ import { initProse } from './prose.js';
 import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType } from './views/composer.js';
 import { initConductor, renderConductor, resetConductor } from './views/conductor.js';
 import { initMascot } from './mascot.js';
+import { initModelPick } from './views/modelpick.js';
 import { initConnections, renderConnections, loadConnections } from './views/connections.js';
 import { initHistory, renderHistory, loadHistory } from './views/history.js';
 import { initDocs, renderDocs, loadDocs, resetDocs, hasDrafts } from './views/docs.js';
@@ -142,6 +143,7 @@ document.addEventListener('keydown', e => {
   initComposer();
   initConductor();
   renderConductor();
+  initModelPick();
   initMascot();
   initConnections();
   initHistory();

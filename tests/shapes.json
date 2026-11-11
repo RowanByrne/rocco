@@ -22,7 +22,7 @@
   "agent": {
     "path": "/api/agent",
     "demo": "agent",
-    "fields": { ".": ["id", "name", "short", "installed", "agents", "model", "takesModel", "models", "leads"], "agents": ["id", "name", "short", "installed"] }
+    "fields": { ".": ["id", "name", "short", "installed", "agents", "model", "takesModel", "models", "effort", "takesEffort", "efforts", "leads"], "agents": ["id", "name", "short", "installed"] }
   },
   "thread": {
     "path": "/api/conductor/thread",

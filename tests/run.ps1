@@ -316,6 +316,18 @@ try {
 		Assert-Equal "$($t.kind) $($t.pending)" 'note plan' 'and it can be made a task after all'
 	}
 
+	Test 'the conductor''s model and effort are kept, and a wrong effort is refused' {
+		Api '/api/agent' @{ id = 'claude' } | Out-Null
+		$a = Api '/api/agent/model' @{ model = 'claude-opus-5-5' }
+		Assert-Equal $a.model 'claude-opus-5-5' 'model'
+		$a = Api '/api/agent/effort' @{ effort = 'high' }
+		Assert-Equal "$($a.effort) $($a.takesEffort)" 'high True' 'effort'
+		Assert-Throws { Api '/api/agent/effort' @{ effort = 'turbo' } } 'Effort is one of' 'a level it does not take'
+		Assert-Equal (Api '/api/agent').effort 'high' 'still high after a refused change'
+		Api '/api/agent/effort' @{ effort = '' } | Out-Null
+		Api '/api/agent/model' @{ model = '' } | Out-Null
+	}
+
 	Test 'an errand is done and said, with nothing to approve' {
 		$n = Api '/api/note' @{ text = 'open 4 lanes and main'; type = '' }
 		Rocco set $n.id -Title 'Open Main and 4 lanes' -Status working | Out-Null
