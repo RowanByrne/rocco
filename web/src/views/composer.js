@@ -27,7 +27,6 @@ const TYPES = [
   ['question', 'Ask', 'Just a question: answered here, with no card', 'What do you want to know?'],
   ['feature', 'Feature', 'Something bigger: Rocco plans it first, then it gets a thread of its own', 'Describe the feature'],
 ];
-const CAMERA = lineIcon('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/>', 16, 1.9);
 const STOP = lineIcon('<rect x="7" y="7" width="10" height="10" rx="2"/>', 16, 1.9);
 const MIC = lineIcon('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', 16, 1.9);
 let drafts = []; // screenshots going with the next note: { file, url }
@@ -51,7 +50,9 @@ function setText(value) {
 export function renderComposerTools() {
   render(capturing()
     ? html`<span class="cap on"><button type="button" class="tool-label" data-capture title="Capture Studio${hint('capture')}"><i></i>Capture</button><button type="button" class="cap-stop" data-capture-stop title="Stop sharing Studio" aria-label="Stop sharing Studio">×</button></span>`
-    : html`<button type="button" class="tool-label" data-capture title="Pick Studio's window once, then capture it any time${hint('capture')}">${CAMERA}Capture Studio</button>`, $('#captureSlot'));
+    // No button for it in the note box: capturing starts from its hotkey or the palette, and only while Studio is
+    // shared does the box say so, with a way to stop.
+    : nothing, $('#captureSlot'));
   // Something for one message, card or thread isn't sorted: it has no kind to pick.
   const mode = noteMode(), kind = TYPES.find(t => t[0] === type) || TYPES[0];
   render(mode ? nothing : TYPES.map(([id, label, title]) => html`<button type="button" class="type${type === id ? ' on' : ''}" data-type=${id} role="radio" aria-checked=${type === id ? 'true' : 'false'} title="${title}${hint('type')}">${label}</button>`), $('#types'));
