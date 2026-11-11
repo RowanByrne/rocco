@@ -118,14 +118,17 @@ function Get-OtherProjects([string]$current) {
 function Get-State([string]$projectId) {
 	$p = Find-Project $projectId
 	$cutoff = (Get-Date).AddDays(-$BoardKeepsDays)
+	# Approved more than a few days ago: in the archive (tasks.ps1 Get-Archive), not on the board.
+	$tasks = @(Get-Tasks | Where-Object { $_.status -ne 'removed' -and ($_.status -ne 'done' -or -not $_.doneAt -or [datetime]$_.doneAt -gt $cutoff) })
 	[pscustomobject]@{
 		rocco = $RoccoVersion # the app reloads when this changes: Rocco updated itself
 		project = [pscustomobject]@{ id = $p.id; name = $p.name; phase = $p.phase; template = $p.template }
 		lanes = Get-Lanes
 		conductor = Get-Conductor
+		# The threads with an agent of their own: a feature's, or a card's (leads.ps1). Each with its agent's state.
+		leads = @(Get-LeadsState $tasks)
 		main = Get-Main
-		# Approved more than a few days ago: in the archive (tasks.ps1 Get-Archive), not on the board.
-		tasks = @(Get-Tasks | Where-Object { $_.status -ne 'removed' -and ($_.status -ne 'done' -or -not $_.doneAt -or [datetime]$_.doneAt -gt $cutoff) })
+		tasks = $tasks
 		others = @(Get-OtherProjects $p.id)
 	}
 }

@@ -2,7 +2,10 @@
 # running from <Game>\rocco\conductor.json: written when Rocco opens one, and kept fresh by `rocco.ps1 wait` while it
 # watches the board. When the user hands over work and no conductor is running, Rocco opens one.
 
-function Get-ConductorFile { Join-Path $Root 'rocco\conductor.json' }
+# A feature's own agent (leads.ps1) is tracked the same way, in its thread's folder: everything here works on the
+# thread in use (core.ps1 Use-Thread), the conductor's when none is named.
+function Get-ConductorFile { if ($script:ThreadId) { Join-Path (Get-ThreadDir) 'agent.json' } else { Join-Path $Root 'rocco\conductor.json' } }
+function Get-ThreadKey { "$Root|$($script:ThreadId)" }
 
 function Read-Conductor {
 	$file = Get-ConductorFile
@@ -57,7 +60,7 @@ $script:ConductorCache = @{}
 $script:HookHeard = @{}   # project -> when a hook of its conductor, or of one of its workers, last reached Rocco
 $StalledMinutes = 5
 function Get-Conductor {
-	$hit = $script:ConductorCache[$Root]
+	$hit = $script:ConductorCache[(Get-ThreadKey)]
 	if ($hit -and ((Get-Date) - $hit.Read).TotalSeconds -lt 3) { return $hit.Value }
 	$c = Read-Conductor
 	$thread = Get-ConductorThread
@@ -84,7 +87,7 @@ function Get-Conductor {
 		# stopped mid-way (its Stop hook lets a turn end after three tries, or it's asking in its own window). The app
 		# says so and offers its window, or a restart. The user decides: a long quiet job looks the same from here.
 		if ($value.state -eq 'busy') {
-			$heard = @(@($thread.heard, $script:HookHeard[$Root], [datetime]$c.at) | Where-Object { $_ } | Sort-Object)[-1]
+			$heard = @(@($thread.heard, $script:HookHeard[(Get-ThreadKey)], [datetime]$c.at) | Where-Object { $_ } | Sort-Object)[-1]
 			$quiet = ((Get-Date) - $heard).TotalMinutes
 			$waiting = @(Get-PendingTasks).Count + [int]$thread.pending
 			$value | Add-Member -NotePropertyName stalled -NotePropertyValue ($quiet -ge $StalledMinutes -and $waiting -gt 0)
@@ -98,13 +101,15 @@ function Get-Conductor {
 			if ($c.PSObject.Properties['transcript'] -and $c.transcript) { $value | Add-Member -NotePropertyName usage -NotePropertyValue (Get-SessionUsage ([string]$c.transcript)) }
 		}
 	}
-	$script:ConductorCache[$Root] = @{ Read = Get-Date; Value = $value }
+	$script:ConductorCache[(Get-ThreadKey)] = @{ Read = Get-Date; Value = $value }
 	$value
 }
 
 # The user's agent, opened in its own window as this project's conductor, on a first prompt. An agent that takes
 # Rocco's hooks (agents.ps1) gets them, so Rocco shows what it does and the user answers it in Rocco. Returns the agent.
-function Open-Conductor([string]$prompt) {
+# $dir and $as: for a feature's own agent (leads.ps1), the lane it works in and what it's opened as. Its window carries
+# ROCCO_THREAD, so every Rocco command run in it is about its own thread without having to say so.
+function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	$agent = Get-Agent
 	if (-not $agent.installed) { throw "$($agent.name) isn't installed on this PC (Connections)." }
 	$extra = @()
@@ -112,10 +117,12 @@ function Open-Conductor([string]$prompt) {
 	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
 	# The model the user picked for the conductor in Settings, for an agent that takes one on its command line.
 	if ($agent.model -and $Agents[$agent.id].model) { $extra += $Agents[$agent.id].model, $agent.model }
-	$window = Start-AgentWindow $RepoDir $prompt "$($agent.name), conductor on $(Split-Path $Root -Leaf)" $extra
+	if (-not $dir) { $dir = $RepoDir }
+	if (-not $as) { $as = "conductor on $(Split-Path $Root -Leaf)" }
+	$window = Start-AgentWindow $dir $prompt "$($agent.name), $as" $extra @{ ROCCO_THREAD = "$($script:ThreadId)" }
 	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now)
 		hooks = $hooks; opened = (Now); model = "$($agent.model)"; transcript = ''; session = '' })
-	Add-Event "Rocco opened $($agent.name) as the conductor$(if ($agent.model -and $Agents[$agent.id].model) { " ($($agent.model))" })"
+	Add-Event "Rocco opened $($agent.name) $(if ($script:ThreadId) { 'on this' } else { 'as the conductor' })$(if ($agent.model -and $Agents[$agent.id].model) { " ($($agent.model))" })"
 	$agent
 }
 
@@ -163,13 +170,16 @@ function Test-HttpHooks {
 function Write-ConductorHooks {
 	$id = Split-Path $Root -Leaf
 	$exe = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File'
-	$wait = { param($hook) "$exe `"$((Join-Path $AppDir 'rocco.ps1').Replace('\', '/'))`" hook $hook -Project `"$id`"" }
+	# A feature's own agent: its hooks name its thread, so its questions and steps show in that feature's chat.
+	$feature = if ($script:ThreadId) { " -Thread $($script:ThreadId)" } else { '' }
+	$t = if ($script:ThreadId) { "&t=$($script:ThreadId)" } else { '' }
+	$wait = { param($hook) "$exe `"$((Join-Path $AppDir 'rocco.ps1').Replace('\', '/'))`" hook $hook -Project `"$id`"$feature" }
 	$command = { param($text) [ordered]@{ type = 'command'; command = $text; timeout = $HookWait + 120 } }
 	$post = if (Test-HttpHooks) {
-		{ param($event) [ordered]@{ type = 'http'; url = "http://localhost:$Port/api/conductor/hook?p=$([uri]::EscapeDataString($id))&e=$event"; headers = [ordered]@{ 'X-Rocco' = '1' }; timeout = 3 } }
+		{ param($event) [ordered]@{ type = 'http'; url = "http://localhost:$Port/api/conductor/hook?p=$([uri]::EscapeDataString($id))&e=$event$t"; headers = [ordered]@{ 'X-Rocco' = '1' }; timeout = 3 } }
 	} else {
 		# A Claude Code from before http hooks: the same posts, made by a small script in the background.
-		{ param($event) [ordered]@{ type = 'command'; command = "$exe `"$((Join-Path $AppDir 'server\hook-post.ps1').Replace('\', '/'))`" -Event $event -Project `"$id`" -Port $Port"; async = $true } }
+		{ param($event) [ordered]@{ type = 'command'; command = "$exe `"$((Join-Path $AppDir 'server\hook-post.ps1').Replace('\', '/'))`" -Event $event -Project `"$id`" -Port $Port$feature"; async = $true } }
 	}
 	$settings = [ordered]@{ hooks = [ordered]@{
 		PermissionRequest = @([ordered]@{ hooks = @(& $command (& $wait 'permission')) })
@@ -196,7 +206,7 @@ $NotTyped = '^\s*<[a-z]+(-[a-z]+)+[\s>]'
 # window. Its workers' steps are left out (their cards show them), but a worker's hooks still say it's alive, and
 # which task its session is for (sessions.ps1).
 function Add-HookEvent([string]$event, $in) {
-	$script:HookHeard[$Root] = Get-Date
+	$script:HookHeard[(Get-ThreadKey)] = Get-Date
 	if ($in.agent_id) { Add-WorkerEvent $event $in; return }
 	# The conductor's own session file, from the first hook that names it: its usage is read from there.
 	if ($in.transcript_path) {
@@ -250,12 +260,24 @@ function Show-ConductorWindow {
 
 # What every conductor Rocco opens is told after its first job: keep watching the board. Rocco's README has the command,
 # so this works whatever template release the game is on.
-$WaitCommand = '..\..\_tools\rocco\rocco.ps1 wait as a background command (with Claude Code: run_in_background, and no -Timeout; an agent without background commands: -Timeout 540): it returns, and wakes you, the moment something new waits on you. Start it again each time it returns, once you have handled what it listed'
-$WatchBoard = "Then keep watching the Workboard: run $WaitCommand (..\..\_tools\rocco\README.md, Commands)."
+# Where Rocco is from where the agent runs: the conductor in repo\, a feature's own agent in its lane.
+function Get-ToolsPath { if ($script:ThreadId) { '..\..\..\_tools\rocco' } else { '..\..\_tools\rocco' } }
+function Get-WaitCommand {
+	"$(Get-ToolsPath)\rocco.ps1 wait as a background command (with Claude Code: run_in_background, and no -Timeout; an agent without background commands: -Timeout 540): it returns, and wakes you, the moment something new waits on you. Start it again each time it returns, once you have handled what it listed"
+}
+function Get-WatchText {
+	if ($script:ThreadId) { "Then keep watching for what the user sends you: run $(Get-WaitCommand) ($(Get-ToolsPath)\LEAD.md)." }
+	else { "Then keep watching the Workboard: run $(Get-WaitCommand) (..\..\_tools\rocco\README.md, Commands)." }
+}
 
-# Tasks left Working with no conductor running: a conductor that stopped mid-round (its window closed, the PC restarted),
-# and the workers it ran with it.
-function Get-CutOff { @(Get-Tasks | Where-Object { $_.status -eq 'working' }) }
+# Tasks left Working with nothing running them: a conductor that stopped mid-round (its window closed, the PC
+# restarted), and the workers it ran with it. A feature's own agent is asked about its own tasks, the conductor
+# about the rest.
+function Get-CutOff {
+	$tasks = @(Get-Tasks)
+	$byId = @{}; foreach ($x in $tasks) { $byId[$x.id] = $x }
+	@($tasks | Where-Object { $_.status -eq 'working' -and (Get-TaskOwner $_ $byId $true) -eq $script:ThreadId })
+}
 
 # The user handed something over (a note, an answer, a plan to approve), or work was cut off. No conductor running: open
 # one on it. Work that was cut off is picked up from the board and the lanes: an agent's old session may not have been
@@ -263,6 +285,8 @@ function Get-CutOff { @(Get-Tasks | Where-Object { $_.status -eq 'working' }) }
 function Request-Conductor {
 	# ROCCO_NO_CONDUCTOR: a test run, which must never open the user's agent.
 	if ($env:ROCCO_NO_CONDUCTOR) { return '' }
+	# A feature's thread: its own agent (leads.ps1).
+	if ($script:ThreadId) { return (Request-Lead) }
 	if ((Get-Conductor).state -ne 'none') { return '' }
 	$agent = Get-Agent
 	if (-not $agent.installed) { return '' }
@@ -270,8 +294,10 @@ function Request-Conductor {
 	$prompt = if ($cut.Count) {
 		"Your conductor session for this game stopped mid-round, and its workers with it: $(($cut | ForEach-Object { $_.id }) -join ', ') are still Working on the Workboard. " +
 		'Check each one''s lane (its branch, commits and uncommitted work), make sure its place is open and syncing (..\..\_tools\rocco\rocco.ps1 lanes opens whatever isn''t), and carry them on (docs/workflow/CONDUCTOR.md). ' +
-		"Handle anything else waiting on you too (rocco.ps1 list -Pending). $WatchBoard"
-	} else { "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $WatchBoard" }
+		"Handle anything else waiting on you too (rocco.ps1 list -Pending). $(Get-WatchText)"
+	} else { "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $(Get-WatchText)" }
+	# What Rocco itself adds to the conductor's job, whatever the game's template says (README.md "Sorting").
+	$prompt += ' Sort each new note first, as ..\..\_tools\rocco\README.md "Sorting" says: answer a question, do a small fix, or post a plan for a feature. A feature the user approves is built by an agent of its own, which Rocco opens: its tasks never wait on you, except to be merged.'
 	try { Open-Conductor $prompt | Out-Null; $agent.name } catch { '' }
 }
 

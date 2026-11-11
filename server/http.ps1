@@ -85,10 +85,14 @@ function Invoke-Request($ctx) {
 	# Everything else is about one project, named by ?p=.
 	$project = Find-Project $req.QueryString['p']
 	Use-Project $project.path
+	# And, for the conductor's routes, about one thread, named by ?t=: a feature's, or a card's, with an agent of its
+	# own (leads.ps1). Without it, the main chat: the conductor's.
+	if ($req.QueryString['t']) { try { Use-Thread ([string]$req.QueryString['t']) } catch { Send-Text $ctx 400 $_.Exception.Message; return } }
 	if ($get) {
 		if ($path -eq '/api/state') {
 			Invoke-UpdateAuto $false | Out-Null # due game page events get queued even when Updates isn't open (updates.ps1)
 			Send-StaleNotes
+			Update-Leads # a feature's own agent is opened once it has a lane to work in (leads.ps1)
 			Send-Json $ctx (Get-State $req.QueryString['p']); return
 		}
 		# What the board no longer shows (tasks.ps1): approved or deleted a while ago, searched by ?q=.
@@ -157,6 +161,8 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Set-AgentModel ([string](Read-Json $req).model)) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	# Whether a feature the user approves gets an agent of its own (Settings, leads.ps1).
+	if ($path -eq '/api/agent/leads') { Send-Json $ctx (Set-LeadsOn ([bool](Read-Json $req).on)); return }
 	# A background job the user gave up on (a new project, opening lanes): stopped, with whatever it started.
 	if ($path -match '^/api/jobs/(\w+)/cancel$') {
 		try { Send-Json $ctx (Stop-ScriptJob $Matches[1]) } catch { Send-Text $ctx 400 $_.Exception.Message }
@@ -348,7 +354,7 @@ function Invoke-Request($ctx) {
 		Save-Task $t
 		Send-Json $ctx @{ name = $name }; return
 	}
-	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise|pause|resume|restart|assign)$') {
+	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise|pause|resume|restart|assign|promote|make-task)$') {
 		$id, $action = $Matches[1], $Matches[2]
 		$text = [string](Read-Json $req).text
 		try { Invoke-TaskAction $id $action $text } catch { Send-Text $ctx 400 $_.Exception.Message; return }
@@ -359,8 +365,16 @@ function Invoke-Request($ctx) {
 		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved). A deleted task's work
 		# waits for the next conductor instead: with none running, nothing is running it either.
 		# Nor does a pause open one: with no conductor there's no worker to stop (it took effect at once).
+		# Whose it is to handle is opened: the conductor, or the feature's (or the card's) own agent (leads.ps1).
 		$pending = $t.pending
-		Send-Json $ctx @{ ok = $true; opened = $(if ($pending -and $pending -notin 'cancel', 'stop') { Request-Conductor } else { '' }) }; return
+		$opened = ''
+		if ($pending -and $pending -notin 'cancel', 'stop') {
+			$all = @(Get-Tasks); $byId = @{}; foreach ($x in $all) { $byId[$x.id] = $x }
+			Use-Thread (Get-TaskOwner $t $byId)
+			$opened = Request-Conductor
+			Use-Thread ''
+		} elseif ($t.lead -and -not $pending) { Update-Leads }
+		Send-Json $ctx @{ ok = $true; opened = $opened }; return
 	}
 	Send-Text $ctx 404 'Not found'
 }

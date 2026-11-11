@@ -117,5 +117,13 @@ function Use-Project([string]$dir) {
 	$script:RepoDir = Join-Path $dir 'repo'
 	$script:TasksDir = Join-Path $dir 'rocco\tasks'
 	$script:ArchiveDir = Join-Path $dir 'rocco\archive'
+	$script:ThreadId = ''
+}
+
+# The conversation a command or request is about: '' for the conductor's (the main chat), or the id of a feature (or
+# of a card given its own agent), which has a thread and an agent of its own (thread.ps1, leads.ps1).
+function Use-Thread([string]$id) {
+	if ($id -and $id -notmatch '^T-\d+$') { throw "Not a thread: '$id' (a feature's or a card's id, like T-020)." }
+	$script:ThreadId = "$id"
 }
 Use-Project $HomeProject

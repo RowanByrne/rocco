@@ -17,7 +17,23 @@
 #   event       a milestone: text [, task]
 #   handled     the conductor has read it: to
 
-function Get-ThreadDir { Join-Path $Root 'rocco\conductor' }
+# The conductor's thread is the main chat. A feature with its own agent (leads.ps1), or a card given one, has a thread
+# of its own, with the same files, in <Game>\rocco\threads\<its id>\. Which one is meant is core.ps1's Use-Thread.
+function Get-ThreadDir { if ($script:ThreadId) { Join-Path $Root "rocco\threads\$($script:ThreadId)" } else { Join-Path $Root 'rocco\conductor' } }
+
+# The thread a task's news belongs in: its feature's, or its own when it has an agent of its own, else the main chat.
+function Get-OwnerThread([string]$taskId) {
+	try { $t = Get-Task $taskId } catch { return '' }
+	if ($t.lead) { return "$($t.id)" }
+	if ($t.plan) { try { if ((Get-Task $t.plan).lead) { return "$($t.plan)" } } catch { } }
+	''
+}
+
+# Runs $run with that thread as the one in use, then puts back the one that was.
+function Invoke-InTaskThread([string]$taskId, [scriptblock]$run) {
+	$was = $script:ThreadId
+	try { $script:ThreadId = Get-OwnerThread $taskId; & $run } finally { $script:ThreadId = $was }
+}
 function Get-ThreadFile { Join-Path (Get-ThreadDir) 'thread.jsonl' }
 function Get-ActivityFile { Join-Path (Get-ThreadDir) 'activity.jsonl' }
 
@@ -49,7 +65,11 @@ function Add-Thread([string]$kind, [hashtable]$fields, [string]$who = 'conductor
 	[pscustomobject]$entry
 }
 
-function Add-Event([string]$text, [string]$task = '') { Add-Thread 'event' @{ text = $text; task = $task } 'rocco' | Out-Null }
+# A milestone. One about a task goes in the thread that task belongs to.
+function Add-Event([string]$text, [string]$task = '') {
+	if ($task) { Invoke-InTaskThread $task { Add-Thread 'event' @{ text = $text; task = $task } 'rocco' | Out-Null } }
+	else { Add-Thread 'event' @{ text = $text; task = '' } 'rocco' | Out-Null }
+}
 
 # A step: the status line while it's working.
 function Add-Activity([string]$text) {
@@ -355,5 +375,5 @@ function Wait-Question($in) {
 # What the user did on the Workboard that goes to the conductor (a note, an answer, a send-back, an approval), for its
 # history.
 function Add-Sent([string]$act, $t, [string]$text = '') {
-	Add-Thread 'sent' @{ act = $act; task = $t.id; title = $t.title; text = $text } 'you' | Out-Null
+	Invoke-InTaskThread $t.id { Add-Thread 'sent' @{ act = $act; task = $t.id; title = $t.title; text = $text } 'you' | Out-Null }
 }

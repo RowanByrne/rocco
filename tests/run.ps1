@@ -81,9 +81,10 @@ function Stop-Server { if ($script:Server -and -not $script:Server.HasExited) { 
 
 try {
 	# ---- The temporary game ----
-	New-Item -ItemType Directory -Force (Join-Path $RoDevDir '_tools'), (Join-Path $Game 'lanes'), (Join-Path $Repo 'docs\game'), (Join-Path $Repo 'docs\workflow'), (Join-Path $Temp 'home') | Out-Null
+	# Three lanes on this PC (folders only: no checkouts, places or Lync are needed to hand a lane out).
+	New-Item -ItemType Directory -Force (Join-Path $RoDevDir '_tools'), (Join-Path $Game 'lanes\lane1'), (Join-Path $Game 'lanes\lane2'), (Join-Path $Game 'lanes\lane3'), (Join-Path $Repo 'docs\game'), (Join-Path $Repo 'docs\workflow'), (Join-Path $Temp 'home') | Out-Null
 	cmd /c mklink /J "$App" "$Here" | Out-Null
-	[IO.File]::WriteAllText((Join-Path $Repo 'docs\game\PROJECT.md'), "# Project`n`n| | |`n|---|---|`n| Game | Test Game |`n| Code | ``TG`` |`n| Phase | Production |`n| Lanes | None yet |`n`n## Workstations`n`n| PC | Specs | Lanes |`n|---|---|---|`n| None yet | | |`n", $Utf8)
+	[IO.File]::WriteAllText((Join-Path $Repo 'docs\game\PROJECT.md'), "# Project`n`n| | |`n|---|---|`n| Game | Test Game |`n| Code | ``TG`` |`n| Phase | Production |`n| Lanes | 3 (lane1 to lane3) |`n`n## Workstations`n`n| PC | Specs | Lanes |`n|---|---|---|`n| ``$env:COMPUTERNAME`` | the tests | 3 |`n", $Utf8)
 	[IO.File]::WriteAllText((Join-Path $Repo 'docs\workflow\CONDUCTOR.md'), "# Conductor`n`nThe template's.`n", $Utf8)
 	[IO.File]::WriteAllText((Join-Path $Repo 'docs\game\GDD.md'), "# Design`n`nA racing game.`n", $Utf8)
 	[IO.File]::WriteAllText((Join-Path $Repo 'default.project.json'), '{ "name": "Game", "port": 34900, "tree": {} }', $Utf8)
@@ -97,7 +98,7 @@ try {
 
 	# Rocco's own functions, for the tests that call one directly.
 	$AppDir = $App; $Command = 'test'; $Project = 'Game'; $Port = 34860
-	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
+	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
 	$ErrorActionPreference = 'Stop'
 
 	Write-Host "Rocco tests in $Temp"
@@ -251,6 +252,70 @@ try {
 		Assert-Match ((Rocco show $id) -join "`n") 'wants a fresh worker' 'show says to restart it'
 	}
 
+	Test 'an approved feature gets a thread and an agent of its own' {
+		$plan = @(Rocco plan -Title 'Trading' -Summary 'Players trade cars.' -Steps 'Trade window|1|standard,Trade service|2|heavy')[0]
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		Api '/api/state' | Out-Null # looking at the board gives it its lane
+		$p = Read-TaskJson $plan
+		Assert ([bool]$p.lead) 'it has an agent of its own'
+		Assert ([int]$p.lane -ge 1) "and a lane ($($p.lane))"
+		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match "^$plan\s" }).Count 0 'the conductor isn''t asked to build it'
+		Assert-Equal @(Rocco list -Pending -Thread $plan | Where-Object { $_ -match "^$plan\s.*\[approved\]" }).Count 1 'its own agent is'
+		# What the user writes in the feature's thread goes to that agent, not to the conductor.
+		Api "/api/conductor/message?t=$plan" @{ text = 'make the accept button green' } | Out-Null
+		Assert (Test-Path (Join-Path $Game "rocco\threads\$plan\thread.jsonl")) 'the thread has its own file'
+		Assert-Match ((Rocco list -Pending -Thread $plan) -join "`n") '\[message\]\s+make the accept button green' 'its agent sees the message'
+		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match 'accept button' }).Count 0 'the conductor doesn''t'
+		# As that agent (its window names its thread): a step it makes is its own, and its news goes in its thread.
+		$env:ROCCO_THREAD = $plan
+		try {
+			$step = @(Rocco new -Title 'Trade window' -Plan $plan)[0]
+			Rocco set $step -Status working -Lane $p.lane -Branch feature/trading | Out-Null
+			Rocco say -Text 'The window is half built.' | Out-Null
+			Assert-Match ((Rocco list) -join "`n") 'Trade window' 'its list is its own tasks'
+			Assert-Equal @(Rocco list | Where-Object { $_ -match 'Worked on' }).Count 0 'and nobody else''s'
+		} finally { Remove-Item Env:ROCCO_THREAD }
+		$items = (Api "/api/conductor/thread?t=$plan").items
+		Assert (@($items | Where-Object { $_.kind -eq 'event' -and $_.task -eq $step }).Count -ge 1) 'the step''s start is in the thread'
+		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -match 'half built' }).Count 1 'and so is what its agent said'
+		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { "$($_.text)" -match 'half built' }).Count 0 'neither is in the main chat'
+		Assert (@((Api '/api/state').leads | Where-Object { $_.id -eq $plan }).Count -eq 1) 'the board lists the thread'
+		# Sent back, a step goes to the feature's agent. Approved, its merge is the conductor's.
+		Rocco set $step -Status ready -Where lane -Summary 'The window opens.' -Test 'Open it' | Out-Null
+		Api "/api/tasks/$step/reopen" @{ text = 'too small on phone' } | Out-Null
+		Assert-Match ((Rocco list -Pending -Thread $plan) -join "`n") "$step\s.*\[reopen\]" 'a send-back goes to its agent'
+		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match "^$step\s" }).Count 0 'not to the conductor'
+		Rocco set $step -Status ready -Where lane -Summary 'Bigger on phone.' -Test 'Open it' | Out-Null
+		Api "/api/tasks/$step/approve" @{} | Out-Null
+		Start-Sleep -Seconds 7
+		Assert-Match ((Rocco list -Pending) -join "`n") "$step\s.*\[merge\]" 'the merge goes to the conductor'
+		Assert-Match ((Rocco show $plan) -join "`n") 'has an agent of its own' 'show tells the conductor it isn''t its to build'
+	}
+
+	Test 'a card can be given an agent of its own' {
+		$id = @(Rocco new -Title 'Stubborn bug')[0]
+		Rocco set $id -Status working -Lane 2 | Out-Null
+		Rocco set $id -Status ready -Where main -Summary 'Fixed.' -Test 'Try it' | Out-Null
+		Api "/api/tasks/$id/reopen" @{ text = 'still wrong' } | Out-Null
+		Api "/api/tasks/$id/promote" @{} | Out-Null
+		Api '/api/state' | Out-Null
+		Assert ([bool](Read-TaskJson $id).lead) 'it has its own agent'
+		Assert-Match ((Rocco list -Pending -Thread $id) -join "`n") "$id\s.*\[reopen\]" 'which hears the send-back'
+		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match "^$id\s" }).Count 0 'and the conductor no longer does'
+		Assert-Throws { Api "/api/tasks/$id/promote" @{} } 'already has an agent' 'twice'
+	}
+
+	Test 'a note that was only a question is answered, with no card kept' {
+		$n = Api '/api/note' @{ text = 'how is drift score worked out?'; type = '' }
+		Rocco reply $n.id -Answer -Text 'Angle times speed, summed over the slide.' | Out-Null
+		$t = Read-TaskJson $n.id
+		Assert-Equal "$($t.kind) $($t.status)" 'question done' 'answered, and finished'
+		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'said' -and $_.task -eq $n.id }).Count 1 'the answer is in the chat'
+		Api "/api/tasks/$($n.id)/make-task" @{} | Out-Null
+		$t = Read-TaskJson $n.id
+		Assert-Equal "$($t.kind) $($t.pending)" 'note plan' 'and it can be made a task after all'
+	}
+
 	Test 'docs: the template''s files stay locked however the path is written' {
 		Assert ([bool](Api '/api/docs/file?path=docs/workflow/CONDUCTOR.md').locked) 'locked by its plain path'
 		Assert ([bool](Api '/api/docs/file?path=docs//workflow/CONDUCTOR.md').locked) 'locked with a doubled slash'
@@ -299,6 +364,8 @@ try {
 		# A task of its own at work, so the board and the usage list each have a row to look at.
 		$own = @(Rocco new -Title 'A task for the fields')[0]
 		Rocco set $own -Status working -Lane 1 | Out-Null
+		# With an agent of its own, so the threads the board lists have one to look at too.
+		Api "/api/tasks/$own/promote" @{} | Out-Null
 		$problems = @()
 		foreach ($shape in $shapes.PSObject.Properties) {
 			$value = Api ($shape.Value.path -replace '\{task\}', $own)
@@ -375,6 +442,11 @@ try {
 		Assert-Equal @($s.hooks.Stop[0].hooks).Count 2 'Stop passes the message on and checks the board'
 		Assert-Equal @($s.hooks.Stop[0].hooks)[1].type 'command' 'the check that can send it back is a command'
 		Assert ($null -ne $s.hooks.SubagentStop) 'a worker ending is passed on'
+		# A feature's own agent: its hooks name its thread.
+		Use-Thread 'T-001'
+		try { $own = [IO.File]::ReadAllText((Write-ConductorHooks), $Utf8) } finally { Use-Thread '' }
+		Assert-Match $own 'T-001' 'a feature''s hooks name its thread'
+		Assert (Test-Path (Join-Path $Game 'rocco\threads\T-001\claude-settings.json')) 'and are kept with it'
 	}
 
 	Test 'what an agent is opened with is data: a quote in it can''t run' {

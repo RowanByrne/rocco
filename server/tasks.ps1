@@ -2,7 +2,8 @@
 # screenshots, audio options, and the worker's notes.md. A feature plan is a task too (kind 'plan').
 
 $Statuses = 'inbox', 'queued', 'working', 'stuck', 'ready', 'done', 'removed'
-$Types = 'bug', 'tweak', 'idea', 'feature', 'question'
+# fix: the user marked the note as a small fix themselves (the note box's kinds: README.md "Sorting").
+$Types = 'bug', 'tweak', 'idea', 'feature', 'question', 'fix'
 $ToConductor = 'Waiting for the conductor'
 # Once the conductor has read a note (show), so the user can tell it from one it hasn't seen. {0}: the agent.
 $ReadIt = 'Rocco has read it'
@@ -101,7 +102,8 @@ function Test-WaitsForLane($t) { $t.status -eq 'queued' -and $t.PSObject.Propert
 
 # This PC's lanes that no task holds, as the sidebar sees them: none at work or stuck in it, or held for testing there.
 function Get-FreeLanes($tasks) {
-	$held = @($tasks | Where-Object { $_.lane -and ($_.status -in 'working', 'stuck' -or ($_.where -eq 'lane' -and $_.status -in 'ready', 'queued')) } | ForEach-Object { [int]$_.lane })
+	# A feature's own agent keeps its lane for the feature's life, between steps too (leads.ps1).
+	$held = @($tasks | Where-Object { $_.lane -and ($_.status -in 'working', 'stuck' -or ($_.where -eq 'lane' -and $_.status -in 'ready', 'queued') -or ($_.lead -and $_.status -notin 'done', 'removed')) } | ForEach-Object { [int]$_.lane })
 	$count = [int](Get-Lanes).count
 	@(if ($count) { 1..$count | Where-Object { $_ -notin $held } })
 }
@@ -552,6 +554,8 @@ function Sync-Plan([string]$id) {
 		Add-Log $p 'conductor' $(if ($dropped) { 'Every step approved or dropped, so the feature is done.' } else { 'Every step approved, so the feature is done.' })
 		Save-Task $p
 		Add-Event "Feature done: $($p.title)" $p.id
+		# Its own agent has nothing left to build: its session ends, and its lane is free again.
+		if ($p.lead) { Stop-Lead $p.id 'Every step is approved, so its agent''s session is closed' }
 	} elseif (-not $finished -and $p.status -eq 'done') {
 		Set-Status $p 'queued'
 		Save-Task $p
@@ -627,6 +631,27 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Add-Log $t 'you' $(if ($t.kind -eq 'question') { 'Got it.' } else { 'Approved.' })
 			# A feature on its own branch merges once it's approved.
 			if ($t.where -eq 'lane') { Set-Field $t 'pending' 'merge' }
+			$closeLead = $t.lead -and $t.kind -ne 'plan'
+		}
+		# A card that keeps coming back gets an agent of its own (leads.ps1): the user works it through with that
+		# agent directly, in the card's own thread. A worker still on it is the conductor's to stop first.
+		'promote' {
+			if ($t.kind -in 'plan', 'question') { throw "$($t.id) isn't a card of work." }
+			if ($t.status -in 'done', 'removed') { throw "$($t.id) is finished." }
+			if ($t.lead) { throw "$($t.id) already has an agent of its own." }
+			Set-Field $t 'lead' $true
+			Set-Field $t 'held' $false
+			Add-Log $t 'you' 'Give it an agent of its own.'
+			if ($t.status -in 'working', 'stuck' -and (Get-Conductor).state -ne 'none') { Set-Field $t 'pending' 'handoff' }
+			else { Set-Field $t 'waiting' 'Opening its own agent' }
+		}
+		# An answer that turned out to be work: the question becomes a note in Up next, for the conductor to plan.
+		'make-task' {
+			if ($t.kind -ne 'question') { throw "$($t.id) isn't an answered question." }
+			Set-Field $t 'kind' 'note'
+			Set-Field $t 'type' ''
+			Send-ToConductor $t 'plan'
+			Add-Log $t 'you' $(if ($text) { $text } else { 'Make this a task.' })
 		}
 		'reopen' {
 			Set-Field $t 'attempt' ([int]$t.attempt + 1)
@@ -650,6 +675,7 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			if ($t.kind -eq 'plan') {
 				foreach ($k in Get-PlanTasks $t) { $k = Read-Task $k.id; Remove-Task $k $t.id; Save-Task $k }
 			}
+			$closeLead = [bool]$t.lead
 		}
 		# More from the user while the task is running; it waits until the worker or conductor reads it (clear).
 		'followup' {
@@ -673,6 +699,8 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Set-Field $t 'pending' 'approved'
 			Set-Field $t 'waiting' $ToConductor
 			Add-Log $t 'you' 'Approved the plan.'
+			# It's built by an agent of its own, in its own thread (leads.ps1), unless this PC turned that off.
+			if (Test-LeadsOn) { Set-Field $t 'lead' $true; Set-Field $t 'waiting' 'Opening its own agent'; $newThread = $true }
 		}
 		'revise' {
 			if (-not $text) { throw 'Say what to change.' }
@@ -684,6 +712,14 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 	Save-Task $t
 	# Approving a plan's last step finishes the feature; Undo opens it again.
 	Sync-Plan $t.plan
+	# A card with its own agent that's approved or deleted, or a deleted feature: that agent's session ends. What's
+	# left of its work (a branch to merge, or to drop) is the conductor's.
+	if ($closeLead) { Stop-Lead $t.id $(if ($action -eq 'remove') { 'Deleted, so its agent''s session is closed' } else { 'Approved, so its agent''s session is closed' }) }
+	# The main chat says where the feature went.
+	if ($newThread) {
+		$was = $script:ThreadId
+		try { Use-Thread ''; Add-Thread 'event' @{ text = "$($t.title) has its own thread now: an agent of its own builds it there"; task = $t.id } 'rocco' | Out-Null } finally { $script:ThreadId = $was }
+	}
 }
 
 # ---- Checks: what the worker ran, and what came of it ----

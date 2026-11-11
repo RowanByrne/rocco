@@ -103,7 +103,10 @@ function Get-SessionFiles {
 	if (Test-Path -LiteralPath $repo) { $files += @(Get-ChildItem -LiteralPath $repo -Directory | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_.FullName 'subagents') -Filter 'agent-*.jsonl' -File -ErrorAction SilentlyContinue }) }
 	foreach ($lane in @(Get-ChildItem (Join-Path $Root 'lanes') -Directory -Filter 'lane*' -ErrorAction SilentlyContinue)) {
 		$dir = Get-AgentProjectDir $lane.FullName
-		if (Test-Path -LiteralPath $dir) { $files += @(Get-ChildItem -LiteralPath $dir -Filter '*.jsonl' -File) }
+		if (-not (Test-Path -LiteralPath $dir)) { continue }
+		# A session started in the lane (a feature's own agent, leads.ps1), and the helpers that session started.
+		$files += @(Get-ChildItem -LiteralPath $dir -Filter '*.jsonl' -File)
+		$files += @(Get-ChildItem -LiteralPath $dir -Directory | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_.FullName 'subagents') -Filter 'agent-*.jsonl' -File -ErrorAction SilentlyContinue })
 	}
 	$files
 }
@@ -142,7 +145,8 @@ function Get-SessionInfo($file) {
 # its file says so (Get-SessionInfo), or when its worker's hooks did (workers.jsonl).
 function Find-TaskSessions($t) {
 	$since = try { ([datetime]$t.created).ToUniversalTime().AddMinutes(-5) } catch { [datetime]::MinValue }
-	$reported = @(Read-Lines (Get-WorkersFile))
+	# What the hooks reported, in the thread the task belongs to: the conductor's, or its feature's own.
+	$reported = @(Invoke-InTaskThread $t.id { Read-Lines (Get-WorkersFile) })
 	$agents = @($reported | Where-Object { $_.task -eq $t.id } | ForEach-Object { "$($_.agent)" } | Select-Object -Unique)
 	$found = @{}
 	foreach ($info in @(Get-SessionFiles | Where-Object { $_.LastWriteTimeUtc -ge $since } | ForEach-Object { Get-SessionInfo $_ })) {

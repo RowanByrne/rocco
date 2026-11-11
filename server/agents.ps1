@@ -47,6 +47,8 @@ function Get-Agent {
 		$script:AgentCache = @{ Read = Get-Date; Value = [pscustomobject]@{
 			id = $id; name = $Agents[$id].name; short = $Agents[$id].short; installed = ($installed -contains $id); chosen = [bool]$chosen
 			model = $model; takesModel = [bool]$Agents[$id].model; models = @($Agents[$id].models | Where-Object { $_ })
+			# Whether a feature the user approves gets an agent of its own (leads.ps1): on unless turned off here.
+			leads = -not ($settings.PSObject.Properties['leads'] -and $settings.leads -eq $false)
 			agents = @($Agents.Keys | ForEach-Object { [pscustomobject]@{ id = $_; name = $Agents[$_].name; short = $Agents[$_].short; installed = ($installed -contains $_) } })
 		} }
 	}
@@ -86,7 +88,7 @@ function Set-AgentModel([string]$model) {
 # steer. It starts minimized in the taskbar, out of the way: the user follows it in Rocco, and opens the window only when
 # they want to (or the agent asks them something there). The prompt has no double quotes: they don't survive the npm
 # .cmd wrappers agents are often installed as. Returns the window's process (conductor.ps1 finds the agent in it).
-function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title, [string[]]$extra = @()) {
+function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title, [string[]]$extra = @(), [hashtable]$set = @{}) {
 	$agent = Get-Agent
 	$exe = Find-AgentExe $agent.id
 	if (-not $exe) { throw "$($agent.name) isn't installed on this PC (Connections)." }
@@ -98,14 +100,16 @@ function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title, [strin
 	# or Claude Code takes it for a sub-session and doesn't save its transcript.
 	$text = @'
 $start = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_START)) | ConvertFrom-Json
-Remove-Item Env:ROCCO_START, Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION -ErrorAction SilentlyContinue
+Remove-Item Env:ROCCO_START, Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION, Env:ROCCO_THREAD -ErrorAction SilentlyContinue
+foreach ($p in $start.set.PSObject.Properties) { if ("$($p.Value)") { Set-Item "Env:$($p.Name)" "$($p.Value)" } }
 $Host.UI.RawUI.WindowTitle = $start.title
 Set-Location -LiteralPath $start.dir
 $arguments = @($start.arguments)
 & $start.exe @arguments
 '@
 	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
-	$data = ConvertTo-Json -Compress -InputObject ([ordered]@{ title = "Rocco: $title"; dir = $dir; exe = $exe; arguments = @($arguments) })
+	# set: what the window's environment is given (ROCCO_THREAD, for a feature's own agent: conductor.ps1).
+	$data = ConvertTo-Json -Compress -InputObject ([ordered]@{ title = "Rocco: $title"; dir = $dir; exe = $exe; arguments = @($arguments); set = $set })
 	# The window inherits this process's environment as it is when it starts.
 	$env:ROCCO_START = [Convert]::ToBase64String($Utf8.GetBytes($data))
 	try {

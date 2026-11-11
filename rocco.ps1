@@ -51,14 +51,24 @@ param(
 	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [switch]$ForLane, [int]$Port = 34860,
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
 	[switch]$Pass, [switch]$Fail, [string]$File,
+	[Alias('Thread')] [string]$ThreadId, # -Thread T-020: the thread a command is about, a feature's (or a card's) with an agent of its own (LEAD.md)
+	[switch]$Answer,  # reply: the note was only a question, and this answers it (no card is kept)
 	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
+# Kept before the parts load: they keep the thread in use under the same name (core.ps1 Use-Thread), and start with none.
+$named = $ThreadId
 # An agent's command loads only what the board needs: it runs many of these, and each starts PowerShell afresh.
-$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
-	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'lanes' }
+$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
+	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes' }
 foreach ($part in $parts) { . (Join-Path $AppDir "server\$part.ps1") }
+
+# A feature's own agent runs in a window that names its thread (ROCCO_THREAD, conductor.ps1 Open-Conductor), so
+# every command it runs is about that thread without saying so: its wait, its messages, its questions. The server
+# is about every thread, and takes each request's.
+if (-not $named -and $env:ROCCO_THREAD -and $Command -notin 'serve', 'start') { $named = $env:ROCCO_THREAD }
+if ($named) { Use-Thread $named }
 
 # A list given as "a","b" arrives as one string, a,b, when the command is run through powershell -File (an agent in a
 # bash shell): -File hands every argument over as plain text. So a single item with a comma in it is taken as the list
@@ -111,14 +121,18 @@ function Format-Wanted($t) { (@($(if ($t.wantLane) { "lane $($t.wantLane)" }), $
 function Get-PendingTasks {
 	$undoGone = (Get-Date).AddSeconds(-$UndoSeconds)
 	$tasks = @(Get-Tasks)
+	$byId = @{}; foreach ($x in $tasks) { $byId[$x.id] = $x }
 	@($tasks | Where-Object {
 		$_.pending -and
 		(-not $_.undo -or -not $_.undo.at -or [datetime]$_.undo.at -lt $undoGone) -and
 		($_.status -ne 'removed' -or $_.pending -eq 'cancel') -and
-		(-not $_.held -or $_.pending -eq 'stop')
+		(-not $_.held -or $_.pending -eq 'stop') -and
+		# Each agent hears only of its own: a feature's agent of its feature's tasks, the conductor of the rest
+		# (leads.ps1 Get-TaskOwner).
+		(Get-TaskOwner $_ $byId) -eq $script:ThreadId
 	})
-	# A task parked for a lane (set -ForLane), once one is free.
-	Get-LaneReady $tasks
+	# A task parked for a lane (set -ForLane), once one is free: the conductor's.
+	if (-not $script:ThreadId) { Get-LaneReady $tasks }
 }
 
 # Everything that waits on the conductor, as list -Pending and wait print it: tasks, then what the user sent it.
@@ -136,9 +150,9 @@ function Test-ConductorStop($in) {
 	$rows = @(Get-PendingTasks)
 	$thread = Get-ThreadState
 	$reason = if ($rows.Count -or $thread.pending.Count) {
-		"Before you stop, handle what waits on you, as CONDUCTOR.md `"What waits on you`" says:`n$((Write-Pending $rows $thread) -join "`n")`nThen, if nothing is watching the board, start $WaitCommand."
+		"Before you stop, handle what waits on you, as $(if ($script:ThreadId) { 'LEAD.md' } else { 'CONDUCTOR.md "What waits on you"' }) says:`n$((Write-Pending $rows $thread) -join "`n")`nThen, if nothing is watching for what the user sends, start $(Get-WaitCommand)."
 	} elseif (-not (Wait-ForWatch 20)) {
-		"Before you stop: nothing is watching the board, so the user's next note, answer or send-back would sit unseen until they prompt you. Start $WaitCommand."
+		"Before you stop: nothing is watching for what the user sends, so their next note, answer or send-back would sit unseen until they prompt you. Start $(Get-WaitCommand)."
 	} else { '' }
 	if (-not $reason -or $tries -ge 3) {
 		if ($reason) { Add-Event "The conductor stopped $(if ($rows.Count -or $thread.pending.Count) { 'with work still waiting on it' } else { 'with nothing watching the board' }): type anything in its window to wake it" }
@@ -216,6 +230,8 @@ switch ($Command) {
 
 	'list' {
 		$rows = @(if ($Pending) { Get-PendingTasks } else { Get-Tasks | Where-Object { ($_.status -notin 'done', 'removed') -or $_.pending } })
+		# In a feature's thread: its own plan and tasks.
+		if ($script:ThreadId -and -not $Pending) { $rows = @($rows | Where-Object { $_.id -eq $script:ThreadId -or $_.plan -eq $script:ThreadId }) }
 		$thread = Get-ThreadState
 		if ($Pending) {
 			if (-not $rows.Count -and -not $thread.pending.Count) { 'Nothing waiting on the conductor.'; break }
@@ -289,10 +305,11 @@ switch ($Command) {
 		if ($t.pending -eq 'plan' -and $t.status -eq 'queued') {
 			if ($t.waiting -eq $ToConductor) { Set-Field $t 'waiting' $ReadIt; Save-Task $t }
 			''
-			"Taking it on? First: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
+			"Sort it first (README.md `"Sorting`"). Only a question, with nothing to change: answer it with reply $($t.id) -Answer -Text `"...`", and no card is kept. A small fix: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. A feature (it needs a plan, a decision, or several steps): post its plan (plan -Title ... -Steps ...), then set $($t.id) -Status removed. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}
 		# The user stepped in on its worker (the card's Pause, Resume, Start again, or its lane and worker): what to do.
 		$stepIn = switch ($t.pending) {
+			'handoff' { "The user gave it an agent of its own, which Rocco opens once your worker has let go of it. Stop the worker on it now, commit what it has on its branch so nothing is lost, then clear $($t.id). From then on it isn't yours, except to merge when it's approved." }
 			'stop' { "The user paused it. Stop its worker now, commit what it has on its branch so nothing is lost, then set $($t.id) -Status queued and clear $($t.id). Don't start it again until they resume it (wait hands it back as [resume])." }
 			'resume' { "The user resumed it. $(if ($t.branch) { "Carry it on from $($t.branch) and its notes.md" } else { 'Start it when its turn comes' }): set $($t.id) -Status working -Lane <n> -Step `"...`" as you do." }
 			'restart' { "The user wants a fresh worker on it. Stop the one it has, then start a new one on $($t.id) $(if ($t.branch) { "from $($t.branch) and its notes.md" } else { 'from the start' }) (attempt $($t.attempt)), and clear $($t.id). Their reason, if they gave one, is the latest 'you' line." }
@@ -309,7 +326,13 @@ switch ($Command) {
 		# Every lane busy for a task you're about to start.
 		if ($t.status -eq 'queued' -and $t.pending -in 'plan', 'reopen' -and -not @(Get-FreeLanes @(Get-Tasks)).Count) { ''; "Every lane is busy. To start it when one frees: set $($t.id) -ForLane (wait hands it back as [lane])." }
 		# A feature plan is never worked as a card: its steps are tasks, which the plan's chip counts.
-		if ($t.kind -eq 'plan') {
+		if ($t.kind -eq 'plan' -and $t.lead) {
+			# Built by an agent of its own (LEAD.md). To that agent: how. To anyone else: hands off.
+			''
+			if ($script:ThreadId -eq $t.id) {
+				"You are building this, a step at a time, in lane $($t.lane). For each step in turn: new -Title `"<step>`" -Plan $($t.id), then set <its id> -Status working -Lane $($t.lane) -Branch <the feature's branch> -Step `"...`", build it, record what you ran (result), and set it ready with -Where lane. $(if ($t.pending -eq 'approved') { "Then clear $($t.id)." })"
+			} else { "This feature has an agent of its own, in lane $($t.lane): it makes and works its tasks, and the user talks to it in the feature's thread. It isn't yours, except to merge a step the user has approved." }
+		} elseif ($t.kind -eq 'plan') {
 			$perStep = "a task per step, new -Title `"<step>`" -Plan $($t.id) [-After T-0xx], and give each worker its step's id"
 			$hint = if ($t.status -eq 'inbox' -and $t.pending) { "It still waits for the user's OK (Approve plan on its card). If their words approve it (`"go`", `"build it`"), make $perStep; the first one approves it. Otherwise answer them, and it waits." }
 				elseif ($t.pending -eq 'approved') { "Approved: make $perStep. Then clear $($t.id)." }
@@ -458,11 +481,18 @@ switch ($Command) {
 	'reply' {
 		if (-not $Text) { throw 'reply needs -Text.' }
 		$t = Read-Task $Id
-		# A question card is answered: it shows under the note box. On any other card the answer goes in its session,
-		# and the card stays where it is (a question typed into a working card doesn't make it ready to test).
+		# -Answer: a note that was only a question (the conductor sorted it so) becomes one, answered here.
+		if ($Answer) {
+			if ($t.kind -notin 'note', 'question' -or $t.status -notin 'queued', 'inbox') { throw "-Answer is for a note that hasn't been started: $($t.id) is $($t.status)." }
+			Set-Field $t 'kind' 'question'
+			Set-Field $t 'type' 'question'
+		}
+		# A question is answered in the chat, where it was asked: the answer is all there is to it, so it's finished,
+		# with no card to tick off. (The user can ask more, or make it a task.) On any other card the answer goes in
+		# its session, and the card stays where it is (a question typed into a working card doesn't make it ready).
 		if ($t.kind -eq 'question') {
 			Set-Field $t 'summary' $Text
-			Set-Status $t 'ready'
+			Set-Status $t 'done'
 			Set-Field $t 'pending' ''
 			Set-Field $t 'waiting' ''
 		}
@@ -479,6 +509,7 @@ switch ($Command) {
 			'merge' { Add-Event "Merged into Main: $($t.title)" $t.id }
 			'cancel' { Add-Event "Stopped deleted work: $($t.title)" $t.id }
 			'stop' { Add-Event "Paused: $($t.title)" $t.id }
+			'handoff' { Set-Field $t 'waiting' 'Opening its own agent' }
 		}
 		Set-Field $t 'pending' ''
 		Set-Field $t 'followups' 0

@@ -122,7 +122,7 @@ function Start-Setup([string]$part, [string[]]$tiles) {
 	$opened = $false
 	$running = (Get-Conductor).state -ne 'none'
 	if ($agent.installed -and -not $running) {
-		try { Open-Conductor "$prompt $WatchBoard" | Out-Null; $opened = $true } catch { }
+		try { Open-Conductor "$prompt $(Get-WatchText)" | Out-Null; $opened = $true } catch { }
 	}
 	if ($opened) {
 		Set-Status $t 'working'
