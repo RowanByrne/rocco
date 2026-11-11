@@ -28,8 +28,8 @@ function sound(seed, ms = 420) {
 }
 
 const PROJECTS = [
-  { id: 'sample-game', name: 'Sample Game', phase: 'Production' },
-  { id: 'sky-farm', name: 'Sky Farm', phase: 'Core loop' },
+  { id: 'sample-game', name: 'Sample Game', phase: 'Production', template: false },
+  { id: 'sky-farm', name: 'Sky Farm', phase: 'Core loop', template: false },
   { id: 'template', name: 'RoDev template', phase: 'Template', template: true },
 ];
 
@@ -47,7 +47,8 @@ function seed(id) {
         log: [{ who: 'conductor', at: ago(59), text: 'Lane 2.' }, { who: 'worker', at: ago(42), text: 'Saves on claim instead of on autosave.' },
           { who: 'you', at: ago(21), text: 'Still happens if I rejoin really fast.' },
           { who: 'worker', at: ago(6), text: 'Save lands before the reward, and loading waits for the session lock. 20 fast rejoins: no double claims.' },
-          { who: 'conductor', at: ago(4), text: 'Merged.' }] },
+          // As an agent writes it: shown tidied, with "Show original" under it (prose.js).
+          { who: 'conductor', at: ago(4), text: 'MERGED TO MAIN at a91f3c2 -- lane 2 is free again.' }] },
       { ...base, id: 'T-041', status: 'ready', type: 'tweak', lane: 4, title: 'Shop prices wrap on phone', shots: [picture(30)], note: 'shop prices wrap to 2 lines on phone',
         summary: 'Prices shrink to fit on phone.', test: 'Open the shop at phone size. Prices stay on one line.', branch: 'agent/shop-price-fit',
         log: [{ who: 'conductor', at: ago(31), text: 'Lane 4.' }, { who: 'worker', at: ago(17), text: 'Labels shrink to fit. Checked phone, tablet, desktop.' }, { who: 'conductor', at: ago(5), text: 'Merged.' }] },
@@ -89,6 +90,9 @@ function seed(id) {
         log: [{ who: 'worker', at: ago(20), text: 'Sound asset deleted. Found 3 replacements.' }] },
       { ...base, id: 'T-046', status: 'working', type: 'bug', lane: 3, startedAt: ago(12), step: 'Testing 6 hallway spots', progress: 70, title: 'Camera clips into walls',
         note: 'camera goes inside the walls in the hallway by the shop', shots: [picture(260), picture(280)], branch: 'agent/camera-clip',
+        // Its time at work, and the checks its worker ran (rocco.ps1 result): the card shows both.
+        worked: 0, workSince: ago(12),
+        checks: [{ at: ago(8), ok: false, text: 'Camera test: 2 of 6 hallway spots still clip', file: 'check-1.txt', attempt: 1 }, { at: ago(4), ok: true, text: 'Camera test: 6 of 6 hallway spots clear', file: 'check-2.txt', attempt: 1 }],
         log: [{ who: 'conductor', at: ago(12), text: 'Lane 3.' }, { who: 'worker', at: ago(10), text: 'Found it: the camera only checks walls behind the head.' },
           { who: 'worker', at: ago(6), text: 'Raycast from the head to the camera.' }, { who: 'worker', at: ago(3), text: 'Camera pulls in on wall hits.' }] },
       { ...base, id: 'T-047', status: 'working', type: 'bug', lane: 1, startedAt: ago(6), step: 'Coding', title: 'New players show 0 coins on leaderboard',
@@ -146,6 +150,10 @@ function sampleThread() {
     { id: 'C-000008', at: at(60), who: 'you', kind: 'decided', to: 'C-000007', allow: true },
     { id: 'C-000009', at: at(31), who: 'conductor', kind: 'said', text: "**Done**\n- Daily reward can't be claimed twice: it saves on claim now (T-038, lane 2).\n- Shop prices fit on phones (T-041).\n\n**Flagged**\n- The trade countdown has no sound yet. I'll ask you which one when it's built.\n- `T-046` found the camera only checks walls behind the head; the fix is in progress." },
     { id: 'C-000010', at: at(28), who: 'you', kind: 'message', text: 'nice. do the camera next', via: 'rocco' },
+    // Check-ins with nothing in them: the history folds a run of these into one line.
+    { id: 'C-000015', at: at(24), who: 'conductor', kind: 'said', text: 'Watching.' },
+    { id: 'C-000016', at: at(20), who: 'conductor', kind: 'said', text: 'Watching the board.' },
+    { id: 'C-000017', at: at(16), who: 'conductor', kind: 'said', text: 'Watching.' },
     { id: 'C-000011', at: at(4), who: 'rocco', kind: 'event', text: 'Ready to test: Daily reward claimable twice after rejoin', task: 'T-038' },
     // Concepts to pick from: each option has its picture (server/tasks.ps1 Add-Pictures).
     { id: 'C-000014', at: at(3), who: 'conductor', kind: 'asked', via: 'hook', questions: [
@@ -163,7 +171,8 @@ function sampleThread() {
   ];
   const steps = [
     [44, 'Reading CONDUCTOR.md'], [43, 'List what waits on the conductor'], [41, 'Starting a worker: Daily reward claimable twice'], [38, 'Merge agent/daily-reward into main'],
-    [36, 'Running the tests'], [33, 'Push main to GitHub'], [26, 'Starting a worker: Camera clips into walls'], [12, 'Reading CameraController.luau'],
+    [36, 'Running the tests'], [33, 'Push main to GitHub'], [26, 'Starting a worker: Camera clips into walls'],
+    [25, 'Wait for what the board needs'], [21, 'Wait for what the board needs'], [17, 'Wait for what the board needs'], [12, 'Reading CameraController.luau'],
     [9, 'Using Studio: start stop play'], [6, 'Merge the daily reward fix into main'],
   ].map(([m, text]) => ({ at: at(m), text }));
   return { items, steps };
@@ -178,7 +187,7 @@ function conductorView(d) {
   const open = t.items.filter(e => (e.kind === 'asked' && !has('answered', e.id)) || (e.kind === 'permission' && !has('decided', e.id) && !has('expired', e.id)));
   const last = [...t.items].reverse().find(e => e.kind === 'said');
   const replied = !!last && t.items.some(e => e.who === 'you' && e.at > last.at);
-  return { ...(d.conductor || { state: 'listening', agent: 'Claude Code' }), open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
+  return { doing: '', ...(d.conductor || { state: 'listening', agent: 'Claude Code' }), open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
 }
 
 export async function conductorThread(stamp) {
@@ -216,9 +225,71 @@ const bookmarks = new Set();
 
 export async function projects() { return { home: 'sample-game', projects: PROJECTS }; }
 
+// A task on the board: not deleted, and not approved more than three days ago (the server's cut, tasks.ps1).
+const onBoard = t => t.status !== 'removed' && !(t.status === 'done' && t.doneAt && Date.now() - Date.parse(t.doneAt) > 3 * 864e5);
+
 export async function snapshot() {
   const d = current();
-  return JSON.stringify({ project: PROJECTS.find(p => p.id === state.project), lanes: d.lanes, conductor: conductorView(d), main: d.main, tasks: d.tasks.filter(t => t.status !== 'removed') });
+  // Another sample project with a card waiting, to show the project picker's mark for it.
+  const others = state.project === 'sample-game' ? [{ id: 'sky-farm', name: 'Sky Farm', stuck: 1, ready: 0, asks: 0 }] : [];
+  return JSON.stringify({ rocco: 'demo', project: { template: false, ...PROJECTS.find(p => p.id === state.project) }, lanes: d.lanes, conductor: conductorView(d), main: d.main, tasks: d.tasks.filter(onBoard), others });
+}
+
+// ---- The archive, usage, one task, and a changed file's lines (tasks.ps1, sessions.ps1, history.ps1) ----
+
+// Tasks finished long ago: what the sample game's archive holds. Each: id, title, note, days ago, seconds at work,
+// tokens used.
+const OLD = /** @type {[string, string, string, number, number, number][]} */ ([
+  ['T-012', 'Trade window opens from the HUD', 'trade window should open from a HUD button', 21, 5400, 1.9e6],
+  ['T-015', 'Coins save on leave', 'coins reset when i leave quick', 18, 2700, 0.8e6],
+  ['T-019', 'Shop sign faces the path', 'the shop sign faces the wall', 12, 900, 0.3e6],
+  ['T-023', 'Pets idle animation', 'pets just stand still, give them an idle', 9, 6100, 2.4e6],
+  ['T-027', 'Old tutorial arrow', 'remove the old tutorial arrow', 7, 0, 0],
+]).map(([id, title, note, days, worked, used], n) => ({ id, title, note, kind: 'task', type: n % 2 ? 'tweak' : 'bug', status: id === 'T-027' ? 'removed' : 'done', pending: '', attempt: 1, where: 'main',
+  lane: (n % 4) + 1, branch: id === 'T-027' ? '' : `agent/${title.toLowerCase().replace(/[^a-z]+/g, '-')}`, summary: id === 'T-027' ? '' : `${title}.`, test: '', questions: [], shots: [], after: [], plan: '', steps: [],
+  created: ago(days * 1440 + 300), updated: ago(days * 1440), doneAt: id === 'T-027' ? null : ago(days * 1440), worked, used,
+  log: [{ who: 'conductor', at: ago(days * 1440 + 200), text: `Lane ${(n % 4) + 1}.` }, { who: 'you', at: ago(days * 1440), text: id === 'T-027' ? 'Deleted.' : 'Approved.' }] }));
+
+export async function archive(q = '', skip = 0) {
+  if (state.project !== 'sample-game') return { total: 0, skip, tasks: [] };
+  const words = String(q).toLowerCase().split(/\s+/).filter(Boolean);
+  const gone = current().tasks.filter(t => !onBoard(t));
+  const rows = [...gone, ...OLD].filter(t => words.every(w => `${t.id} ${t.title} ${t.note} ${t.summary || ''} ${(t.log || []).map(l => l.text).join(' ')}`.toLowerCase().includes(w)));
+  return { total: rows.length, skip, tasks: rows.slice(skip, skip + 50) };
+}
+
+export async function task(id) {
+  const t = find(id) || OLD.find(x => x.id === id);
+  if (!t) throw Object.assign(new Error(`There's no task ${id} in this project.`), { status: 404 });
+  return t;
+}
+
+// What a task's sessions used: a made-up count that grows with its time at work.
+const usedBy = t => { const n = t.used ?? Math.round(((t.worked || 0) + (t.workSince ? (Date.now() - Date.parse(t.workSince)) / 1000 : 0)) * 2400); return { in: Math.round(n * 0.0001), out: Math.round(n * 0.012), cacheRead: Math.round(n * 0.95), cacheWrite: Math.round(n * 0.038) }; };
+
+export async function usage() {
+  if (state.project !== 'sample-game') return { tasks: [], plans: [], conductor: null, sessions: 0 };
+  const all = [...current().tasks, ...OLD];
+  const tasks = all.filter(t => t.worked || t.workSince || t.used).map(t => ({
+    id: t.id, title: t.title, status: t.status, plan: t.plan || '', lane: t.lane ?? null, attempt: t.attempt || 1, doneAt: t.doneAt || null,
+    worked: Math.round((t.worked || 0) + (t.status === 'working' && t.workSince ? (Date.now() - Date.parse(t.workSince)) / 1000 : 0)), ...usedBy(t), sessions: 1, models: ['claude-opus-5-5'],
+  })).sort((a, b) => (b.cacheRead + b.out) - (a.cacheRead + a.out));
+  return { tasks, sessions: tasks.length, plans: all.filter(t => t.kind === 'plan').map(p => ({ id: p.id, title: p.title })),
+    conductor: { in: 456, out: 107401, cacheRead: 42343467, cacheWrite: 553499, messages: 200, model: 'claude-opus-5-5' } };
+}
+
+export async function diff(id, path) {
+  const text = [`diff --git a/${path} b/${path}`, 'index 4f2a1c9..b81e0d3 100644', `--- a/${path}`, `+++ b/${path}`, '@@ -12,7 +12,9 @@ function Occlusion.update(camera, head)',
+    '   local params = RaycastParams.new()', '   params.FilterDescendantsInstances = { head.Parent }', '-  local back = head.CFrame.LookVector * -1', '-  local hit = workspace:Raycast(head.Position, back * distance, params)',
+    '+  -- From the head to where the camera wants to be: a wall at the side counts too.', '+  local toCamera = camera.CFrame.Position - head.Position', '+  local hit = workspace:Raycast(head.Position, toCamera, params)',
+    '   if hit then', '+    camera.CFrame = CFrame.new(hit.Position + hit.Normal * 0.4, head.Position)', '   end', ' end'].join('\n');
+  return { path, binary: /\.(png|rbxm|ogg)$/i.test(path), text: /\.(png|rbxm|ogg)$/i.test(path) ? '' : text, cut: false };
+}
+
+export async function checkOutput(id, name) {
+  return name === 'check-1.txt'
+    ? 'CameraWalls: 6 spots\n  shop door ........ clear\n  stairs corner .... CLIPPED (0.0 studs)\n  hallway mid ...... clear\n  hallway end ...... CLIPPED (0.0 studs)\n  counter .......... clear\n  back room ........ clear\n\n2 of 6 spots clip. FAILED'
+    : 'CameraWalls: 6 spots\n  shop door ........ clear\n  stairs corner .... clear\n  hallway mid ...... clear\n  hallway end ...... clear\n  counter .......... clear\n  back room ........ clear\n\n6 of 6 spots clear. PASSED\n\nStudio console: no errors, 1 warning\n  [warn] Occlusion: camera pulled in 14 times this run';
 }
 
 export async function me() {
@@ -314,13 +385,27 @@ export async function link(service, key) {
 }
 export async function unlink(service) { if (service === 'roblox') robloxKey = null; else eleven = null; return { ok: true }; }
 
-export async function note(text, type) {
+// hold: the note waits for its screenshots (the server keeps it from the conductor until release).
+export async function note(text, type, hold = false) {
   const title = (text || 'Screenshot').split('\n')[0], question = type === 'question';
   const t = { id: `T-${next++}`, kind: question ? 'question' : 'note', type: type || '', attempt: 1, where: 'main', title, note: text, shots: [], options: [], log: [] };
-  current().tasks.push(toConductor(t, question ? 'question' : 'plan'));
+  current().tasks.push(toConductor(t, hold ? '' : question ? 'question' : 'plan'));
+  if (hold) { t.uploading = new Date().toISOString(); t.waiting = 'Adding its screenshots'; return { id: t.id }; }
   addLine(current(), 'sent', { act: question ? 'question' : 'note', task: t.id, title, text }, 'you');
   if (question) answerSoon(t);
   return { id: t.id };
+}
+
+// The held note's screenshots are on it (or didn't make it): the conductor gets it now.
+export async function release(id) {
+  const t = find(id);
+  if (!t) throw new Error(`There's no task ${id}.`);
+  if (!t.uploading) return { ok: true, opened: '' };
+  const question = t.kind === 'question';
+  Object.assign(t, { uploading: null, pending: question ? 'question' : 'plan', waiting: 'Waiting for the conductor' });
+  addLine(current(), 'sent', { act: question ? 'question' : 'note', task: t.id, title: t.title, text: t.note }, 'you');
+  if (question) answerSoon(t);
+  return { ok: true, opened: '' };
 }
 
 // The demo's conductor answers questions after a few seconds.
@@ -376,6 +461,31 @@ export async function act(id, action, text) {
       break;
     }
     case 'approve-plan': Object.assign(t, { status: 'queued', pending: 'approved', waiting: 'Waiting for the conductor' }); say('Approved the plan.'); break;
+    // Stepping in on its worker, as the server does: the demo's conductor "handles" each a few seconds later.
+    case 'pause':
+      t.held = true; say('Paused.');
+      if (t.status === 'working' || t.status === 'stuck') { t.pending = 'stop'; setTimeout(() => { if (t.pending === 'stop') Object.assign(t, { status: 'queued', pending: '', order: nextOrder(), workSince: null, step: '', progress: null }); }, 3000); }
+      break;
+    case 'resume':
+      if (!t.held) throw new Error(`${id} isn't paused.`);
+      t.held = false; say('Resumed.');
+      if (t.pending === 'stop') t.pending = '';
+      else if (t.status === 'queued') { toConductor(t, 'resume'); setTimeout(() => { if (t.pending === 'resume') Object.assign(t, { status: 'working', pending: '', waiting: '', startedAt: new Date().toISOString(), workSince: new Date().toISOString(), step: 'Carrying on' }); }, 3000); }
+      break;
+    case 'restart':
+      t.attempt += 1; t.held = false; t.pending = 'restart'; say(text ? `Start again with a fresh worker: ${text}` : 'Start again with a fresh worker.');
+      setTimeout(() => { if (t.pending === 'restart') Object.assign(t, { pending: '', status: 'working', startedAt: new Date().toISOString(), step: 'Starting again', progress: null }); }, 3000);
+      break;
+    case 'assign': {
+      const lane = /lane\s*=\s*(\d+)/i.exec(text || ''), tier = /tier\s*=\s*([a-z]+)/i.exec(text || '');
+      if (!lane && !tier) throw new Error('Say which lane or worker: lane=3, tier=heavy.');
+      if (tier && !['any', 'heavy', 'standard', 'light'].includes(tier[1].toLowerCase())) throw new Error('A worker is one of: heavy, standard, light.');
+      if (lane) t.wantLane = +lane[1] || null;
+      if (tier) t.wantTier = tier[1].toLowerCase() === 'any' ? '' : tier[1].toLowerCase();
+      say(`Use ${[lane && (+lane[1] ? `lane ${lane[1]}` : 'any lane'), tier && (t.wantTier ? `the ${t.wantTier} worker` : 'any worker')].filter(Boolean).join(', ')}.`);
+      if (t.status === 'working' || t.status === 'stuck') { t.pending = 'assign'; setTimeout(() => { if (t.pending === 'assign') Object.assign(t, { pending: '', lane: t.wantLane || t.lane }); }, 3000); }
+      break;
+    }
     case 'revise': if (!text) throw new Error('Say what to change.'); t.pending = 'revise'; say(text); break;
     default: throw new Error(`Unknown action '${action}'.`);
   }
@@ -423,7 +533,8 @@ function demoSession() {
 }
 
 export async function sessions(id) {
-  return id === 'T-046' ? [{ key: 'agent-demo', desc: 'Camera clips into walls (T-046)', type: 'roblox-dev-standard', started: ago(12), size: demoSession().length }] : [];
+  return id === 'T-046' ? [{ key: 'agent-demo', desc: 'Camera clips into walls (T-046)', type: 'roblox-dev-standard', started: ago(12), size: demoSession().length, tasks: 1,
+    usage: { in: 72, out: 28924, cacheRead: 2924205, cacheWrite: 97639, messages: 36, model: 'claude-opus-5-5' } }] : [];
 }
 
 export async function session(id, key, from) {
@@ -459,11 +570,19 @@ const AGENTS = [{ id: 'claude', name: 'Claude Code', short: 'Claude' }, { id: 'c
 let agentId = 'claude';
 // Gemini CLI isn't on this sample PC until its Install window has run.
 const installed = id => id !== 'gemini' || fixed.has('gemini-update');
+// The conductor's model, kept per agent (server/agents.ps1): only Claude Code takes one from Rocco.
+const models = {};
 export async function agent() {
-  const a = AGENTS.find(x => x.id === agentId);
-  return { ...a, installed: installed(a.id), chosen: true, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+  const a = AGENTS.find(x => x.id === agentId), takes = a.id === 'claude';
+  return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] || '', takesModel: takes, models: takes ? ['fable', 'opus', 'sonnet', 'haiku', 'opusplan'] : [],
+    agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
 }
 export async function setAgent(id) { agentId = id; return agent(); }
+export async function setAgentModel(model) {
+  if (model && !/^[A-Za-z0-9][\w.:[\]-]{0,79}$/.test(model)) throw new Error("That doesn't look like a model's name (like opus, sonnet, or a full name such as claude-opus-5-5).");
+  models[agentId] = model;
+  return agent();
+}
 
 // Your accounts (server/accounts.ps1): Claude Code is signed in; Codex is installed but signed out until its sign-in window runs.
 const PLANS = { claude: 'A Claude Pro or Max plan, or Anthropic API credit', codex: 'A ChatGPT plan, or OpenAI API credit', gemini: 'A Google account (free to start), or a Gemini API key' };
@@ -523,13 +642,25 @@ export async function openLanes(project, count) {
   return { job: id, saved: { committed: true, pushed: true, note: '' } };
 }
 export async function openConductor() { const a = await agent(); return { agent: a.name }; }
+export async function restartConductor() {
+  const a = await agent(), d = current();
+  d.conductor = { state: 'listening', agent: a.name };
+  addLine(d, 'event', { text: 'You restarted the conductor' }, 'rocco');
+  return { agent: a.name };
+}
+export async function cancelJob(id) {
+  const j = jobs[id], running = !!j && Date.now() < j.until;
+  if (running) { j.until = 0; j.stopped = true; }
+  return { stopped: running };
+}
 export async function job(id) {
   const j = jobs[id], running = Date.now() < j.until;
+  if (j.stopped) return { running: false, ok: false, project: j.name, output: 'Stopped: you cancelled it.' };
   if (j.lanes) {
     if (!running) j.lanes.lanes = { ...j.lanes.lanes, main: true, open: Array.from({ length: j.count }, (_, i) => i + 1) };
     return { running, ok: !running, project: j.name, output: running ? 'Lane 1: making its checkout' : `Open: Main and ${j.count} lanes.` };
   }
-  if (!running && !PROJECTS.some(p => p.id === j.name)) PROJECTS.push({ id: j.name, name: j.name, phase: 'Pitch' });
+  if (!running && !PROJECTS.some(p => p.id === j.name)) PROJECTS.push({ id: j.name, name: j.name, phase: 'Pitch', template: false });
   return { running, ok: !running, project: j.name, output: running ? 'Copying the template ...' : `${j.name} is ready.` };
 }
 
@@ -808,6 +939,11 @@ export async function makeConcepts(direction, count) {
   const t = thumbs();
   const d = DIRECTIONS.find(x => x.id === direction);
   t.run = { running: true, direction: d.name, count, done: 0, started: ago(0), error: '', at: Date.now() };
+  return t.run;
+}
+export async function cancelConcepts() {
+  const t = thumbs();
+  if (t.run?.running) t.run = { ...t.run, running: false, error: 'Stopped.' };
   return t.run;
 }
 export async function useConcept(file) {

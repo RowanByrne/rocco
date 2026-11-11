@@ -43,7 +43,7 @@ const HEART = `<svg viewBox="0 0 7 6" width="10" height="9" shape-rendering="cri
   .flatMap((row, y) => [...row].map((c, x) => c === 'X' ? `<rect x="${x}" y="${y}" width="1" height="1" fill="#ff8fc7"/>` : '')).join('')}</svg>`;
 
 let el, box, text, ctx;
-let pos = 140, face = 1, act = '', mood = 'smile';
+let pos = 140, face = 1, act = '';
 let running = false, watching = false, asleep = false;
 let gen = 0, raf = 0, seqTimer = 0, fxTimer = 0, sayTimer = 0;
 let lastType = 0, lastUser = Date.now(), counts = null;
@@ -55,7 +55,7 @@ const clamp = x => { const b = bounds(); return Math.min(b.hi, Math.max(b.lo, x)
 // Whole cells only, so the pixels stay sharp.
 const place = () => { el.style.transform = `translateX(${Math.round((pos - MID) / 2) * 2}px)`; };
 const setFace = f => { face = f; el.style.setProperty('--face', f); };
-const setMood = m => { mood = m; el.dataset.mood = m; };
+const setMood = m => { el.dataset.mood = m; };
 const look = (dx, dy) => el.querySelector('.m-look').setAttribute('transform', `translate(${Math.round(dx * 2) / 2} ${Math.round(dy * 2) / 2})`);
 
 // Eyes toward a point on the page, in his own (possibly flipped) frame.

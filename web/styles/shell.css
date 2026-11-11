@@ -60,6 +60,7 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; }
 .live { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .live.idle { background: var(--gray); box-shadow: none; }
 .live.off { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.live.warn { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
 .lane-grid { display: grid; gap: 4px; }
 .lane-grid:empty { display: none; }
 .ln { height: 18px; display: grid; place-items: center; border-radius: 5px; font-size: 10px; font-weight: 600; font-style: normal; font-variant-numeric: tabular-nums;

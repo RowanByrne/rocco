@@ -17,7 +17,8 @@ const CAPS_LEAD = /(^|\n)([ \t]*(?:[-*]\s+|\d+[.)]\s+)?)([A-Z]{2,}):/g;
 // Words that stay as they are in a run: names written in capitals elsewhere (DRIFTO's road), or with a capital (Rocco).
 function namesIn(text) {
   const names = new Map();
-  const outside = text.replace(CAPS_RUN, ' ');
+  // Outside the shouting itself: a run of capitals, or a lead-in like "NOTE:", doesn't make its own words names.
+  const outside = text.replace(CAPS_RUN, ' ').replace(CAPS_LEAD, '$1$2 ');
   for (const m of outside.matchAll(/\b[A-Z][A-Za-z]+\b/g)) {
     const w = m[0], key = w.toUpperCase();
     // A capital that starts a sentence isn't a name.

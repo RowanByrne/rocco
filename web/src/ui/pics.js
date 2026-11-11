@@ -3,21 +3,24 @@
 // others in its set a key away and, for an option, a button that picks it.
 //
 // A set is the element with data-pic-set around a question's pictures; the caller's pick gets the label and the set.
-import { $, esc } from '../lib/dom.js';
+import { $ } from '../lib/dom.js';
+import { html, render, nothing, ifDefined, fixed } from '../lib/html.js';
 
-const arrow = d => `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+const arrow = d => fixed(`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`);
+const PREV = arrow('M15 6l-6 6 6 6'), NEXT = arrow('M9 6l6 6-6 6');
 let list = [], at = 0, onPick = null, set = null, ready = false;
 
 const modal = () => $('#picModal');
 
 // The question's own pictures, in a row.
-export const picsHTML = srcs => (srcs || []).filter(Boolean).length
-  ? `<div class="pics">${srcs.filter(Boolean).map((src, i) => `<button type="button" class="pic-img" data-pic-src="${esc(src)}" title="See it bigger"><img src="${esc(src)}" alt="Picture ${i + 1}" loading="lazy"></button>`).join('')}</div>` : '';
+export function pics(srcs) {
+  const shown = (srcs || []).filter(Boolean);
+  return shown.length ? html`<div class="pics">${shown.map((src, i) => html`<button type="button" class="pic-img" data-pic-src=${src} title="See it bigger"><img src=${src} alt="Picture ${i + 1}" loading="lazy"></button>`)}</div>` : nothing;
+}
 
-// An option with a picture: the picture opens it big, the label under it picks it. attrs: what makes the label a pick.
-export const picOptionHTML = (o, src, attrs, on, extra = '') => `<div class="pic-opt${on ? ' on' : ''}">`
-  + `<button type="button" class="pic-img" data-pic-src="${esc(src)}" data-pic-label="${esc(o.label)}" data-pic-detail="${esc(o.detail || '')}" title="See it bigger"><img src="${esc(src)}" alt="${esc(o.label)}" loading="lazy"></button>`
-  + `<span class="pic-row"><button type="button" class="opt${on ? ' on' : ''}" ${attrs}${o.detail ? ` title="${esc(o.detail)}"` : ''}><span>${esc(o.label)}</span></button>${extra}</span></div>`;
+// An option with a picture: the picture opens it big, the label under it picks it. data: what makes the label a pick,
+// as the data attributes the caller's click handler reads ({ pick, q } on a task, { cPick, ask } on the conductor's).
+export const picOption = (o, src, data, on, extra = nothing) => html`<div class="pic-opt${on ? ' on' : ''}"><button type="button" class="pic-img" data-pic-src=${src} data-pic-label=${o.label} data-pic-detail=${o.detail || ''} title="See it bigger"><img src=${src} alt=${o.label} loading="lazy"></button><span class="pic-row"><button type="button" class="opt${on ? ' on' : ''}" data-pick=${ifDefined(data.pick)} data-q=${ifDefined(data.q)} data-c-pick=${ifDefined(data.cPick)} data-ask=${ifDefined(data.ask)} title=${ifDefined(o.detail || undefined)}><span>${o.label}</span></button>${extra}</span></div>`;
 
 // Opens the clicked picture big. pick(label, set) is called when the user picks an option's picture there.
 export function openPicsFrom(button, pick) {
@@ -27,24 +30,25 @@ export function openPicsFrom(button, pick) {
   at = Math.max(0, all.indexOf(button));
   onPick = pick;
   if (!ready) init();
-  render();
+  draw();
   modal().classList.add('open');
+  modal().querySelector('[data-pv="close"]')?.focus();
 }
 
-function render() {
+function draw() {
   const p = list[at];
   if (!p) return;
   const many = list.length > 1;
-  modal().querySelector('.modal-card').innerHTML = `<div class="pv-stage"><img class="pv-img" src="${esc(p.src)}" alt="${esc(p.label)}">`
-    + (many ? `<button type="button" class="pv-nav prev" data-pv="prev" aria-label="Previous picture">${arrow('M15 6l-6 6 6 6')}</button>`
-      + `<button type="button" class="pv-nav next" data-pv="next" aria-label="Next picture">${arrow('M9 6l6 6-6 6')}</button>` : '') + '</div>'
-    + `<div class="pv-foot"><div class="pv-text">${p.label ? `<b>${esc(p.label)}</b>` : ''}${p.detail ? `<p>${esc(p.detail)}</p>` : ''}</div>`
-    + `${many ? `<span class="pv-n">${at + 1} of ${list.length}</span>` : ''}`
-    + `<div class="m-actions"><button type="button" class="btn" data-pv="close">Close</button>`
-    + `${p.label && onPick ? `<button type="button" class="btn accent" data-pv="pick">Pick “${esc(p.label)}”</button>` : ''}</div></div>`;
+  const nav = many ? html`<button type="button" class="pv-nav prev" data-pv="prev" aria-label="Previous picture">${PREV}</button><button type="button" class="pv-nav next" data-pv="next" aria-label="Next picture">${NEXT}</button>` : nothing;
+  render(html`<div class="pv-stage"><img class="pv-img" src=${p.src} alt=${p.label}>${nav}</div><div class="pv-foot"><div class="pv-text">${
+    p.label ? html`<b>${p.label}</b>` : nothing}${p.detail ? html`<p>${p.detail}</p>` : nothing}</div>${
+    many ? html`<span class="pv-n">${at + 1} of ${list.length}</span>` : nothing
+  }<div class="m-actions"><button type="button" class="btn" data-pv="close">Close</button>${
+    p.label && onPick ? html`<button type="button" class="btn accent" data-pv="pick">Pick “${p.label}”</button>` : nothing}</div></div>`,
+  modal().querySelector('.modal-card'));
 }
 
-const step = n => { at = (at + n + list.length) % list.length; render(); };
+const step = n => { at = (at + n + list.length) % list.length; draw(); };
 
 export const picViewOpen = () => !!modal()?.classList.contains('open');
 export function closePicView() { modal()?.classList.remove('open'); }

@@ -14,7 +14,8 @@ export function stopCapture() {
 }
 
 async function start() {
-  stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'window' }, audio: false, preferCurrentTab: false });
+  // preferCurrentTab is newer than the types the check knows.
+  stream = await navigator.mediaDevices.getDisplayMedia(/** @type {any} */ ({ video: { displaySurface: 'window' }, audio: false, preferCurrentTab: false }));
   video = document.createElement('video');
   video.muted = true;
   video.srcObject = stream;

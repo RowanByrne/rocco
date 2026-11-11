@@ -1,6 +1,7 @@
 // The sidebar: project picker, navigation, Main and the lanes, and the user.
 import { state, emit, currentProject } from './state.js';
-import { $, $$, esc } from './lib/dom.js';
+import { $, $$ } from './lib/dom.js';
+import { html, render, nothing } from './lib/html.js';
 import { agoText, initial, logoVars } from './lib/format.js';
 import { icon } from './lib/icons.js';
 import { storage } from './lib/storage.js';
@@ -26,11 +27,13 @@ export function renderSidebar() {
   $('#projName').textContent = p.name || 'Rocco';
   $('#projSub').textContent = DEMO ? `${p.phase || ''} · demo data` : (p.phase || '');
 
-  // Main: green while Lync serves it, grey when it doesn't, red when the Rocco server is gone.
+  // Main: green while Lync serves it, grey when it doesn't, red when the Rocco server is gone, amber when it
+  // answers with an error (sync.js).
   const lanes = state.meta.lanes || { count: 0, open: [], main: false };
-  $('#liveDot').className = 'live' + (!state.online ? ' off' : lanes.main ? '' : ' idle');
-  $('#mainAgo').textContent = state.online ? agoText(state.meta.main.at) : 'Rocco offline';
+  $('#liveDot').className = 'live' + (!state.online ? ' off' : state.problem ? ' warn' : lanes.main ? '' : ' idle');
+  $('#mainAgo').textContent = !state.online ? 'Rocco offline' : state.problem ? 'Rocco error' : agoText(state.meta.main.at);
   $('#mainStat').title = !state.online ? 'The Rocco server stopped. Run tools\\rocco.bat in any project.'
+    : state.problem ? `The Rocco server answered with an error: ${state.problem}`
     : `${lanes.main ? 'Lync is serving Main.' : 'Lync isn\'t serving Main.'}${state.meta.main.subject ? ` Last change: ${state.meta.main.subject}` : ''}`;
 
   // Lanes: one labeled chip per lane this PC opens, up to 8 a row, outlined while its Lync isn't serving. The key below says what each color means.
@@ -49,7 +52,7 @@ export function renderSidebar() {
     : game && lanes.mine == null ? 'Set up'
     : `${[...open].filter(n => n <= lanes.count).length} open · ${bars.filter(b => b.busy).length} busy`;
   $('#lanes').style.gridTemplateColumns = `repeat(${Math.min(lanes.count, 8) || 1}, 1fr)`;
-  $('#lanes').innerHTML = bars.map(b => `<span class="ln ${b.cls}" title="${esc(b.tip)}">L${b.n}</span>`).join('');
+  render(bars.map(b => html`<span class="ln ${b.cls}" title=${b.tip}>L${b.n}</span>`), $('#lanes'));
 }
 
 // ---- Navigation: categories fold, and categories and the tabs in them drag into the user's order. Kept in this browser. ----
@@ -111,10 +114,10 @@ function initNav() {
 
 // ---- The user ----
 
-const avatarHTML = () => state.me?.avatar ? `<img src="${esc(state.me.avatar)}" alt="" referrerpolicy="no-referrer">` : esc(initial(state.me?.name || 'You'));
+const avatar = () => state.me?.avatar ? html`<img src=${state.me.avatar} alt="" referrerpolicy="no-referrer">` : initial(state.me?.name || 'You');
 
 export function renderMe() {
-  $('#meAvatar').innerHTML = avatarHTML();
+  render(avatar(), $('#meAvatar'));
   $('#meName').textContent = state.me?.name || 'You';
   $('#meSub').textContent = state.me?.pc || '';
 }
@@ -123,25 +126,29 @@ export async function loadMe() {
   try { state.me = await api.me(); emit('me'); } catch { /* the sidebar shows the server is offline */ }
 }
 
-function meMenuHTML() {
+function meMenu() {
   const m = state.me || {};
-  const row = (key, value) => value ? `<div class="kv"><span>${key}</span><span title="${esc(value)}">${esc(value)}</span></div>` : '';
-  return `<div class="me-card"><span class="avatar">${avatarHTML()}</span><span class="ws-text"><span class="ws-name">${esc(m.name || 'You')}</span>`
-    + `<span class="ws-sub">${esc(m.login ? '@' + m.login : m.email || '')}</span></span></div><div class="menu-sep"></div>`
-    + row('Agent', state.agent?.name) + row('Claude account', m.claude) + row('Git email', m.email) + row('This PC', m.pc)
-    + row('Lanes here', state.meta.lanes.count ? `${state.meta.lanes.count} for this project` : '')
-    + `<div class="menu-sep"></div><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button>`
-    + `<button class="menu-item" data-goto="settings" role="menuitem">${icon.sliders}<span class="mi-text">Settings</span></button>`;
+  const row = (key, value) => value ? html`<div class="kv"><span>${key}</span><span title=${value}>${value}</span></div>` : nothing;
+  return html`<div class="me-card"><span class="avatar">${avatar()}</span><span class="ws-text"><span class="ws-name">${m.name || 'You'}</span><span class="ws-sub">${m.login ? '@' + m.login : m.email || ''}</span></span></div><div class="menu-sep"></div>${
+    row('Agent', state.agent?.name)}${row('Claude account', m.claude)}${row('Git email', m.email)}${row('This PC', m.pc)}${
+    row('Lanes here', state.meta.lanes.count ? `${state.meta.lanes.count} for this project` : '')
+  }<div class="menu-sep"></div><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button><button class="menu-item" data-goto="settings" role="menuitem">${icon.sliders}<span class="mi-text">Settings</span></button>`;
 }
 
 // ---- Projects ----
 
-function projectMenuHTML() {
-  return `<div class="menu-label">Projects</div>`
-    + state.projects.map(p => `<button class="menu-item" data-project="${esc(p.id)}" role="menuitem"><span class="logo sm" style="${logoVars(p.id)}">${initial(p.name)}</span>`
-      + `<span class="mi-text"><span class="mi-name">${esc(p.name)}</span><span class="mi-sub">${esc(p.phase)}</span></span>`
-      + `${p.id === state.project ? `<span class="tick">${icon.checkSm}</span>` : ''}</button>`).join('')
-    + `<div class="menu-sep"></div><button class="menu-item" data-new-project role="menuitem"><span class="add-tile">${icon.plus}</span><span class="mi-text">New project</span></button>`;
+// What another project wants the user for (sync.js keeps state.others): shown beside it, so work there isn't left waiting.
+function wantsOf(id) {
+  const o = state.others.find(x => x.id === id);
+  if (!o) return nothing;
+  const parts = [o.asks && `${o.asks} question${o.asks === 1 ? '' : 's'} from its conductor`, o.stuck && `${o.stuck} stuck`, o.ready && `${o.ready} to test`].filter(Boolean);
+  return html`<span class="mi-wants" title=${parts.join(', ')}>${(o.asks || 0) + (o.stuck || 0) + (o.ready || 0)}</span>`;
+}
+
+function projectMenu() {
+  return html`<div class="menu-label">Projects</div>${state.projects.map(p => html`<button class="menu-item" data-project=${p.id} role="menuitem"><span class="logo sm" style=${logoVars(p.id)}>${initial(p.name)}</span><span class="mi-text"><span class="mi-name">${p.name}</span><span class="mi-sub">${p.phase}</span></span>${wantsOf(p.id)}${
+    p.id === state.project ? html`<span class="tick">${icon.checkSm}</span>` : nothing}</button>`)
+  }<div class="menu-sep"></div><button class="menu-item" data-new-project role="menuitem"><span class="add-tile">${icon.plus}</span><span class="mi-text">New project</span></button>`;
 }
 
 export function initSidebar() {
@@ -160,14 +167,14 @@ export function initSidebar() {
   $$('.nav a').forEach(a => a.addEventListener('click', e => { e.preventDefault(); go(a.dataset.view); }));
   initNav();
 
-  $('#projBtn').addEventListener('click', () => openMenu($('#projMenu'), $('#projBtn'), projectMenuHTML()));
+  $('#projBtn').addEventListener('click', () => openMenu($('#projMenu'), $('#projBtn'), projectMenu()));
   $('#projMenu').addEventListener('click', e => {
     const project = e.target.closest('[data-project]');
     if (project) { closeMenus(); switchProject(project.dataset.project); }
     else if (e.target.closest('[data-new-project]')) { closeMenus(); openOnboarding(); }
   });
 
-  $('#meBtn').addEventListener('click', () => openMenu($('#meMenu'), $('#meBtn'), meMenuHTML(), { up: true }));
+  $('#meBtn').addEventListener('click', () => openMenu($('#meMenu'), $('#meBtn'), meMenu(), { up: true }));
   $('#meMenu').addEventListener('click', e => {
     const target = e.target.closest('[data-goto]');
     if (target) { closeMenus(); go(target.dataset.goto); }

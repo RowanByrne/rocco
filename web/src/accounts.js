@@ -3,8 +3,8 @@
 // and the Vital section of Connections. Installs and sign-ins run the tool's own command in a window of its own
 // (actions.ps1); when it closes, the accounts are checked again.
 import { state, emit } from './state.js';
-import { esc } from './lib/dom.js';
-import { logoHTML } from './lib/brands.js';
+import { html, nothing, ifDefined } from './lib/html.js';
+import { logo } from './lib/brands.js';
 import { api } from './api.js';
 import { toast } from './ui/toast.js';
 import { chooseAgent, loadAgent } from './agent.js';
@@ -58,27 +58,27 @@ export async function useAgent(id) {
 // ---- Rows ----
 
 export const windowButton = (action, label, cls = 'btn-sm') => running.has(action)
-  ? `<button class="${cls}" disabled><span class="spin"></span>In its window</button>` : `<button class="${cls}" data-acc-run="${esc(action)}">${label}</button>`;
+  ? html`<button class=${cls} disabled><span class="spin"></span>In its window</button>` : html`<button class=${cls} data-acc-run=${action}>${label}</button>`;
 
-// tone: ok, update, warn, bad or off. attrs: extra attributes for the row (Connections opens its details).
-export function accRowHTML({ name, need, tone, detail, buttons = '', chip = '', form = '', attrs = '' }) {
-  return `<div class="acc-row k-${tone}"${attrs}>${logoHTML({ name }, 'sm')}<div class="acc-text"><div class="acc-name">${esc(name)}${chip}</div>`
-    + (need ? `<div class="acc-need">${esc(need)}</div>` : '') + `<div class="acc-state"><i></i><span>${esc(detail)}</span></div></div>`
-    + `<div class="acc-btns">${buttons}</div>${form}</div>`;
+// tone: ok, update, warn, bad or off. buttons, chip and form are templates. conn: the connection whose details the
+// row opens (Connections).
+export function accRow({ name, need, tone, detail, buttons = nothing, chip = nothing, form = nothing, conn = null }) {
+  return html`<div class="acc-row k-${tone}" data-conn=${ifDefined(conn)}>${logo({ name }, 'sm')}<div class="acc-text"><div class="acc-name">${name}${chip}</div>${
+    need ? html`<div class="acc-need">${need}</div>` : nothing}<div class="acc-state"><i></i><span>${detail}</span></div></div><div class="acc-btns">${buttons}</div>${form}</div>`;
 }
 
-export const chip = text => `<span class="acc-chip">${esc(text)}</span>`;
+export const chip = text => html`<span class="acc-chip">${text}</span>`;
 
 // Install or sign in: whatever the account needs next.
 export const fixButtons = x => x.state === 'missing' ? windowButton(x.install, 'Install')
-  : x.state === 'signin' || x.state === 'expired' ? windowButton(x.login, 'Sign in', 'btn-sm go') : '';
+  : x.state === 'signin' || x.state === 'expired' ? windowButton(x.login, 'Sign in', 'btn-sm go') : nothing;
 
 // The one this PC uses must be ready; the others are optional.
 export const agentTone = x => x.state === 'ok' ? 'ok' : x.chosen ? 'warn' : 'off';
 
-export function agentRowHTML(x) {
-  const pick = x.state !== 'missing' && !x.chosen ? `<button class="btn-sm" data-acc-use="${esc(x.id)}">Use this one</button>` : '';
-  return accRowHTML({ name: x.name, need: x.plan, tone: agentTone(x), detail: x.detail, buttons: fixButtons(x) + pick, chip: x.chosen ? chip('Your agent') : '' });
+export function agentRow(x) {
+  const pick = x.state !== 'missing' && !x.chosen ? html`<button class="btn-sm" data-acc-use=${x.id}>Use this one</button>` : nothing;
+  return accRow({ name: x.name, need: x.plan, tone: agentTone(x), detail: x.detail, buttons: html`${fixButtons(x)}${pick}`, chip: x.chosen ? chip('Your agent') : nothing });
 }
 
 // Codex makes the images, whichever agent the PC uses.

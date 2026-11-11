@@ -7,8 +7,9 @@
 // lane's, in Studio, with Lync syncing each) while the agent writes the docs and plans the first build, which the user
 // approves on the Workboard before anything is built. The lanes screen also opens on its own, from the sidebar.
 import { state, currentProject } from '../state.js';
-import { $, esc } from '../lib/dom.js';
-import { icon } from '../lib/icons.js';
+import { $ } from '../lib/dom.js';
+import { html, render, nothing, keyed, live, ifDefined } from '../lib/html.js';
+import { icon, lineIcon } from '../lib/icons.js';
 import { storage } from '../lib/storage.js';
 import { api, DEMO } from '../api.js';
 import { toast } from '../ui/toast.js';
@@ -16,7 +17,7 @@ import { loadProjects, switchProject } from '../projects.js';
 import { go } from '../router.js';
 import { agentName } from '../agent.js';
 import { LINKS } from '../views/connections.js';
-import { loadAccounts, yourAgent, notReady, runAccountAction, useAgent, accRowHTML, agentRowHTML, fixButtons, windowButton, imagesNeed } from '../accounts.js';
+import { loadAccounts, yourAgent, notReady, runAccountAction, useAgent, accRow, agentRow, fixButtons, windowButton, imagesNeed } from '../accounts.js';
 
 const root = $('#onboarding');
 const DRAFT = 'rocco.onboarding';
@@ -27,6 +28,9 @@ const KINDS = [
   ['place', 'In a place file', 'D:\\Places\\MyGame.rbxl', 'The place is copied into the project (and backed up); your agent exports its scripts.'],
   ['studio', 'Only in Studio', '', 'Open it in Studio when your agent asks: it exports the scripts from there.'],
 ];
+const CLOSE = lineIcon('<path d="M6 6l12 12M18 6L6 18"/>', 16, 2);
+const SPIN = html`<span class="spin"></span>`;
+const CTRL_ENTER = html` <kbd>Ctrl</kbd><kbd>Enter</kbd>`;
 let ob = null;     // the survey in progress: { mode, screen, flow, basics, answers, index, tile, job, project, setup, saved, unsent, error,
                    //   advice (this PC, for lanes), laneCount, lanesJob }
 let survey = null; // tools/onboarding.json
@@ -48,10 +52,10 @@ function readDraft() { try { return JSON.parse(storage.get(DRAFT) || 'null'); } 
 // A new game or one brought in. A survey left half-way is picked up where it was.
 export async function openOnboarding({ fresh = false } = {}) {
   try { survey = await api.survey(); } catch (e) { toast(`Couldn't load the onboarding: ${e.message}`, 'var(--red)'); return; }
-  const draft = fresh ? null : readDraft();
-  ob = draft ? { ...draft, unsent: new Set() } : { mode: 'start', screen: storage.get(SEEN) ? 'start' : 'accounts', flow: 'new', basics: { name: '', code: '', repo: '', kind: 'github', from: '' }, answers: {}, index: 0, unsent: new Set() };
+  const saved = fresh ? null : readDraft();
+  ob = saved ? { ...saved, unsent: new Set() } : { mode: 'start', screen: storage.get(SEEN) ? 'start' : 'accounts', flow: 'new', basics: { name: '', code: '', repo: '', kind: 'github', from: '' }, answers: {}, index: 0, unsent: new Set() };
   root.classList.add('open');
-  render();
+  draw();
   if (ob.job?.state === 'making') poll();
   checkAccounts(false);
 }
@@ -60,7 +64,7 @@ export async function openOnboarding({ fresh = false } = {}) {
 export function openLanesDialog() {
   ob = { mode: 'lanes', screen: 'lanes', project: state.project, laneCount: null, unsent: new Set() };
   root.classList.add('open');
-  render();
+  draw();
   loadAdvice(state.project);
 }
 
@@ -68,7 +72,7 @@ export function openLanesDialog() {
 export function openAccounts() {
   ob = { mode: 'accounts', screen: 'accounts', unsent: new Set() };
   root.classList.add('open');
-  render();
+  draw();
   checkAccounts(true);
 }
 
@@ -80,7 +84,7 @@ export async function openDetails() {
     ob = { mode: 'tiles', screen: 'tiles', flow: data.answers.flow || 'new', answers: { ...data.answers.answers }, project: state.project, unsent: new Set() };
   } catch (e) { toast(`Couldn't load the onboarding: ${e.message}`, 'var(--red)'); return; }
   root.classList.add('open');
-  render();
+  draw();
 }
 
 export function closeOnboarding() {
@@ -97,16 +101,17 @@ export function renderFirstGame() {
 }
 
 // ---- Screens ----
+// Each is a template. Labels and button text are plain text, or a template where they carry a spinner or keys.
 
-function topHTML(label, progress) {
-  return `<div class="ob-top"><span class="ob-label">${label}</span>`
-    + (progress !== undefined ? `<span class="ob-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : '<span class="sp"></span>')
-    + (ob.mode === 'start' && !['start', 'accounts'].includes(ob.screen) && !ob.setup ? '<button class="mini" data-ob="restart">Start over</button>' : '')
-    + `<button class="icon-btn" data-ob="close" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
+function top(label, progress) {
+  return html`<div class="ob-top"><span class="ob-label">${label}</span>${
+    progress !== undefined ? html`<span class="ob-progress"><i style="width:${Math.round(progress * 100)}%"></i></span>` : html`<span class="sp"></span>`}${
+    ob.mode === 'start' && !['start', 'accounts'].includes(ob.screen) && !ob.setup ? html`<button class="mini" data-ob="restart">Start over</button>` : nothing
+  }<button class="icon-btn" data-ob="close" aria-label="Close">${CLOSE}</button></div>`;
 }
 
-const foot = (left, right) => `<div class="ob-foot">${left || ''}<span class="sp"></span>${right || ''}</div>`;
-const button = (action, label, cls = 'btn', disabled = false) => `<button class="${cls}" data-ob="${action}"${disabled ? ' disabled' : ''}>${label}</button>`;
+const foot = (left, right) => html`<div class="ob-foot">${left || nothing}<span class="sp"></span>${right || nothing}</div>`;
+const button = (action, label, cls = 'btn', disabled = false) => html`<button class=${cls} data-ob=${action} ?disabled=${disabled}>${label}</button>`;
 
 // ---- Your accounts ----
 
@@ -114,54 +119,50 @@ const button = (action, label, cls = 'btn', disabled = false) => `<button class=
 // whether it's ready, with the tool's own install or sign-in one click away (accounts.js).
 async function checkAccounts(refresh) {
   checking = true;
-  if (ob?.screen === 'accounts') render();
+  if (ob?.screen === 'accounts') draw();
   await loadAccounts(refresh);
   checking = false;
-  rerenderAccounts();
+  redrawAccounts();
 }
 
-function rerenderAccounts() { if (onboardingOpen() && ['accounts', 'start', 'review'].includes(ob?.screen)) render(); }
+function redrawAccounts() { if (onboardingOpen() && ['accounts', 'start', 'review'].includes(ob?.screen)) draw(); }
 
 // ElevenLabs and Roblox: a key the user makes on the service's site and pastes here (the same link as in Connections).
-function keyRowHTML(service, need) {
+function keyRow(service, need) {
   const l = LINKS[service], k = state.accounts[service];
-  const form = linking === service ? `<div class="acc-form"><p class="acc-why">${esc(l.why)}</p>`
-    + `<div class="link-form"><input class="input" id="accKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your ${esc(l.name)} API key">`
-    + `<button class="btn accent" data-ob="acc-save:${service}">${busy ? '<span class="spin"></span>Checking' : 'Link'}</button></div>`
-    + `<div class="link-help">Make a key at <a href="${esc(l.keys)}" target="_blank" rel="noreferrer">${esc(new URL(l.keys).host)}</a>. ${esc(l.where)}</div></div>` : '';
-  return accRowHTML({ name: l.name, need, tone: k.linked ? 'ok' : 'off', detail: k.linked ? `Linked, with the key ending ${k.hint}` : 'Not linked',
-    buttons: k.linked ? '' : `<button class="btn-sm" data-ob="acc-link:${service}">${linking === service ? 'Cancel' : 'Link'}</button>`, form });
+  const form = linking === service ? html`<div class="acc-form"><p class="acc-why">${l.why}</p><div class="link-form"><input class="input" id="accKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your ${l.name} API key" .value=${live(keyDraft)}><button class="btn accent" data-ob="acc-save:${service}" ?disabled=${busy}>${
+    busy ? html`${SPIN}Checking` : 'Link'}</button></div><div class="link-help">Make a key at <a href=${l.keys} target="_blank" rel="noreferrer">${new URL(l.keys).host}</a>. ${l.where}</div></div>` : nothing;
+  return accRow({ name: l.name, need, tone: k.linked ? 'ok' : 'off', detail: k.linked ? `Linked, with the key ending ${k.hint}` : 'Not linked',
+    buttons: k.linked ? nothing : html`<button class="btn-sm" data-ob="acc-link:${service}">${linking === service ? 'Cancel' : 'Link'}</button>`, form });
 }
 
-function accountsHTML() {
+function accounts() {
   const alone = ob.mode === 'accounts', a = state.accounts;
-  const section = (title, sub, rows) => `<div class="acc-sec"><div class="acc-sec-head"><b>${title}</b><span>${sub}</span></div>${rows}</div>`;
-  const intro = '<h2 class="ob-title">Your accounts</h2><p class="ob-lede">RoDev runs on your own accounts: no AI plan comes with it, and nothing is shared. '
-    + 'Each tool below uses your own plan, signed in on this PC, and what it does counts against that plan. Sign in here; Rocco checks again when you come back.</p>';
+  const section = (title, sub, rows) => html`<div class="acc-sec"><div class="acc-sec-head"><b>${title}</b><span>${sub}</span></div>${rows}</div>`;
+  const intro = html`<h2 class="ob-title">Your accounts</h2><p class="ob-lede">RoDev runs on your own accounts: no AI plan comes with it, and nothing is shared. Each tool below uses your own plan, signed in on this PC, and what it does counts against that plan. Sign in here; Rocco checks again when you come back.</p>`;
   const next = button('acc-continue', alone ? 'Done' : !a || a.ready ? 'Continue' : 'Continue anyway', 'btn accent');
-  if (!a) return topHTML(alone ? 'Your accounts' : 'Before you start')
-    + `<div class="ob-body">${intro}<div class="ob-status"><span class="spin"></span><span>Checking this PC…</span></div></div>` + foot('', next);
+  const head = top(alone ? 'Your accounts' : 'Before you start');
+  if (!a) return html`${head}<div class="ob-body">${intro}<div class="ob-status">${SPIN}<span>Checking this PC…</span></div></div>${foot(nothing, next)}`;
   const mine = yourAgent(), images = { ...a.images, name: 'Codex' };
-  return topHTML(alone ? 'Your accounts' : 'Before you start')
-    + `<div class="ob-body">${intro}`
-    + section('A coding agent', 'Needed. One is enough: it plans, builds and keeps the docs, in your name.', a.agents.map(agentRowHTML).join(''))
-    + (mine && !a.ready ? `<div class="ob-status warn">${icon.alert}<span>${esc(mine.name)} ${notReady(mine)} yet. You can still go on: the game is made, and its setup waits in Up next until your agent is ready.</span></div>` : '')
-    + section('Images', 'Recommended. Without it, this PC can\'t make art.',
-      accRowHTML({ name: 'Codex', need: imagesNeed(), tone: images.state === 'ok' ? 'ok' : 'warn', detail: images.detail, buttons: fixButtons(images) }))
-    + section('Later, when you need them', 'Optional. Each can be linked any time in Connections.',
-      accRowHTML({ name: 'GitHub', need: 'Your own account: where each game\'s code is kept, and how your PCs share it.', tone: a.github.state === 'ok' ? 'ok' : 'off', detail: a.github.detail,
-        buttons: a.github.login ? windowButton(a.github.login, 'Sign in', 'btn-sm go') : '' })
-      + keyRowHTML('elevenlabs', 'Sound effects and music. Game audio needs a paid plan (Starter or above).')
-      + keyRowHTML('roblox', 'The game page: events, thumbnails and how each one does. Once the game is on Roblox.'))
-    + '</div>'
-    + foot(button('acc-check', checking ? '<span class="spin"></span>Checking' : 'Check again', 'btn ghost-btn', checking), next);
+  return html`${head}<div class="ob-body">${intro}${
+    section('A coding agent', 'Needed. One is enough: it plans, builds and keeps the docs, in your name.', a.agents.map(agentRow))}${
+    mine && !a.ready ? html`<div class="ob-status warn">${icon.alert}<span>${mine.name} ${notReady(mine)} yet. You can still go on: the game is made, and its setup waits in Up next until your agent is ready.</span></div>` : nothing}${
+    section('Images', 'Recommended. Without it, this PC can\'t make art.',
+      accRow({ name: 'Codex', need: imagesNeed(), tone: images.state === 'ok' ? 'ok' : 'warn', detail: images.detail, buttons: fixButtons(images) }))}${
+    section('Later, when you need them', 'Optional. Each can be linked any time in Connections.', html`${
+      accRow({ name: 'GitHub', need: 'Your own account: where each game\'s code is kept, and how your PCs share it.', tone: a.github.state === 'ok' ? 'ok' : 'off', detail: a.github.detail,
+        buttons: a.github.login ? windowButton(a.github.login, 'Sign in', 'btn-sm go') : nothing })}${
+      keyRow('elevenlabs', 'Sound effects and music. Game audio needs a paid plan (Starter or above).')}${
+      keyRow('roblox', 'The game page: events, thumbnails and how each one does. Once the game is on Roblox.')}`)
+  }</div>${foot(button('acc-check', checking ? html`${SPIN}Checking` : 'Check again', 'btn ghost-btn', checking), next)}`;
 }
 
 async function linkKey(service) {
   const key = keyDraft.trim();
   if (!key) { root.querySelector('#accKey')?.focus(); return; }
+  if (busy) return;
   busy = true;
-  render();
+  draw();
   try {
     const { tier, note } = await api.link(service, key);
     toast(note || `${LINKS[service].name} linked${tier ? ` · ${tier[0].toUpperCase()}${tier.slice(1)} plan` : ''}`, note && !note.startsWith('Linked.') ? 'var(--amber)' : undefined);
@@ -170,49 +171,45 @@ async function linkKey(service) {
     await checkAccounts(true);
   } catch (e) {
     busy = false;
-    render();
+    draw();
     toast(e.message, 'var(--red)');
   }
 }
 
-function startHTML() {
-  const choice = (flow, title, text) => `<button class="ob-choice" data-ob="flow:${flow}"><b>${title}</b><span>${text}</span></button>`;
+function start() {
+  const choice = (flow, title, text) => html`<button class="ob-choice" data-ob="flow:${flow}"><b>${title}</b><span>${text}</span></button>`;
   const mine = yourAgent();
-  return topHTML('New project')
-    + `<div class="ob-body"><h2 class="ob-title">What are you starting?</h2>`
-    + `<p class="ob-lede">A few questions about the game, one at a time. Answer as much or as little as you like: your agent (${esc(agentName())}) turns the answers into the first docs.</p>`
-    + `<div class="ob-choices">${choice('new', 'A new game', esc(survey.flows.new.blurb))}${choice('existing', 'A game I&#39;ve already made', esc(survey.flows.existing.blurb))}</div>`
-    + (mine && !state.accounts.ready ? `<div class="ob-status warn">${icon.alert}<span>${esc(mine.name)} ${notReady(mine)} on this PC, so it can't write the docs yet.</span>${button('accounts', 'Sort it out', 'btn-sm go')}</div>` : '')
-    + '</div>' + foot(button('accounts', 'Your accounts', 'btn ghost-btn'), '');
+  return html`${top('New project')}<div class="ob-body"><h2 class="ob-title">What are you starting?</h2><p class="ob-lede">A few questions about the game, one at a time. Answer as much or as little as you like: your agent (${agentName()}) turns the answers into the first docs.</p><div class="ob-choices">${
+    choice('new', 'A new game', survey.flows.new.blurb)}${choice('existing', 'A game I\'ve already made', survey.flows.existing.blurb)}</div>${
+    mine && !state.accounts.ready ? html`<div class="ob-status warn">${icon.alert}<span>${mine.name} ${notReady(mine)} on this PC, so it can't write the docs yet.</span>${button('accounts', 'Sort it out', 'btn-sm go')}</div>` : nothing
+  }</div>${foot(button('accounts', 'Your accounts', 'btn ghost-btn'), nothing)}`;
 }
 
-function basicsHTML() {
+function basics() {
   const b = ob.basics, existing = ob.flow === 'existing';
   const kind = KINDS.find(k => k[0] === b.kind) || KINDS[0];
   // Once the project is being made, these are fixed: Start over changes them.
   const locked = !!ob.job && ob.job.state !== 'failed';
-  const field = (id, label, value, placeholder, extra = '') => `<label class="lbl">${label}<input class="input" data-field="${id}" value="${esc(value)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false"${extra}${locked ? ' disabled' : ''}></label>`;
-  return topHTML(existing ? 'Bring in a game' : 'A new game', 0)
-    + `<div class="ob-body"><h2 class="ob-title">${existing ? 'Which game?' : 'Name it'}</h2>`
-    + `<p class="ob-lede">${existing ? 'Its name in this RoDev folder, and where it is now.' : 'You can change the name players see later; this one names its folder.'}</p>`
-    + `<div class="ob-fields"><div class="two">${field('name', 'Name', b.name, existing ? 'MyGame' : 'SkyFarm')}${field('code', 'Code <small>2 to 4 letters, for its place files</small>', b.code, 'SF', ' maxlength="4"')}</div>`
-    + (existing ? `<div class="lbl">Where is it?<div class="ob-kinds">${KINDS.map(([id, label]) => `<button class="ob-kind${b.kind === id ? ' on' : ''}" data-ob="kind:${id}"${locked ? ' disabled' : ''}>${label}</button>`).join('')}</div>`
-      + `<span class="ob-note">${kind[3]}</span></div>`
-      + (kind[2] ? field('from', b.kind === 'github' ? 'Its GitHub repo' : b.kind === 'folder' ? 'The folder' : 'The place file', b.from, kind[2]) : '') : '')
-    + (!existing || b.kind !== 'github' ? field('repo', `A new GitHub repo <small>optional: an empty private one, to back the game up</small>`, b.repo, 'https://github.com/you/game.git') : '')
-    + `</div>${locked ? '<div class="ob-note">The project is already being made with these. Start over to change them.</div>' : ''}${ob.error ? `<div class="ob-status err">${icon.alert}<span>${esc(ob.error)}</span></div>` : ''}</div>`
-    + foot(button('back', 'Back'), button('basics-next', busy ? '<span class="spin"></span>Starting' : 'Next', 'btn accent', busy));
+  const field = (id, label, value, placeholder, maxlength) => html`<label class="lbl">${label}<input class="input" data-field=${id} .value=${live(value)} placeholder=${placeholder} autocomplete="off" spellcheck="false" maxlength=${ifDefined(maxlength)} ?disabled=${locked}></label>`;
+  return html`${top(existing ? 'Bring in a game' : 'A new game', 0)}<div class="ob-body"><h2 class="ob-title">${existing ? 'Which game?' : 'Name it'}</h2><p class="ob-lede">${
+    existing ? 'Its name in this RoDev folder, and where it is now.' : 'You can change the name players see later; this one names its folder.'}</p><div class="ob-fields"><div class="two">${
+    field('name', 'Name', b.name, existing ? 'MyGame' : 'SkyFarm')}${field('code', html`Code <small>2 to 4 letters, for its place files</small>`, b.code, 'SF', 4)}</div>${
+    existing ? html`<div class="lbl">Where is it?<div class="ob-kinds">${KINDS.map(([id, label]) => html`<button class="ob-kind${b.kind === id ? ' on' : ''}" data-ob="kind:${id}" ?disabled=${locked}>${label}</button>`)}</div><span class="ob-note">${kind[3]}</span></div>${
+      kind[2] ? field('from', b.kind === 'github' ? 'Its GitHub repo' : b.kind === 'folder' ? 'The folder' : 'The place file', b.from, kind[2]) : nothing}` : nothing}${
+    !existing || b.kind !== 'github' ? field('repo', html`A new GitHub repo <small>optional: an empty private one, to back the game up</small>`, b.repo, 'https://github.com/you/game.git') : nothing
+  }</div>${locked ? html`<div class="ob-note">The project is already being made with these. Start over to change them.</div>` : nothing}${
+    ob.error ? html`<div class="ob-status err">${icon.alert}<span>${ob.error}</span></div>` : nothing
+  }</div>${foot(button('back', 'Back'), button('basics-next', busy ? html`${SPIN}Starting` : 'Next', 'btn accent', busy))}`;
 }
 
-function questionHTML() {
+function question() {
   const list = questions(), q = list[ob.index];
   const value = ob.answers[q.id] || '';
-  return topHTML(`${esc(q.step)} <span class="ob-count">${ob.index + 1} of ${list.length}</span>`, (ob.index + 1) / (list.length + 1))
-    + `<div class="ob-body"><h2 class="ob-title">${esc(q.prompt)}</h2>${q.hint ? `<p class="ob-lede">${esc(q.hint)}</p>` : ''}`
-    + `<textarea class="field ob-text" id="obText" placeholder="${esc(q.placeholder || 'As much or as little as you like')}" aria-label="${esc(q.prompt)}">${esc(value)}</textarea>`
-    + `<div class="ob-for">Goes into ${esc((q.for || []).join(', '))}</div></div>`
-    + foot(button('back', 'Back'), ob.editing ? button('next', 'Done <kbd>Ctrl</kbd><kbd>Enter</kbd>', 'btn accent')
-      : `${value.trim() ? '' : button('skip', 'Skip', 'btn ghost-btn')}${button('next', 'Next <kbd>Ctrl</kbd><kbd>Enter</kbd>', 'btn accent')}`);
+  return html`${top(html`${q.step} <span class="ob-count">${ob.index + 1} of ${list.length}</span>`, (ob.index + 1) / (list.length + 1))}<div class="ob-body"><h2 class="ob-title">${q.prompt}</h2>${
+    q.hint ? html`<p class="ob-lede">${q.hint}</p>` : nothing
+  }<textarea class="field ob-text" id="obText" placeholder=${q.placeholder || 'As much or as little as you like'} aria-label=${q.prompt} .value=${live(value)}></textarea><div class="ob-for">Goes into ${(q.for || []).join(', ')}</div></div>${
+    foot(button('back', 'Back'), ob.editing ? button('next', html`Done${CTRL_ENTER}`, 'btn accent')
+      : html`${value.trim() ? nothing : button('skip', 'Skip', 'btn ghost-btn')}${button('next', html`Next${CTRL_ENTER}`, 'btn accent')}`)}`;
 }
 
 // ---- Lanes: how many this PC opens ----
@@ -221,39 +218,32 @@ async function loadAdvice(project) {
   try { ob.advice = await api.laneAdvice(project); } catch (e) { ob.advice = { error: e.message }; }
   if (ob.laneCount == null && !ob.advice.error) ob.laneCount = ob.advice.mine ?? ob.advice.suggested;
   saveDraft();
-  if (onboardingOpen() && ob.screen === 'lanes') render();
+  if (onboardingOpen() && ob.screen === 'lanes') draw();
 }
 
 const lanesText = n => n ? `${n} lane${n === 1 ? '' : 's'}` : 'no lanes';
 
-function lanesHTML() {
+function lanes() {
   const a = ob.advice, alone = ob.mode === 'lanes', total = alone ? 0 : questions().length;
-  const top = alone ? topHTML('Lanes on this PC') : topHTML('Lanes', (total + 0.5) / (total + 1));
-  const title = '<h2 class="ob-title">How many lanes can this PC run?</h2>';
-  const nextButton = alone ? button('lanes-open', busy ? '<span class="spin"></span>Opening' : 'Open them', 'btn accent', busy || !a || !!a.error)
+  const head = alone ? top('Lanes on this PC') : top('Lanes', (total + 0.5) / (total + 1));
+  const title = html`<h2 class="ob-title">How many lanes can this PC run?</h2>`;
+  const next = alone ? button('lanes-open', busy ? html`${SPIN}Opening` : 'Open them', 'btn accent', busy || !a || !!a.error)
     : button('lanes-next', ob.editing ? 'Done' : 'Next', 'btn accent', !a);
   const back = alone ? button('close', 'Cancel') : button('back', 'Back');
-  if (!a) return top + `<div class="ob-body">${title}<div class="ob-status"><span class="spin"></span><span>Checking this PC…</span></div></div>` + foot(back, nextButton);
-  if (a.error) return top + `<div class="ob-body">${title}<div class="ob-status err">${icon.alert}<span>${esc(a.error)}</span></div></div>` + foot(back, alone ? '' : button('lanes-next', 'Skip', 'btn'));
+  if (!a) return html`${head}<div class="ob-body">${title}<div class="ob-status">${SPIN}<span>Checking this PC…</span></div></div>${foot(back, next)}`;
+  if (a.error) return html`${head}<div class="ob-body">${title}<div class="ob-status err">${icon.alert}<span>${a.error}</span></div></div>${foot(back, alone ? nothing : button('lanes-next', 'Skip', 'btn'))}`;
   const pick = ob.laneCount ?? a.suggested;
-  const chips = Array.from({ length: a.most + 1 }, (_, i) => `<button class="ob-kind ob-lane${pick === i ? ' on' : ''}${a.suggested === i ? ' suggested' : ''}" data-ob="lanes-count:${i}"`
-    + ` title="${i === a.suggested ? 'Suggested for this PC' : lanesText(i)}">${i || 'None'}</button>`).join('');
-  return top
-    + `<div class="ob-body">${title}`
-    + `<p class="ob-lede">A lane is a worker's own copy of the game, with its own Studio place, so several workers build and test at the same time. Each one is a Studio window, so how many depends on this PC.</p>`
-    + `<div class="ob-pc"><b>${esc(a.pc)}</b><span>${a.memory} GB memory · ${a.threads} threads · ${esc(a.cpu)}</span></div>`
-    + `<div class="ob-kinds ob-lanes">${chips}</div>`
-    + `<p class="ob-note">Suggested: ${a.suggested}, at about ${a.perLane} GB a lane, with room for the Main place and your other apps. `
-    + `More lanes build faster, and use your agent's plan faster.${pick === 0 ? ' With none, your agent builds alone, in the Main place.' : ''}</p>`
-    + `<p class="ob-note">${alone ? 'Rocco opens them now' : 'When you finish, Rocco opens them'}: the Main place and ${pick ? `${lanesText(pick)}, each` : 'its'} in Studio, with Lync syncing ${pick ? 'each one' : 'it'}. Change the number any time from Lanes in the sidebar.</p>`
-    + '</div>' + foot(back, nextButton);
+  return html`${head}<div class="ob-body">${title}<p class="ob-lede">A lane is a worker's own copy of the game, with its own Studio place, so several workers build and test at the same time. Each one is a Studio window, so how many depends on this PC.</p><div class="ob-pc"><b>${a.pc}</b><span>${a.memory} GB memory · ${a.threads} threads · ${a.cpu}</span></div><div class="ob-kinds ob-lanes">${
+    Array.from({ length: a.most + 1 }, (_, i) => html`<button class="ob-kind ob-lane${pick === i ? ' on' : ''}${a.suggested === i ? ' suggested' : ''}" data-ob="lanes-count:${i}" title=${i === a.suggested ? 'Suggested for this PC' : lanesText(i)}>${i || 'None'}</button>`)
+  }</div><p class="ob-note">Suggested: ${a.suggested}, at about ${a.perLane} GB a lane, with room for the Main place and your other apps. More lanes build faster, and use your agent's plan faster.${pick === 0 ? ' With none, your agent builds alone, in the Main place.' : ''}</p><p class="ob-note">${
+    alone ? 'Rocco opens them now' : 'When you finish, Rocco opens them'}: the Main place and ${pick ? `${lanesText(pick)}, each` : 'its'} in Studio, with Lync syncing ${pick ? 'each one' : 'it'}. Change the number any time from Lanes in the sidebar.</p></div>${foot(back, next)}`;
 }
 
 // From the sidebar: record this PC's number, and open them in the background.
 async function openLanesNow() {
   if (busy) return;
   busy = true;
-  render();
+  draw();
   try {
     const r = await api.openLanes(ob.project, ob.laneCount);
     busy = false;
@@ -261,7 +251,7 @@ async function openLanesNow() {
     toast(`Opening ${lanesText(ob.laneCount)} and the Main place: Lync starts in the background, and Studio opens each place${r.saved?.note ? `. ${r.saved.note}` : ''}`, 'var(--cyan)');
   } catch (e) {
     busy = false;
-    render();
+    draw();
     toast(`Couldn't open them: ${e.message}`, 'var(--red)');
   }
 }
@@ -274,99 +264,92 @@ async function pollLanes() {
       const s = await api.job(id);
       if (ob?.lanesJob?.id !== id) return;
       Object.assign(ob.lanesJob, { output: s.output || '', state: s.running ? 'opening' : s.ok ? 'open' : 'failed' });
-      if (onboardingOpen() && ob.screen === 'tiles') render();
+      if (onboardingOpen() && ob.screen === 'tiles') draw();
     } catch { /* Rocco restarting: ask again */ }
   }
 }
 
-function lanesJobHTML() {
+function lanesJob() {
   const j = ob.lanesJob;
-  if (!j) return '';
+  if (!j) return nothing;
   const last = (j.output || '').trim().split('\n').at(-1) || 'Starting';
-  if (j.state === 'opening') return `<div class="ob-result"><span class="spin"></span><span>Opening the Main place and ${lanesText(ob.laneCount)}: ${esc(last)}</span></div>`;
-  if (j.state === 'open') return `<div class="ob-result">${icon.checkSm}<span>${esc(last)}</span></div>`;
-  return `<div class="ob-result">${icon.alert}<span>Opening the lanes didn't finish: ${esc(j.error || last)}. Lanes in the sidebar tries again.</span></div>`;
+  if (j.state === 'opening') return html`<div class="ob-result">${SPIN}<span>Opening the Main place and ${lanesText(ob.laneCount)}: ${last}</span><button class="linkish" data-ob="cancel-job:${j.id}">Stop</button></div>`;
+  if (j.state === 'open') return html`<div class="ob-result">${icon.checkSm}<span>${last}</span></div>`;
+  return html`<div class="ob-result">${icon.alert}<span>Opening the lanes didn't finish: ${j.error || last}. Lanes in the sidebar tries again.</span></div>`;
 }
 
-function jobHTML() {
+function job() {
   const j = ob.job;
-  if (!j) return '';
-  if (j.state === 'making') return `<div class="ob-status"><span class="spin"></span><span>Making ${esc(ob.basics.name)}…</span></div>`;
-  if (j.state === 'ready') return `<div class="ob-status ok">${icon.checkSm}<span>${esc(ob.basics.name)} is ready in the RoDev folder.</span></div>`;
-  return `<div class="ob-status err">${icon.alert}<span>Making the project didn't work. Fix what it says, then go back to the name.</span></div><pre class="m-log err">${esc(j.output || '')}</pre>`;
+  if (!j) return nothing;
+  if (j.state === 'making') return html`<div class="ob-status">${SPIN}<span>Making ${ob.basics.name}…</span><button class="linkish" data-ob="cancel-job:${j.id}">Stop</button></div>`;
+  if (j.state === 'ready') return html`<div class="ob-status ok">${icon.checkSm}<span>${ob.basics.name} is ready in the RoDev folder.</span></div>`;
+  return html`<div class="ob-status err">${icon.alert}<span>Making the project didn't work. Fix what it says, then go back to the name.</span></div><pre class="m-log err">${j.output || ''}</pre>`;
 }
 
-function reviewHTML() {
+function review() {
   const list = questions();
   const filled = list.filter(q => answered(q.id)).length;
   const agent = state.agent;
   const building = ob.flow === 'new' ? ', then plans the first build. The plan waits on the Workboard for your OK before anything is built' : '';
-  const handoff = !agent?.installed ? `${esc(agentName())} isn't installed on this PC, so the job waits in Up next for whichever agent you open.`
-    : state.accounts && !state.accounts.ready ? `${esc(agent.name)} starts, minimized in your taskbar. It isn't signed in yet, so it asks you to first, then writes the docs from your answers${building}.`
-    : `${esc(agent.name)} starts, minimized in your taskbar, and writes the docs from your answers${building}.`;
-  const lanesRow = ob.flow === 'new' ? `<button class="ob-rev" data-ob="goto-lanes"><small>Lanes</small><span class="q">How many lanes can this PC run?</span>`
-    + `<span class="a">${ob.laneCount == null ? 'Not picked' : `${lanesText(ob.laneCount)}, opened with the Main place when you finish`}</span></button>` : '';
-  return topHTML('Ready', 1)
-    + `<div class="ob-body"><h2 class="ob-title">Ready to start?</h2><p class="ob-lede">${filled} of ${list.length} answered. ${handoff} Click any answer to change it.</p>`
-    + `<div class="ob-review">${list.map((q, i) => `<button class="ob-rev" data-ob="goto:${i}"><small>${esc(q.step)}</small><span class="q">${esc(q.prompt)}</span>`
-      + `<span class="a${answered(q.id) ? '' : ' skipped'}">${answered(q.id) ? esc(ob.answers[q.id]) : 'Skipped'}</span></button>`).join('')}${lanesRow}</div>${jobHTML()}</div>`
-    + foot(button('back', 'Back'), button('finish', busy ? '<span class="spin"></span>Starting' : ob.flow === 'new' ? 'Start' : 'Save and start setup', 'btn accent', busy || ob.job?.state !== 'ready'));
+  const handoff = !agent?.installed ? `${agentName()} isn't installed on this PC, so the job waits in Up next for whichever agent you open.`
+    : state.accounts && !state.accounts.ready ? `${agent.name} starts, minimized in your taskbar. It isn't signed in yet, so it asks you to first, then writes the docs from your answers${building}.`
+    : `${agent.name} starts, minimized in your taskbar, and writes the docs from your answers${building}.`;
+  return html`${top('Ready', 1)}<div class="ob-body"><h2 class="ob-title">Ready to start?</h2><p class="ob-lede">${filled} of ${list.length} answered. ${handoff} Click any answer to change it.</p><div class="ob-review">${
+    list.map((q, i) => html`<button class="ob-rev" data-ob="goto:${i}"><small>${q.step}</small><span class="q">${q.prompt}</span><span class="a${answered(q.id) ? '' : ' skipped'}">${answered(q.id) ? ob.answers[q.id] : 'Skipped'}</span></button>`)}${
+    ob.flow === 'new' ? html`<button class="ob-rev" data-ob="goto-lanes"><small>Lanes</small><span class="q">How many lanes can this PC run?</span><span class="a">${ob.laneCount == null ? 'Not picked' : `${lanesText(ob.laneCount)}, opened with the Main place when you finish`}</span></button>` : nothing
+  }</div>${job()}</div>${foot(button('back', 'Back'), button('finish', busy ? html`${SPIN}Starting` : ob.flow === 'new' ? 'Start' : 'Save and start setup', 'btn accent', busy || ob.job?.state !== 'ready'))}`;
 }
 
-function setupHTML() {
+function setup() {
   const s = ob.setup, saved = ob.saved;
-  if (!s) return '';
-  const done = text => `<div class="ob-result">${icon.checkSm}<span>${text}</span></div>`;
+  if (!s) return nothing;
+  const done = text => html`<div class="ob-result">${icon.checkSm}<span>${text}</span></div>`;
   const work = ob.flow === 'new' ? 'writing the docs, then a plan for the first build that you approve on the Workboard' : 'writing the docs';
-  return `<div class="ob-results">${done(`${esc(currentProjectName())} is set up in the RoDev folder.`)}`
-    + done(`Your answers are in <code>docs/game/ONBOARDING.md</code>${saved?.pushed ? ', pushed to GitHub' : ''}.${saved?.note ? ` <span class="ob-note">${esc(saved.note)}</span>` : ''}`)
-    + lanesJobHTML()
-    + (s.opened ? done(`${esc(s.agent)} is ${work}, minimized in your taskbar. Follow it on the Workboard (${esc(s.task)}).`)
-      : s.running ? done(`${esc(s.task)} is on the Workboard for the ${esc(s.agent)} session that's already running.`)
-      : `<div class="ob-result">${icon.alert}<span>${esc(s.task)} is in Up next for your agent. To start it now, give your agent this:</span></div>`
-        + `<div class="ob-prompt"><code>${esc(s.prompt)}</code><button class="copy" data-copy="${esc(s.prompt)}">${icon.copy}Copy</button></div>`)
-    + '</div>';
+  return html`<div class="ob-results">${done(`${currentProjectName()} is set up in the RoDev folder.`)}${
+    done(html`Your answers are in <code>docs/game/ONBOARDING.md</code>${saved?.pushed ? ', pushed to GitHub' : ''}.${saved?.note ? html` <span class="ob-note">${saved.note}</span>` : nothing}`)}${lanesJob()}${
+    s.opened ? done(`${s.agent} is ${work}, minimized in your taskbar. Follow it on the Workboard (${s.task}).`)
+      : s.running ? done(`${s.task} is on the Workboard for the ${s.agent} session that's already running.`)
+      : html`<div class="ob-result">${icon.alert}<span>${s.task} is in Up next for your agent. To start it now, give your agent this:</span></div><div class="ob-prompt"><code>${s.prompt}</code><button class="copy" data-copy=${s.prompt}>${icon.copy}Copy</button></div>`}</div>`;
 }
 
 const currentProjectName = () => ob.basics?.name || currentProject().name;
 
-function tilesHTML() {
+function tiles() {
   const after = ob.mode === 'done';
   const sendable = ob.unsent.size > 0;
-  return topHTML(after ? 'All set' : `More detail for ${esc(currentProject().name)}`)
-    + `<div class="ob-body">${after ? `<h2 class="ob-title">All set</h2>${setupHTML()}<h3 class="ob-sub">Want to add more?</h3>` : '<h2 class="ob-title">Add game details</h2>'}`
-    + `<p class="ob-lede">Optional. Pick any of these and write as much or as little as you like. Rocco files each into its doc.</p>`
-    + `<div class="ob-tiles">${survey.tiles.map(t => `<button class="ob-tile${tileFilled(t) ? ' filled' : ''}" data-ob="tile:${esc(t.id)}">`
-      + `<span class="ob-tile-head"><b>${esc(t.title)}</b>${tileFilled(t) ? icon.checkSm : ''}</span><span>${esc(t.blurb)}</span></button>`).join('')}</div></div>`
-    + foot(sendable ? `<span class="ob-note">${ob.unsent.size} saved, not sent to Rocco yet</span>` : '',
-      `${button('send', busy ? '<span class="spin"></span>Sending' : `Send to Rocco`, 'btn', busy || !sendable)}${button('done', 'Done', 'btn accent')}`);
+  return html`${top(after ? 'All set' : `More detail for ${currentProject().name}`)}<div class="ob-body">${
+    after ? html`<h2 class="ob-title">All set</h2>${setup()}<h3 class="ob-sub">Want to add more?</h3>` : html`<h2 class="ob-title">Add game details</h2>`
+  }<p class="ob-lede">Optional. Pick any of these and write as much or as little as you like. Rocco files each into its doc.</p><div class="ob-tiles">${
+    survey.tiles.map(t => html`<button class="ob-tile${tileFilled(t) ? ' filled' : ''}" data-ob="tile:${t.id}"><span class="ob-tile-head"><b>${t.title}</b>${tileFilled(t) ? icon.checkSm : nothing}</span><span>${t.blurb}</span></button>`)
+  }</div></div>${foot(sendable ? html`<span class="ob-note">${ob.unsent.size} saved, not sent to Rocco yet</span>` : nothing,
+    html`${button('send', busy ? html`${SPIN}Sending` : 'Send to Rocco', 'btn', busy || !sendable)}${button('done', 'Done', 'btn accent')}`)}`;
 }
 
-function tileHTML() {
+function tile() {
   const t = survey.tiles.find(x => x.id === ob.tile);
-  return topHTML(esc(t.title))
-    + `<div class="ob-body"><h2 class="ob-title">${esc(t.title)}</h2><p class="ob-lede">${esc(t.blurb)}</p>`
-    + t.questions.map(q => `<label class="ob-tq"><span class="ob-tq-prompt">${esc(q.prompt)}</span>${q.hint ? `<span class="ob-note">${esc(q.hint)}</span>` : ''}`
-      + `<textarea class="field ob-text sm" data-answer="${esc(q.id)}" placeholder="As much or as little as you like">${esc(ob.answers[q.id] || '')}</textarea></label>`).join('') + '</div>'
-    + foot(button('tiles', 'Back'), button('save-tile', busy ? '<span class="spin"></span>Saving' : 'Save', 'btn accent', busy));
+  // The boxes start from what's saved and are then the user's, until Save reads them.
+  return html`${top(t.title)}<div class="ob-body"><h2 class="ob-title">${t.title}</h2><p class="ob-lede">${t.blurb}</p>${
+    t.questions.map(q => html`<label class="ob-tq"><span class="ob-tq-prompt">${q.prompt}</span>${q.hint ? html`<span class="ob-note">${q.hint}</span>` : nothing}<textarea class="field ob-text sm" data-answer=${q.id} placeholder="As much or as little as you like" .value=${ob.answers[q.id] || ''}></textarea></label>`)
+  }</div>${foot(button('tiles', 'Back'), button('save-tile', busy ? html`${SPIN}Saving` : 'Save', 'btn accent', busy))}`;
 }
 
-function render() {
+const SCREENS = { accounts, start, basics, question, lanes, review, tiles, tile };
+// What makes a screen a different one: each question and each tile starts from fresh fields.
+const screenKey = () => `${ob.screen}:${ob.screen === 'question' ? ob.index : ob.screen === 'tile' ? ob.tile : ''}`;
+
+// Draws the screen the survey is on. The same screen again changes only what differs, so its scroll, and a field
+// being typed in, stay as they are.
+function draw() {
   if (!ob) return;
-  const html = { accounts: accountsHTML, start: startHTML, basics: basicsHTML, question: questionHTML, lanes: lanesHTML, review: reviewHTML, tiles: tilesHTML, tile: tileHTML }[ob.screen] || startHTML;
-  const scroll = root.querySelector('.ob-body')?.scrollTop || 0, typing = document.activeElement?.id === 'accKey';
-  root.innerHTML = `<div class="ob-card">${html()}</div>`;
+  render(html`<div class="ob-card">${keyed(screenKey(), (SCREENS[ob.screen] || start)())}</div>`, root);
   root.querySelectorAll('textarea').forEach(fit);
-  // The accounts screen re-renders as checks come back: keep its place, and a key being typed.
-  if (ob.screen === 'accounts') {
-    root.querySelector('.ob-body').scrollTop = scroll;
-    const key = root.querySelector('#accKey');
-    if (key) { key.value = keyDraft; if (typing) key.focus(); }
-    return;
-  }
-  const focus = root.querySelector('#obText') || root.querySelector('[data-field="name"]:placeholder-shown') || root.querySelector('textarea');
-  // At once, so a quick Ctrl+Enter or keystroke after the last one lands here.
-  if (focus && ob.screen !== 'tiles') focus.focus({ preventScroll: true });
+  if (ob.screen === 'accounts' || ob.screen === 'tiles') return;
+  // Focus goes to the screen's first field at once, so a quick Ctrl+Enter or keystroke lands there, unless the user
+  // is already in one of its fields.
+  const at = document.activeElement;
+  if (root.contains(at) && at.matches('input, textarea')) return;
+  const first = root.querySelector('#obText') || root.querySelector('[data-field="name"]:placeholder-shown') || root.querySelector('textarea');
+  if (first) first.focus({ preventScroll: true });
 }
 
 function fit(el) { el.style.height = 'auto'; el.style.height = Math.min(Math.max(el.scrollHeight + 2, el.classList.contains('sm') ? 90 : 160), 420) + 'px'; }
@@ -376,7 +359,7 @@ function fit(el) { el.style.height = 'auto'; el.style.height = Math.min(Math.max
 function show(screen, extra = {}) {
   Object.assign(ob, { screen, error: '' }, extra);
   saveDraft();
-  render();
+  draw();
 }
 
 function validBasics() {
@@ -390,16 +373,17 @@ function validBasics() {
 
 // The project is made in the background while the questions go on: name, code and where it is are all it needs.
 async function startProject() {
+  if (busy) return;
   const b = ob.basics;
   ob.error = validBasics();
-  if (ob.error) { render(); return; }
+  if (ob.error) { draw(); return; }
   busy = true;
-  render();
+  draw();
   try {
     const existing = ob.flow === 'existing' ? { kind: b.kind, from: b.kind === 'studio' ? '' : b.from.trim() } : null;
     const repo = ob.flow === 'existing' && b.kind === 'github' ? '' : b.repo.trim();
-    const { job } = await api.newProject({ name: b.name, code: b.code.toUpperCase(), repo, existing });
-    ob.job = { id: job, state: 'making', output: '' };
+    const { job: id } = await api.newProject({ name: b.name, code: b.code.toUpperCase(), repo, existing });
+    ob.job = { id, state: 'making', output: '' };
     busy = false;
     show('question', { index: 0 });
     poll();
@@ -407,7 +391,7 @@ async function startProject() {
     busy = false;
     show('basics', {});
     ob.error = e.message;
-    render();
+    draw();
   }
 }
 
@@ -423,7 +407,7 @@ async function poll() {
         Object.assign(ob.job, { state: s.ok ? 'ready' : 'failed' });
         if (s.ok) ob.project = s.project;
         saveDraft();
-        if (onboardingOpen() && ob.screen === 'review') render();
+        if (onboardingOpen() && ob.screen === 'review') draw();
       }
     } catch { /* Rocco restarting: ask again */ }
   }
@@ -438,7 +422,7 @@ function source() {
 async function finish() {
   if (busy || ob.job?.state !== 'ready') return;
   busy = true;
-  render();
+  draw();
   try {
     const project = ob.project;
     ob.saved = await api.saveAnswers(project, { flow: ob.flow, source: ob.flow === 'existing' ? source() : '', answers: ob.answers });
@@ -458,17 +442,18 @@ async function finish() {
     if (ob.lanesJob?.state === 'opening') pollLanes();
   } catch (e) {
     busy = false;
-    render();
+    draw();
     toast(`Couldn't finish: ${e.message}`, 'var(--red)');
   }
 }
 
 async function saveTile() {
+  if (busy) return;
   const t = survey.tiles.find(x => x.id === ob.tile);
   const answers = {};
   root.querySelectorAll('[data-answer]').forEach(el => { answers[el.dataset.answer] = el.value; ob.answers[el.dataset.answer] = el.value; });
   busy = true;
-  render();
+  draw();
   try {
     await api.saveAnswers(ob.project || state.project, { answers });
     if (tileFilled(t)) ob.unsent.add(t.id);
@@ -477,7 +462,7 @@ async function saveTile() {
     show('tiles');
   } catch (e) {
     busy = false;
-    render();
+    draw();
     toast(`Couldn't save: ${e.message}`, 'var(--red)');
   }
 }
@@ -485,14 +470,14 @@ async function saveTile() {
 async function send() {
   if (busy || !ob.unsent.size) return;
   busy = true;
-  render();
+  draw();
   try {
     const s = await api.startSetup(ob.project || state.project, 'more', [...ob.unsent]);
     ob.unsent.clear();
     toast(s.opened ? `${s.agent} is filling them in, minimized in your taskbar (${s.task})` : `${s.task} is in Up next for your agent`, 'var(--violet)');
   } catch (e) { toast(`Couldn't send them: ${e.message}`, 'var(--red)'); }
   busy = false;
-  render();
+  draw();
 }
 
 function step(delta) {
@@ -513,18 +498,20 @@ function showLanes(extra = {}) {
 export function initOnboarding() {
   root.addEventListener('click', e => {
     const run = e.target.closest('[data-acc-run]'), use = e.target.closest('[data-acc-use]');
-    if (run) { runAccountAction(run.dataset.accRun, rerenderAccounts); return; }
-    if (use) { useAgent(use.dataset.accUse).then(rerenderAccounts); return; }
+    if (run) { runAccountAction(run.dataset.accRun, redrawAccounts); return; }
+    if (use) { useAgent(use.dataset.accUse).then(redrawAccounts); return; }
     const el = e.target.closest('[data-ob]');
     if (!el || el.disabled) return;
     const [action, arg] = el.dataset.ob.split(':');
+    // A job that's taking too long, or was started by mistake: stopped, with whatever it started. Its line then says so.
+    if (action === 'cancel-job') { api.cancelJob(arg).catch(err => toast(`Couldn't stop it: ${err.message}`, 'var(--red)')); return; }
     if (action === 'close') closeOnboarding();
     else if (action === 'accounts') { show('accounts'); checkAccounts(true); }
     else if (action === 'acc-continue') { storage.set(SEEN, 'shown'); linking = ''; keyDraft = ''; ob.mode === 'accounts' ? closeOnboarding() : show('start'); }
     else if (action === 'acc-check') checkAccounts(true);
     else if (action === 'acc-link') {
       linking = linking === arg ? '' : arg; keyDraft = '';
-      render();
+      draw();
       root.querySelector('#accKey')?.focus();
     }
     else if (action === 'acc-save') linkKey(arg);
@@ -539,7 +526,7 @@ export function initOnboarding() {
     else if (action === 'next' || action === 'skip') step(1);
     else if (action === 'goto') show('question', { index: +arg, editing: true });
     else if (action === 'goto-lanes') showLanes({ editing: true });
-    else if (action === 'lanes-count') { ob.laneCount = +arg; saveDraft(); render(); }
+    else if (action === 'lanes-count') { ob.laneCount = +arg; saveDraft(); draw(); }
     else if (action === 'lanes-next') show('review', { editing: false });
     else if (action === 'lanes-open') openLanesNow();
     else if (action === 'finish') finish();
@@ -563,13 +550,12 @@ export function initOnboarding() {
       if (el.dataset.field === 'code') ob.codeTyped = true;
       saveDraft();
     } else if (el.id === 'obText') {
-      const q = questions()[ob.index];
+      const q = questions()[ob.index], had = answered(q.id);
       ob.answers[q.id] = el.value;
       fit(el);
       saveDraft();
       // Skip turns into nothing once there's an answer.
-      const skip = root.querySelector('[data-ob="skip"]');
-      if (skip) skip.hidden = !!el.value.trim();
+      if (had !== answered(q.id)) draw();
     } else if (el.id === 'accKey') keyDraft = el.value;
     else if (el.matches('textarea')) fit(el);
   });

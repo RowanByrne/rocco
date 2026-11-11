@@ -1,27 +1,35 @@
 // The Workboard. Top: the note box, then what needs the user's OK: feature plans to approve, and what the agent
 // spotted (the inbox). Middle: features in progress, then three columns: To test, Stuck and Working.
 // Bottom: Up next, the queue in order, which the user can reorder (never ahead of what a task waits on).
-import { state, byId, of, approvedToday } from '../state.js';
-import { $, esc } from '../lib/dom.js';
+// Everything is drawn from the tasks each time they change, an open task's sheet included, and only what differs
+// is touched, so a column stays where it was scrolled and a box keeps what's typed in it.
+import { state, byId, of, approvedToday, on } from '../state.js';
+import { $, webUrl } from '../lib/dom.js';
+import { html, render, nothing, repeat, live, ifDefined } from '../lib/html.js';
 import { hhmm, minsSince, featureVars } from '../lib/format.js';
 import { icon } from '../lib/icons.js';
+import { draft } from '../lib/drafts.js';
+import { busy, once } from '../lib/busy.js';
 import { api } from '../api.js';
-import { refresh } from '../sync.js';
+import { refresh, taskFrom } from '../sync.js';
 import { settings } from '../settings.js';
 import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
 import { initPopover, hidePopover } from '../ui/popover.js';
-import { shotOf, imagesIn, shotsHTML, shotClick, clip } from '../ui/shots.js';
-import { picsHTML, picOptionHTML, openPicsFrom } from '../ui/pics.js';
+import { shotOf, imagesIn, shotThumbs, shotClick, clip } from '../ui/shots.js';
+import { pics, picOption, openPicsFrom } from '../ui/pics.js';
 import { showDoc } from './docs.js';
 import { prose, proseLine } from '../prose.js';
 import { startSession, scrollSessionToEnd } from './session.js';
+import { stepIn, stepChips, effort, checks, changedFile, linkButton, partsClick, partsChange, resetParts, forgetDiffs } from './taskparts.js';
+import { showArchive } from './archive.js';
+import { showUsage } from './usage.js';
 
-const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved' };
+const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved', removed: 'Deleted' };
 const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
-const COLOR = { ready: 'var(--green)', stuck: 'var(--amber)', working: 'var(--blue)', queued: 'var(--gray)', inbox: 'var(--claude)', done: 'var(--green)' };
+const COLOR = { ready: 'var(--green)', stuck: 'var(--amber)', working: 'var(--blue)', queued: 'var(--gray)', inbox: 'var(--claude)', done: 'var(--green)', removed: 'var(--gray)' };
 const TYPES = { bug: 'Bug', tweak: 'Tweak', idea: 'Idea', feature: 'Feature', question: 'Question' };
-const SKIP = '\u0000skip';
+const SKIP = 'skip'; // "Let Rocco decide", as a pick no option's label can be
 const place = t => t.where === 'lane' ? 'Lane ' + t.lane : 'Main';
 const isPlan = t => t.kind === 'plan';
 const isQuestion = t => t.kind === 'question';
@@ -45,11 +53,18 @@ const unfinishedDeps = t => (t.after || []).filter(id => { const d = byId(id); r
 
 // Questions for the user: the list, or the older single question.
 const questionsOf = t => t.questions?.length ? t.questions : (t.question ? [{ text: t.question, options: (t.options || []).map(label => ({ label })) }] : []);
-const answers = new Map(); // task id -> picked answers, kept across re-renders
-// The reply boxes on the board: a plan's "Change it" and "Ask", an answer's "Ask more". The board re-renders on every
-// refresh and every 30 seconds, so each open box is kept here, with what's typed in it, until it's sent or closed.
-const drafts = new Map(); // task id -> { mode, text }
+
+// What the user is in the middle of, kept by project and task (lib/drafts.js) until it's sent: the answers picked so
+// far on a stuck task (one per question, null where none is picked yet), the reply boxes on the board (a plan's
+// "Change it" and "Ask", an answer's "Ask more": { mode, text }), and what's typed in a task's sheet.
+const picksOf = id => draft.get(`answers:${id}`, []);
+const replyOf = id => draft.get(`reply:${id}`, null);
+const sheetText = id => draft.get(`sheet:${id}`);
 const PLAN_PROMPT = { revise: 'What should change?', followup: 'Your question' };
+
+const sendingAnswers = new Set(); // tasks whose answers are on their way
+const unsent = new Map();         // task -> what was typed with answers that didn't send, to go with them next time
+const folding = new Set();        // tasks being approved: the box is lit and the card folds away
 
 // Where a queued task came from, for its tag in Up next.
 const source = t => t.pending === 'reopen' ? ['Reopened', 'var(--amber)']
@@ -57,185 +72,161 @@ const source = t => t.pending === 'reopen' ? ['Reopened', 'var(--amber)']
   : t.kind === 'suggestion' ? [`From Rocco`, 'var(--claude)']
   : t.kind === 'note' ? ['Your note', 'var(--violet)'] : null;
 
-const typeTag = t => TYPES[t.type] && t.type !== 'feature' ? `<span class="ttag t-${t.type}">${TYPES[t.type]}</span>` : '';
-const featureTag = t => { const p = t.plan && byId(t.plan); return p ? `<span class="ftag" style="${featureVars(p.id)}" title="Part of ${esc(p.title)}"><i></i>${esc(p.title)}</span>` : ''; };
+const hasType = t => !!TYPES[t.type] && t.type !== 'feature';
+const typeTag = t => hasType(t) ? html`<span class="ttag t-${t.type}">${TYPES[t.type]}</span>` : nothing;
+const featureOf = t => (t.plan && byId(t.plan)) || null;
+const featureTag = t => { const p = featureOf(t); return p ? html`<span class="ftag" style=${featureVars(p.id)} title="Part of ${p.title}"><i></i>${p.title}</span>` : nothing; };
 
 // ---- Audio options ----
 
 let player = null, playing = '';
-function play(url, button) {
+function play(url) {
   const again = playing === url;
   player?.pause();
-  document.querySelectorAll('.speaker.playing').forEach(b => b.classList.remove('playing'));
   playing = '';
-  if (again) return;
-  player = new Audio(url);
-  playing = url;
-  button.classList.add('playing');
-  player.onended = () => { button.classList.remove('playing'); playing = ''; };
-  player.play().catch(() => { button.classList.remove('playing'); toast("Couldn't play that sound", 'var(--red)'); });
+  if (!again) {
+    player = new Audio(url);
+    playing = url;
+    player.onended = () => { if (playing === url) { playing = ''; renderWorkboard(); } };
+    player.play().catch(() => { if (playing === url) playing = ''; renderWorkboard(); toast("Couldn't play that sound", 'var(--red)'); });
+  }
+  renderWorkboard();
 }
 
-const speakerHTML = o => o.audio ? `<button class="speaker" data-play="${esc(o.audio)}" title="Play" aria-label="Play ${esc(o.label)}">${icon.speaker}</button>` : '';
+const speaker = o => o.audio ? html`<button class="speaker${playing === o.audio ? ' playing' : ''}" data-play=${o.audio} title="Play" aria-label="Play ${o.label}">${icon.speaker}</button>` : nothing;
 // An option: a button to pick, with a play button for a sound, or a picture to see bigger (ui/pics.js).
-const optionHTML = (o, i, picked) => o.image ? picOptionHTML(o, o.image, `data-pick="${esc(o.label)}" data-q="${i}"`, picked === o.label, speakerHTML(o))
-  : `<span class="opt-wrap"><button class="opt${picked === o.label ? ' on' : ''}" data-pick="${esc(o.label)}" data-q="${i}" title="${esc(o.label)}"><span>${esc(o.label)}</span></button>${speakerHTML(o)}</span>`;
+const option = (o, i, picked) => o.image ? picOption(o, o.image, { pick: o.label, q: i }, picked === o.label, speaker(o))
+  : html`<span class="opt-wrap"><button class="opt${picked === o.label ? ' on' : ''}" data-pick=${o.label} data-q=${i} title=${o.label}><span>${o.label}</span></button>${speaker(o)}</span>`;
 // A question's pictures and options, as one set for the picture viewer.
-const optionsHTML = (q, i, picked, extra = '') => `<div data-pic-set data-q="${i}">${picsHTML(q.images)}`
-  + `<div class="opts${(q.options || []).some(o => o.image) ? ' with-pics' : ''}">${(q.options || []).map(o => optionHTML(o, i, picked)).join('')}${extra}</div></div>`;
+const options = (q, i, picked, extra = nothing) => html`<div data-pic-set data-q=${i}>${pics(q.images)}<div class="opts${(q.options || []).some(o => o.image) ? ' with-pics' : ''}">${(q.options || []).map(o => option(o, i, picked))}${extra}</div></div>`;
 
 // ---- Columns ----
 
 // The stuck card asks its questions one at a time, right on the board. The last answer sends them all (pick).
-function questionCardHTML(t) {
-  const qs = questionsOf(t), picked = answers.get(t.id) || [];
-  if (!qs.length) return '';
-  if (picked.length >= qs.length) return `<div class="ask-card done"><span class="spin"></span><span>Sending your answer${qs.length === 1 ? '' : 's'}</span></div>`;
-  const i = picked.length, q = qs[i];
-  return `<div class="ask-card"><div class="ask-q"><span>${proseLine(q.text)}</span>${qs.length > 1 ? `<span class="ask-n">${i + 1} of ${qs.length}</span>` : ''}</div>`
-    + optionsHTML(q, i, '')
-    + `<div class="ask-foot"><button class="linkish" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button>${i ? `<button class="linkish" data-back="${t.id}">Back</button>` : ''}</div></div>`;
+function questionCard(t) {
+  const qs = questionsOf(t), picked = picksOf(t.id);
+  if (!qs.length) return nothing;
+  const many = qs.length > 1;
+  if (sendingAnswers.has(t.id)) return html`<div class="ask-card done"><span class="spin"></span><span>Sending your answer${many ? 's' : ''}</span></div>`;
+  const i = qs.findIndex((_, n) => picked[n] == null);
+  // Every question has its pick, and they aren't on their way: the last send didn't go through.
+  if (i < 0) return html`<div class="ask-card"><div class="ask-q"><span>Your answer${many ? 's are' : ' is'} picked, and not sent yet.</span></div><div class="ask-foot"><button class="btn-sm go" data-resend=${t.id}>Send ${many ? 'them' : 'it'}</button><button class="linkish" data-back=${t.id}>Back</button></div></div>`;
+  const q = qs[i];
+  return html`<div class="ask-card"><div class="ask-q"><span>${proseLine(q.text)}</span>${many ? html`<span class="ask-n">${i + 1} of ${qs.length}</span>` : nothing}</div>${options(q, i, '')}<div class="ask-foot"><button class="linkish" data-pick=${SKIP} data-q=${i}>Let Rocco decide</button>${
+    i ? html`<button class="linkish" data-back=${t.id}>Back</button>` : nothing}</div></div>`;
 }
 
-function workingHTML(t) {
-  if (!settings().liveSteps) return '';
+function workingSteps(t) {
+  if (!settings().liveSteps) return nothing;
   // This attempt's steps: a task sent back starts its list again.
   const since = Date.parse(t.startedAt) || 0;
   const done = t.log.filter(l => l.who === 'worker' && (Date.parse(l.at) || 0) >= since).slice(-3);
-  return `<ol class="steps">${done.map(l => `<li>${icon.check}<span>${esc(l.text)}</span></li>`).join('')}`
-    + `<li class="now"><span class="spin"></span><span>${esc(t.step || 'Working')}</span></li></ol>`;
+  return html`<ol class="steps">${done.map(l => html`<li>${icon.check}<span>${l.text}</span></li>`)}<li class="now"><span class="spin"></span><span>${t.step || 'Working'}</span></li></ol>`;
 }
 
-function cardHTML(t) {
-  const title = `<div class="c-title">${t.feature && !t.plan ? icon.branch : ''}<span>${esc(t.title)}</span></div>`;
-  const tries = t.attempt > 1 ? `<span class="note-meta" title="Attempt ${t.attempt}">${icon.retry}${t.attempt}</span>` : '';
-  const follow = t.followups > 0 ? `<span class="fchip" title="The worker hasn't read your follow-up yet">Follow-up sent</span>` : '';
-  let info = typeTag(t) + featureTag(t), right = '', extra = '';
+function card(t) {
+  const fold = folding.has(t.id);
+  const tries = t.attempt > 1 ? html`<span class="note-meta" title="Attempt ${t.attempt}">${icon.retry}${t.attempt}</span>` : nothing;
+  let info = nothing, right = nothing, extra = nothing, bar = nothing;
   if (t.status === 'ready') {
-    info += `<span class="tag ${t.where === 'lane' ? 't-lane' : 't-main'}"><i></i>${place(t)}</span>${tries}`;
-    right = `<button class="chk" role="checkbox" aria-checked="false" data-approve="${t.id}" aria-label="Tested, approve" title="Tested, approve">${icon.check}</button>`;
+    info = html`<span class="tag ${t.where === 'lane' ? 't-lane' : 't-main'}"><i></i>${place(t)}</span>${tries}`;
+    right = html`<button class="chk${fold ? ' on' : ''}" role="checkbox" aria-checked=${fold ? 'true' : 'false'} data-approve=${t.id} aria-label="Tested, approve" title="Tested, approve">${icon.check}</button>`;
   } else if (t.status === 'stuck') {
-    info += tries;
-    right = questionsOf(t).length ? '' : `<span class="qm" title="Needs your answer">?</span>`;
-    extra = questionCardHTML(t);
+    info = tries;
+    right = questionsOf(t).length ? nothing : html`<span class="qm" title="Needs your answer">?</span>`;
+    extra = questionCard(t);
   } else if (t.status === 'working') {
-    info += `<span class="note-meta">${settings().liveSteps ? '' : `${esc(t.step || 'Working')} · `}${minsSince(t.startedAt)}m</span>${follow}`;
-    right = t.lane ? `<span class="lc" title="Lane ${t.lane}">L${t.lane}</span>` : '';
-    extra = workingHTML(t);
+    info = html`<span class="note-meta">${settings().liveSteps ? '' : `${t.step || 'Working'} · `}${minsSince(t.startedAt)}m</span>${
+      t.followups > 0 ? html`<span class="fchip" title="The worker hasn't read your follow-up yet">Follow-up sent</span>` : nothing}${stepChips(t)}`;
+    right = t.lane ? html`<span class="lc" title="Lane ${t.lane}">L${t.lane}</span>` : nothing;
+    extra = workingSteps(t);
+    bar = typeof t.progress === 'number' ? html`<div class="bar"><i style="width:${Math.max(3, t.progress)}%"></i></div>` : html`<div class="progress"></div>`;
   }
-  const bar = t.status === 'working'
-    ? (typeof t.progress === 'number' ? `<div class="bar"><i style="width:${Math.max(3, t.progress)}%"></i></div>` : '<div class="progress"></div>') : '';
-  return `<div class="card s-${t.status}${t.fresh ? ' fresh' : ''}" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)}">`
-    + `<div class="c-row"><div class="c-main">${title}<div class="c-meta">${info}</div></div>${right}</div>${extra}${bar}</div>`;
+  return html`<div class="card s-${t.status}${t.fresh ? ' fresh' : ''}${fold ? ' collapse' : ''}" data-id=${t.id} tabindex="0" role="button" aria-label=${t.title}><div class="c-row"><div class="c-main"><div class="c-title">${
+    t.feature && !t.plan ? icon.branch : nothing}<span>${t.title}</span></div><div class="c-meta">${typeTag(t)}${featureTag(t)}${info}</div></div>${right}</div>${extra}${bar}</div>`;
 }
 
-function columnHTML(status) {
+function column(status) {
   const list = work(status);
-  return `<div class="col c-${status}"><div class="col-head"><span class="sdot"></span>${NAMES[status]}<span class="count">${list.length}</span></div>`
-    + `<div class="col-list">${list.length ? list.map(cardHTML).join('') : `<div class="empty">${EMPTY[status]}</div>`}</div></div>`;
+  return html`<div class="col c-${status}"><div class="col-head"><span class="sdot"></span>${NAMES[status]}<span class="count">${list.length}</span></div><div class="col-list">${
+    list.length ? repeat(list, t => t.id, card) : html`<div class="empty">${EMPTY[status]}</div>`}</div></div>`;
 }
 
 // ---- Feature plans: their own look, in the feature's color ----
 
-const stepsHTML = p => `<ol class="plan-steps">${(p.steps || []).map((s, i) => `<li><span class="ps-n">${i + 1}</span><span class="ps-t">${esc(s.title)}</span>`
-  + `<span class="ps-meta">${s.lane ? `Lane ${s.lane}` : ''}${s.lane && s.tier ? ' · ' : ''}${esc(s.tier || '')}</span></li>`).join('')}</ol>`;
+const planSteps = p => html`<ol class="plan-steps">${(p.steps || []).map((s, i) => html`<li><span class="ps-n">${i + 1}</span><span class="ps-t">${s.title}</span><span class="ps-meta">${s.lane ? `Lane ${s.lane}` : ''}${s.lane && s.tier ? ' · ' : ''}${s.tier || ''}</span></li>`)}</ol>`;
 
 // A plan's spec (rocco.ps1 plan -Spec): what it builds, in full, opened in Docs.
-const specButton = p => p.spec ? `<span class="sp"></span><button class="btn-sm" data-plan-spec="${esc(p.spec)}" title="${esc(p.spec)}">${icon.doc}Read the spec</button>` : '';
+const specButton = p => html`<button class="btn-sm" data-plan-spec=${p.spec} title=${p.spec}>${icon.doc}Read the spec</button>`;
 
-function planCardHTML(p) {
-  const d = drafts.get(p.id);
-  return `<div class="plan${p.fresh ? ' fresh' : ''}" style="${featureVars(p.id)}" data-id="${p.id}">`
-    + `<div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span>`
-    + `<button class="plan-x" data-plan-dismiss="${p.id}" title="Dismiss this plan" aria-label="Dismiss this plan">×</button></div>`
-    + `<div class="plan-title">${esc(p.title)}</div>${p.summary ? `<div class="plan-sum">${prose(p.summary)}</div>` : ''}${stepsHTML(p)}`
-    + (p.pending === 'revise' ? '<div class="plan-note">Changes asked for · waiting for Rocco</div>' : '')
-    + `<div class="plan-actions"><button class="btn-sm go" data-plan-approve="${p.id}">Approve plan</button>`
-    + `<button class="btn-sm" data-plan-reply="${p.id}" data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply="${p.id}" data-mode="followup">Ask</button>`
-    + `${specButton(p)}</div>`
-    + `<div class="plan-reply"${d ? ` data-mode="${d.mode}"` : ' hidden'}><textarea class="field" placeholder="${d ? PLAN_PROMPT[d.mode] : ''}">${esc(d?.text || '')}</textarea>`
-    + `<div class="row"><span class="sp"></span><button class="btn-sm go" data-plan-send="${p.id}">Send</button></div></div></div>`;
+function planCard(p) {
+  const d = replyOf(p.id);
+  return html`<div class="plan${p.fresh ? ' fresh' : ''}" style=${featureVars(p.id)} data-id=${p.id}><div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span><button class="plan-x" data-plan-dismiss=${p.id} title="Dismiss this plan" aria-label="Dismiss this plan">×</button></div><div class="plan-title">${p.title}</div>${
+    p.summary ? html`<div class="plan-sum">${prose(p.summary)}</div>` : nothing}${planSteps(p)}${
+    p.pending === 'revise' ? html`<div class="plan-note">Changes asked for · waiting for Rocco</div>` : nothing
+  }<div class="plan-actions"><button class="btn-sm go" data-plan-approve=${p.id}>Approve plan</button><button class="btn-sm" data-plan-reply=${p.id} data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply=${p.id} data-mode="followup">Ask</button>${
+    p.spec ? html`<span class="sp"></span>${specButton(p)}` : nothing
+  }</div><div class="plan-reply" data-mode=${ifDefined(d?.mode)} ?hidden=${!d}><textarea class="field" placeholder=${d ? PLAN_PROMPT[d.mode] || '' : ''} .value=${live(d?.text || '')}></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-plan-send=${p.id}>Send</button></div></div></div>`;
 }
 
-function featuresHTML() {
-  return features().map(p => {
-    const { done, total } = planCount(p);
-    return `<button class="feat" style="${featureVars(p.id)}" data-id="${p.id}" title="${esc(p.title)}"><span class="feat-dot"></span><span class="feat-name">${esc(p.title)}</span>`
-      + `<span class="feat-bar"><i style="width:${Math.round(done / Math.max(total, 1) * 100)}%"></i></span><span class="feat-count">${done}/${total}</span></button>`;
-  }).join('');
-}
+const feature = p => {
+  const { done, total } = planCount(p);
+  return html`<button class="feat" style=${featureVars(p.id)} data-id=${p.id} title=${p.title}><span class="feat-dot"></span><span class="feat-name">${p.title}</span><span class="feat-bar"><i style="width:${Math.round(done / Math.max(total, 1) * 100)}%"></i></span><span class="feat-count">${done}/${total}</span></button>`;
+};
 
 // ---- Questions: asked from the note box, answered by the conductor ----
 
-function questionHTML(t) {
-  const done = t.status === 'ready';
-  const status = done ? `<span class="qa-state on">Answered</span>` : `<span class="qa-state"><span class="spin"></span>Waiting for an answer</span>`;
-  return `<div class="qa${done ? ' answered' : ''}${t.fresh ? ' fresh' : ''}" data-id="${t.id}">`
-    + `<div class="qa-q" title="Open the whole thread"><span class="qa-icon">?</span><span class="qa-text">${esc(t.note || t.title)}</span>${status}</div>`
+function question(t) {
+  const done = t.status === 'ready', d = replyOf(t.id);
+  return html`<div class="qa${done ? ' answered' : ''}${t.fresh ? ' fresh' : ''}" data-id=${t.id}><div class="qa-q" title="Open the whole thread"><span class="qa-icon">?</span><span class="qa-text">${t.note || t.title}</span>${
+    done ? html`<span class="qa-state on">Answered</span>` : html`<span class="qa-state"><span class="spin"></span>Waiting for an answer</span>`}</div>${
     // After "Ask more", the follow-up it's waiting on.
-    + (!done && t.attempt > 1 ? `<div class="qa-follow">${esc(t.log.filter(l => l.who === 'you').at(-1)?.text || '')}</div>` : '')
-    + (done ? `<div class="qa-a">${prose(t.summary || '')}</div>`
-      + `<div class="qa-actions"><button class="btn-sm go" data-got-it="${t.id}">${icon.check}Got it</button><button class="btn-sm" data-ask-more="${t.id}">Ask more</button></div>`
-      + `<div class="qa-reply"${drafts.has(t.id) ? '' : ' hidden'}><textarea class="field" placeholder="Ask a follow-up">${esc(drafts.get(t.id)?.text || '')}</textarea>`
-      + `<div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send="${t.id}">Ask</button></div></div>`
-      : `<div class="qa-actions"><button class="linkish" data-unask="${t.id}">Take it back</button></div>`)
-    + `</div>`;
+    !done && t.attempt > 1 ? html`<div class="qa-follow">${t.log.filter(l => l.who === 'you').at(-1)?.text || ''}</div>` : nothing}${
+    done ? html`<div class="qa-a">${prose(t.summary || '')}</div><div class="qa-actions"><button class="btn-sm go" data-got-it=${t.id}>${icon.check}Got it</button><button class="btn-sm" data-ask-more=${t.id}>Ask more</button></div><div class="qa-reply" ?hidden=${!d}><textarea class="field" placeholder="Ask a follow-up" .value=${live(d?.text || '')}></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send=${t.id}>Ask</button></div></div>`
+      : html`<div class="qa-actions"><button class="linkish" data-unask=${t.id}>Take it back</button></div>`}</div>`;
 }
-
-const questionsHTML = () => openQuestions().sort((a, b) => a.id.localeCompare(b.id)).map(questionHTML).join('');
 
 // ---- Inbox: what the agent spotted ----
 
-function inboxHTML() {
+function inbox() {
   const list = work('inbox');
-  if (!list.length) return '';
+  if (!list.length) return nothing;
   const why = t => t.summary || (t.note && t.note !== t.title ? t.note : '');
-  return `<div class="inbox-head">${icon.sparkle}Rocco spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>`
-    + `${list.length > 1 ? '<button class="btn-sm" data-queue-all>Queue all</button>' : ''}</div>`
-    + `<div class="inbox-items">${list.map(t => `<div class="sug${t.fresh ? ' fresh' : ''}" data-id="${t.id}"><div class="sug-title">${esc(t.title)}</div>`
-      + `${why(t) ? `<div class="sug-why">${esc(why(t))}</div>` : ''}`
-      + `<div class="sug-actions"><button class="btn-sm go" data-queue="${t.id}">Queue</button><button class="btn-sm" data-dismiss="${t.id}">Dismiss</button></div></div>`).join('')}</div>`;
+  return html`<div class="inbox-head">${icon.sparkle}Rocco spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>${
+    list.length > 1 ? html`<button class="btn-sm" data-queue-all>Queue all</button>` : nothing}</div><div class="inbox-items">${repeat(list, t => t.id, t => html`<div class="sug${t.fresh ? ' fresh' : ''}" data-id=${t.id}><div class="sug-title">${t.title}</div>${
+    why(t) ? html`<div class="sug-why">${why(t)}</div>` : nothing
+  }<div class="sug-actions"><button class="btn-sm go" data-queue=${t.id}>Queue</button><button class="btn-sm" data-dismiss=${t.id}>Dismiss</button></div></div>`)}</div>`;
 }
 
 // ---- Up next ----
 
-function queueHTML() {
+function queueRow(t, i) {
+  const src = source(t), deps = unfinishedDeps(t);
+  return html`<div class="q-row${t.fresh ? ' fresh' : ''}" data-id=${t.id} draggable="true" tabindex="0" role="button" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><span class="grip" aria-hidden="true">${icon.grip}</span><span class="q-num">${i + 1}</span><span class="q-title">${
+    t.feature && !t.plan ? icon.branch : nothing}<span>${t.title}</span>${t.shots[0] ? html`<img src=${t.shots[0]} alt="">` : nothing}</span>${typeTag(t)}${featureTag(t)}${stepChips(t)}${
+    src ? html`<span class="q-src" style="--sc:${src[1]}">${src[0]}</span>` : nothing}${
+    // A task waiting on another shows that, with the reason on hover; the rest show what they wait for.
+    deps.length ? html`<span class="q-dep" title=${t.waiting || `Needs ${deps.join(', ')} done first`}>${icon.lock}After ${deps.join(', ')}</span>`
+      : html`<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${waitText(t) || 'Queued'}</span></span>`}</div>`;
+}
+
+function upNext() {
   const list = queue();
-  const row = (t, i) => {
-    const src = source(t), deps = unfinishedDeps(t);
-    return `<div class="q-row${t.fresh ? ' fresh' : ''}" data-id="${t.id}" draggable="true" tabindex="0" role="button">`
-      + `<span class="grip" aria-hidden="true">${icon.grip}</span><span class="q-num">${i + 1}</span>`
-      + `<span class="q-title">${t.feature && !t.plan ? icon.branch : ''}<span>${esc(t.title)}</span>${t.shots[0] ? `<img src="${t.shots[0]}" alt="">` : ''}</span>`
-      + typeTag(t) + featureTag(t)
-      + `${src ? `<span class="q-src" style="--sc:${src[1]}">${src[0]}</span>` : ''}`
-      // A task waiting on another shows that, with the reason on hover; the rest show what they wait for.
-      + (deps.length ? `<span class="q-dep" title="${esc(t.waiting || `Needs ${deps.join(', ')} done first`)}">${icon.lock}After ${deps.join(', ')}</span>`
-        : `<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${esc(waitText(t) || 'Queued')}</span></span>`) + '</div>';
-  };
   // Whether a conductor is there to pick things up is the status line above the note box (conductor.js).
-  return `<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? '<span class="q-hint">Drag to reorder</span>' : ''}</div>`
-    + (list.length ? `<div class="q-list">${list.map(row).join('')}</div>` : '<div class="empty">Nothing queued. Notes you add go here.</div>');
+  return html`<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? html`<span class="q-hint">Drag to reorder, or Alt+↑ and Alt+↓</span>` : nothing}</div>${
+    list.length ? html`<div class="q-list">${repeat(list, t => t.id, queueRow)}</div>` : html`<div class="empty">Nothing queued. Notes you add go here.</div>`}`;
 }
 
 // The server opened a conductor because none was running: say so.
 export function conductorOpened(agent) { if (agent) toast(`${agent} started, minimized in your taskbar, to pick it up`, 'var(--claude)'); }
 
-// The cursor in a reply box (drafts, above), put back after the board re-renders.
-function keepTyping(render) {
-  const f = document.activeElement;
-  const box = f?.matches?.('.plan-reply textarea, .qa-reply textarea') ? f : null;
-  const at = box && { id: box.closest('[data-id]').dataset.id, start: box.selectionStart, end: box.selectionEnd, top: box.scrollTop };
-  render();
-  if (!at) return;
-  const again = [...document.querySelectorAll('#plans .plan-reply textarea, #questions .qa-reply textarea')].find(t => t.closest('[data-id]').dataset.id === at.id);
-  if (!again || again === box) return;
-  again.focus({ preventScroll: true });
-  again.setSelectionRange(at.start, at.end);
-  again.scrollTop = at.top;
-}
-
+// The board, and whatever sheet is open on it: a task's follows the task as it changes.
 export function renderWorkboard() {
-  keepTyping(renderBoard);
+  renderBoard();
+  const key = openSheetKey();
+  if (key === 'approved') showApproved();
+  else if (key && key === sheetTask) drawTask(key);
+  else if (key !== sheetTask) sheetTask = null;
 }
 
 function renderBoard() {
@@ -245,23 +236,24 @@ function renderBoard() {
   $('#boardBadge').textContent = waiting;
   $('#boardBadge').hidden = !waiting;
   $('#approvedText').textContent = `${approvedWork().length} approved today`;
-  $('#questions').innerHTML = questionsHTML();
-  $('#questions').hidden = !openQuestions().length;
-  $('#plans').innerHTML = plansToApprove().map(planCardHTML).join('');
-  $('#plans').hidden = !plansToApprove().length;
-  $('#inbox').innerHTML = inboxHTML();
+  const questions = openQuestions().sort((a, b) => a.id.localeCompare(b.id)), plans = plansToApprove(), feats = features();
+  render(repeat(questions, t => t.id, question), $('#questions'));
+  $('#questions').hidden = !questions.length;
+  render(repeat(plans, p => p.id, planCard), $('#plans'));
+  $('#plans').hidden = !plans.length;
+  render(inbox(), $('#inbox'));
   $('#inbox').hidden = !work('inbox').length;
-  $('#features').innerHTML = featuresHTML();
-  $('#features').hidden = !features().length;
-  $('#board').innerHTML = columnHTML('ready') + columnHTML('stuck') + columnHTML('working');
-  $('#queue').innerHTML = queueHTML();
+  render(repeat(feats, p => p.id, feature), $('#features'));
+  $('#features').hidden = !feats.length;
+  render(html`${column('ready')}${column('stuck')}${column('working')}`, $('#board'));
+  render(upNext(), $('#queue'));
   document.title = waiting ? `(${waiting}) Rocco` : 'Rocco';
   state.tasks.forEach(t => { t.fresh = false; });
 }
 
 // The steps to try: one a line (rocco.ps1 set -Test "a","b").
 const stepsOf = t => String(t.test || '').split('\n').map(s => s.trim()).filter(Boolean);
-const stepsHTMLOf = steps => steps.length > 1 ? `<ul>${steps.map(s => `<li>${proseLine(s)}</li>`).join('')}</ul>` : proseLine(steps[0] || '');
+const trySteps = steps => steps.length > 1 ? html`<ul>${steps.map(s => html`<li>${proseLine(s)}</li>`)}</ul>` : proseLine(steps[0] || '');
 // A task parked for a lane (rocco.ps1 set -ForLane): whether one is free now, counted as the sidebar counts them.
 function waitText(t) {
   if (t.waitingFor !== 'lane') return t.waiting;
@@ -287,30 +279,32 @@ function cutWords(texts, n) {
 
 // The hover: what the card is now, in a few lines. Rocco keeps a summary and a test to 30 words each (rocco.ps1
 // Assert-CardText); a card written before that is cut short here, and its sheet has it all.
-function summaryHTML(t) {
-  const head = label => `<div class="ph"><span class="sdot" style="--c:${COLOR[t.status]}"></span>${label}</div>`;
-  const words = 30, more = '<div class="pmore">Open it for the rest</div>';
+function summary(t) {
+  const head = label => html`<div class="ph"><span class="sdot" style="--c:${COLOR[t.status]}"></span>${label}</div>`;
+  const words = 30, more = html`<div class="pmore">Open it for the rest</div>`;
   const sum = cutWords([t.summary || ''], words);
   switch (t.status) {
     case 'ready': {
       const test = cutWords(stepsOf(t), words);
-      return head(`Ready to test · ${place(t)}`)
-        + (sum.out.length ? `<div class="pl">What changed</div><div class="pt">${esc(sum.out[0])}</div>` : '')
-        + (test.out.length ? `<div class="try"><div class="pl">Try</div>${stepsHTMLOf(test.out)}</div>` : '')
-        + (sum.cut || test.cut ? more : '');
+      return html`${head(`Ready to test · ${place(t)}`)}${sum.out.length ? html`<div class="pl">What changed</div><div class="pt">${sum.out[0]}</div>` : nothing}${
+        test.out.length ? html`<div class="try"><div class="pl">Try</div>${trySteps(test.out)}</div>` : nothing}${sum.cut || test.cut ? more : nothing}`;
     }
     case 'stuck': {
       const qs = cutWords(questionsOf(t).map(q => q.text), words * 2);
-      return head('Needs your answer') + `<div class="pt">${esc(qs.out.join(' · '))}</div>` + (qs.cut ? more : '');
+      return html`${head('Needs your answer')}<div class="pt">${qs.out.join(' · ')}</div>${qs.cut ? more : nothing}`;
     }
     case 'working':
-      return head(`${esc(t.step || 'Working')} · ${lanePart(t)} · ${minsSince(t.startedAt)}m`)
-        + `<div class="pt">${sum.out.length ? esc(sum.out[0]) : 'No report yet'}</div>` + (sum.cut ? more : '');
+      return html`${head(`${t.step || 'Working'} · ${lanePart(t)} · ${minsSince(t.startedAt)}m`)}<div class="pt">${sum.out.length ? sum.out[0] : 'No report yet'}</div>${sum.cut ? more : nothing}`;
   }
-  return '';
+  return null;
 }
 
 // ---- A task in the sheet ----
+
+let sheetTask = null;                         // the task whose sheet is open
+let ui = { confirm: false, big: new Set() };  // in that sheet: Delete asked once, and the screenshots shown big
+let changes = null;                           // what it changed: { id, stamp, loading, data, error }
+let reply = { id: '', shots: [] };            // the screenshots going back with it
 
 function whereLine(t) {
   if (isPlan(t)) return t.status === 'inbox' ? 'Feature plan · waiting for your OK' : `Feature · ${planCount(t).done} of ${planCount(t).total} done`;
@@ -319,97 +313,120 @@ function whereLine(t) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
     case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
     case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
-    case 'queued': return esc(waitText(t) || 'Queued');
+    case 'queued': return t.held ? 'Paused' : waitText(t) || 'Queued';
     case 'inbox': return `Rocco spotted this. Queue it to have it done.`;
-    case 'done': return `Approved at ${hhmm(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
+    case 'done': return `Approved ${dayAt(t.doneAt)}${t.pending === 'merge' ? ' · merging into Main' : ''}`;
+    case 'removed': return `Deleted${t.updated ? ` ${dayAt(t.updated)}` : ''}`;
   }
   return '';
 }
+// "at 14:05" for today, "on 3 Nov" for a task from the archive.
+const dayAt = iso => !iso ? '' : new Date(iso).toDateString() === new Date().toDateString() ? `at ${hhmm(iso)}` : `on ${new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 
-function questionsSheetHTML(t) {
-  const picked = answers.get(t.id) || [];
-  return questionsOf(t).map((q, i) => `<div class="s-q">${proseLine(q.text)}</div>`
-    + optionsHTML(q, i, picked[i], `<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick="${SKIP}" data-q="${i}">Let Rocco decide</button>`)).join('');
-}
-
-// The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
-function sheetBody(t) {
-  return `<div class="s-top">${sheetTop(t)}</div>${sheetRest(t)}`;
+function sheetQuestions(t) {
+  const picked = picksOf(t.id);
+  return questionsOf(t).map((q, i) => html`<div class="s-q">${proseLine(q.text)}</div>${
+    options(q, i, picked[i], html`<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick=${SKIP} data-q=${i}>Let Rocco decide</button>`)}`);
 }
 
 // A task to test is approved from what to try; sending it back is the box at the foot.
-const approveHTML = t => isQuestion(t) ? '' : `<button class="btn go s-approve" data-approve-open>${icon.checkSm}Approve</button>`;
+const approveButton = t => isQuestion(t) ? nothing : html`<button class="btn go s-approve" data-approve-open>${icon.checkSm}Approve</button>`;
 
+// The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
 function sheetTop(t) {
-  const meta = [typeTag(t), featureTag(t)].join('');
-  let h = `<h2 class="s-title">${esc(t.title)}</h2><div class="s-where">${whereLine(t)}</div>${meta ? `<div class="c-meta">${meta}</div>` : ''}`;
-  if (t.summary) h += `<div class="s-sum">${prose(t.summary)}</div>`;
-  if (isPlan(t)) {
-    h += stepsHTML(t);
-    if (t.spec) h += `<div class="row s-spec">${specButton(t).replace('<span class="sp"></span>', '')}</div>`;
-    const kids = childrenOf(t);
-    if (kids.length) h += `<div class="sec-h">Tasks</div>${kids.map(k => `<div class="s-row" data-id="${k.id}"><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${esc(k.title)}</span><span class="at">${NAMES[k.status] || ''}</span></div>`).join('')}`;
+  const kids = isPlan(t) ? childrenOf(t) : [];
+  return html`<h2 class="s-title">${t.title}</h2><div class="s-where">${whereLine(t)}</div>${effort(t)}${
+    hasType(t) || featureOf(t) ? html`<div class="c-meta">${typeTag(t)}${featureTag(t)}</div>` : nothing}${stepIn(t)}${
+    t.summary ? html`<div class="s-sum">${prose(t.summary)}</div>` : nothing}${
+    isPlan(t) ? html`${planSteps(t)}${t.spec ? html`<div class="row s-spec">${specButton(t)}</div>` : nothing}${
+      kids.length ? html`<div class="sec-h">Tasks</div>${kids.map(k => html`<div class="s-row" data-id=${k.id}><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${k.title}</span><span class="at">${NAMES[k.status] || ''}</span></div>`)}` : nothing}` : nothing}${
+    t.status === 'ready' && t.test ? html`<div class="s-try"><small>Try</small>${trySteps(stepsOf(t))}${approveButton(t)}</div>` : t.status === 'ready' ? approveButton(t) : nothing}${
+    t.status === 'stuck' ? sheetQuestions(t) : nothing}`;
+}
+
+// What its branch changed (server/tasks.ps1), loaded when the sheet opens and again when the task moves on.
+function changesView(t) {
+  const c = changes?.id === t.id ? changes : null;
+  if (!c || (!c.data && !c.error)) return html`<span class="mut">Loading…</span>`;
+  if (!c.data) return html`<div class="load-error">${icon.alert}<span>Couldn't load what changed: ${c.error}</span><button class="btn-sm" data-changes-retry>Retry</button></div>`;
+  const d = c.data;
+  if (!d.files.length) return html`<span class="mut">No changes found for its branch yet.</span>`;
+  return html`${d.files.map(changedFile)}<div class="chg-foot">${
+    d.source === 'merged' ? 'As merged into main' : 'On its branch, against main'}${d.url ? html` · <a href=${webUrl(d.url)} target="_blank" rel="noreferrer">View on GitHub</a>` : nothing}</div>`;
+}
+
+function sheetBody(t) {
+  return html`<div class="s-top">${sheetTop(t)}</div>${
+    t.shots.length ? html`<div class="shots">${t.shots.map(src => html`<img src=${src} alt="Screenshot" class=${ui.big.has(src) ? 'big' : ''}>`)}</div>` : nothing}${
+    t.note && t.note !== t.title ? html`<div class="s-note">${t.note}</div>` : nothing}${checks(t)}${
+    t.branch ? html`<div class="sec-h">What changed</div><div class="changes" id="changes">${changesView(t)}</div>` : nothing
+  }<div class="sec-h">Session</div><div class="sx" id="sx"></div>`; // its agent's session and the card's history, word for word (session.js draws it)
+}
+
+// The round send button, as on the note box: Enter does the same. kind: follow (a message) or reopen (send it back).
+const sendButton = (kind, label, off) => html`<button type="button" class="send" data-send=${kind} title="${label} (Enter)" aria-label=${label} ?disabled=${off}>${SEND_ICON}</button>`;
+const SEND_ICON = html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>`;
+
+// What the sheet's foot offers depends on where the task is; the one box in it keeps what's typed (sheetText) as the
+// task moves on, and through a reload.
+function sheetFoot(t) {
+  const sending = busy(`task:${t.id}`);
+  const box = (id, placeholder) => html`<textarea class="field" id=${id} data-sheet-text placeholder=${placeholder} .value=${live(sheetText(t.id))} ?disabled=${sending}></textarea>`;
+  const followUp = placeholder => html`<div class="reply msg">${box('followText', placeholder)}<div class="row"><span class="sp"></span>${sendButton('follow', 'Send', sending)}</div></div>`;
+  if (isQuestion(t)) {
+    if (t.status === 'ready') return html`<div class="row"><button class="btn go" data-got-it=${t.id}>${icon.checkSm}Got it</button></div>${box('followText', 'Ask a follow-up')}<div class="row"><span class="sp"></span><button class="btn" data-ask-more-send>Ask more</button></div>`;
+    if (t.status === 'done') return nothing;
+    return followUp('Add to your question');
   }
-  if (t.status === 'ready' && t.test) h += `<div class="s-try"><small>Try</small>${stepsHTMLOf(stepsOf(t))}${approveHTML(t)}</div>`;
-  else if (t.status === 'ready') h += approveHTML(t);
-  if (t.status === 'stuck') h += questionsSheetHTML(t);
-  return h;
+  if (isPlan(t) && t.status === 'inbox') return html`<div class="row"><button class="btn accent" style="flex:1" data-plan-approve=${t.id}>Approve plan</button></div>${box('followText', 'Want changes? Say what, then send')}<div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
+  // Sending a task back: a box that's always open under To test, with screenshots like the note box.
+  if (t.status === 'ready') return html`<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotThumbs(reply.shots)}</div>${
+    box('reopenText', "Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back")
+  }<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button><input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span>${sendButton('reopen', 'Send it back', sending)}</div></div>`;
+  if (t.status === 'stuck') return html`${box('answerText', questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it')}<div class="row"><button class="btn warm" data-answer ?disabled=${sendingAnswers.has(t.id)}>Send answer</button></div>`;
+  if (t.status === 'inbox') return html`<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button></div>`;
+  if (isPlan(t)) return followUp('Add something about this feature, for Rocco');
+  if (t.status === 'working') return followUp('Message its agent. It reads it at its next step');
+  if (t.status === 'queued') return followUp('Add more for its agent, for when it starts');
+  return nothing;
 }
-
-function sheetRest(t) {
-  let h = '';
-  if (t.shots.length) h += `<div class="shots">${t.shots.map(src => `<img src="${src}" alt="Screenshot">`).join('')}</div>`;
-  if (t.note && t.note !== t.title) h += `<div class="s-note">${esc(t.note)}</div>`;
-  if (t.branch) h += `<div class="sec-h">What changed</div><div class="changes" id="changes"><span class="mut">Loading…</span></div>`;
-  // Its agent's session and the card's history, word for word (session.js).
-  h += `<div class="sec-h">Session</div><div class="sx" id="sx"><div class="sx-empty"><span class="spin"></span>Loading</div></div>`;
-  return h;
-}
-
-// The round send button, as on the note box: Enter does the same.
-const sendButton = (attr, label) => `<button type="button" class="send" ${attr} title="${label} (Enter)" aria-label="${label}">`
-  + '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button>';
-
-const followUpHTML = placeholder => `<div class="reply msg"><textarea class="field" id="followText" placeholder="${placeholder}"></textarea>`
-  + `<div class="row"><span class="sp"></span>${sendButton('data-follow', 'Send')}</div></div>`;
-
-// ---- Sending a task back: a box that's always open under To test, with screenshots like the note box ----
-
-let reply = { id: '', shots: [] }; // the sheet's task, and the screenshots going back with it
-
-const replyHTML = () => `<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotsHTML(reply.shots)}</div>`
-  + `<textarea class="field" id="reopenText" placeholder="Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back"></textarea>`
-  + `<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button>`
-  + `<input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span>${sendButton('data-reopen', 'Send it back')}</div></div>`;
 
 function attachReply(files) {
   const added = files.map(shotOf).filter(Boolean);
-  if (!added.length || !$('#replyShots')) return;
+  if (!added.length || !$('#replyShots') || !sheetTask) return;
   reply.shots.push(...added);
-  $('#replyShots').innerHTML = shotsHTML(reply.shots);
-  $('#reopenText').focus();
+  drawTask(sheetTask);
+  $('#reopenText')?.focus();
 }
 
 // The screenshots go up first, so the conductor finds them, named in the text, when the task comes back to it.
-async function sendBack(id) {
-  const text = $('#reopenText').value.trim(), shots = [...reply.shots];
-  if (!text && !shots.length) { $('#reopenText').focus(); toast("Say what's still wrong, or add a screenshot", 'var(--amber)'); return; }
-  $('#reopenText').disabled = true;
-  await attempt('send it back', async () => {
-    const names = [];
-    for (const s of shots) { const { name } = await api.shot(id, s.file); if (name) names.push(name); }
+function sendBack(id) {
+  const text = sheetText(id).trim(), shots = [...reply.shots];
+  if (!text && !shots.length) { $('#reopenText')?.focus(); toast("Say what's still wrong, or add a screenshot", 'var(--amber)'); return; }
+  attempt('send it back', async () => {
+    // One that went up before a send that failed isn't sent twice.
+    for (const s of shots) s.name ??= (await api.shot(id, s.file)).name || '';
+    const names = shots.map(s => s.name).filter(Boolean);
     await act(id, 'reopen', [text, names.length ? `Screenshots: ${names.join(', ')}` : ''].filter(Boolean).join('\n'));
+    draft.clear(`sheet:${id}`);
     reply = { id: '', shots: [] };
     toast('Sent back to Rocco', 'var(--amber)');
     stayOpen(id);
-  });
-  if ($('#reopenText')) $('#reopenText').disabled = false;
+  }, id).then(() => backToBox(id));
 }
 
 function sendFollowUp(id, text) {
-  $('#followText').disabled = true;
-  attempt('send it', async () => { await act(id, 'followup', text); toast('Sent to Rocco', 'var(--violet)'); stayOpen(id); })
-    .finally(() => { if ($('#followText')) $('#followText').disabled = false; });
+  attempt('send it', async () => {
+    await act(id, 'followup', text);
+    draft.clear(`sheet:${id}`);
+    toast('Sent to Rocco', 'var(--violet)');
+    stayOpen(id);
+  }, id).then(() => backToBox(id));
+}
+
+// The box was off while its words were on their way: the caret goes back in it, to carry on like a chat.
+function backToBox(id) {
+  if (openSheetKey() === id) $('#sFoot [data-sheet-text]')?.focus();
 }
 
 // After you send a card something, it stays open like a session: your words show in it, and what its agent does next.
@@ -419,30 +436,13 @@ function stayOpen(id) {
   scrollSessionToEnd();
 }
 
-function sheetFoot(t) {
-  if (isQuestion(t)) {
-    if (t.status === 'ready') return `<div class="row"><button class="btn go" data-got-it="${t.id}">${icon.checkSm}Got it</button></div>`
-      + `<textarea class="field" id="followText" placeholder="Ask a follow-up"></textarea><div class="row"><span class="sp"></span><button class="btn" data-ask-more-send>Ask more</button></div>`;
-    if (t.status === 'done') return '';
-    return followUpHTML('Add to your question');
-  }
-  if (isPlan(t) && t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-plan-approve="${t.id}">Approve plan</button></div>`
-    + `<textarea class="field" id="followText" placeholder="Want changes? Say what, then send"></textarea><div class="row"><span class="sp"></span><button class="btn" data-revise>Ask for changes</button></div>`;
-  if (t.status === 'ready') return replyHTML();
-  if (t.status === 'stuck') return `<textarea class="field" id="answerText" placeholder="${questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it'}"></textarea><div class="row"><button class="btn warm" data-answer>Send answer</button></div>`;
-  if (t.status === 'inbox') return `<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button></div>`;
-  if (isPlan(t)) return followUpHTML('Add something about this feature, for Rocco');
-  if (t.status === 'working') return followUpHTML('Message its agent. It reads it at its next step');
-  if (t.status === 'queued') return followUpHTML('Add more for its agent, for when it starts');
-  return '';
-}
-
 // ---- Deleting a task, from its sheet: a second click confirms, and Undo takes it back for a few seconds ----
 
 // Work a worker is on, or that's done on a branch but not merged: the conductor stops it and drops it.
 const running = t => t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && !!t.branch && (t.status !== 'done' || t.pending === 'merge'));
 
-const deleteHTML = t => `<button class="btn-sm danger" data-delete>${isPlan(t) && childrenOf(t).length ? 'Delete plan' : 'Delete'}</button>`;
+const deleteButton = t => html`<button class="btn-sm danger${ui.confirm ? ' confirm' : ''}" data-delete>${
+  ui.confirm ? (running(t) || (isPlan(t) && childrenOf(t).some(running)) ? 'Stop and delete?' : 'Delete it?') : isPlan(t) && childrenOf(t).length ? 'Delete plan' : 'Delete'}</button>`;
 
 function deletedText(t) {
   if (isPlan(t)) return childrenOf(t).length ? 'Deleted the plan and its tasks' : 'Plan deleted';
@@ -452,144 +452,228 @@ function deletedText(t) {
   return 'Deleted';
 }
 
-function deleteTask(id, button) {
+function deleteTask(id) {
   const t = byId(id);
   if (!t) return;
-  if (!button.classList.contains('confirm')) {
-    button.classList.add('confirm');
-    button.textContent = running(t) || (isPlan(t) && childrenOf(t).some(running)) ? 'Stop and delete?' : 'Delete it?';
-    return;
-  }
+  if (!ui.confirm) { ui.confirm = true; drawTask(id); return; }
   closeSheet();
-  attempt('delete it', async () => { await act(id, 'remove'); undoable(id, deletedText(t), 'var(--gray)'); });
+  attempt('delete it', async () => { await act(id, 'remove'); undoable(id, deletedText(t), 'var(--gray)'); }, id);
 }
 
-async function loadChanges(t) {
-  try {
-    const c = await api.changes(t.id);
-    const box = $('#changes');
-    if (!box || openSheetKey() !== t.id) return;
-    // Reading at the end of the session, it stays there as this fills in above.
-    const body = $('#sBody'), fromEnd = body.scrollHeight - body.scrollTop;
-    const atEnd = fromEnd - body.clientHeight < 40;
-    box.innerHTML = c.files.length
-      ? c.files.map(f => `<div class="chg"><span class="chg-path">${esc(f.path)}</span><span class="chg-add">+${f.added}</span><span class="chg-del">−${f.removed}</span></div>`).join('')
-        + `<div class="chg-foot">${c.source === 'merged' ? 'As merged into main' : 'On its branch, against main'}${c.url ? ` · <a href="${esc(c.url)}" target="_blank" rel="noreferrer">View on GitHub</a>` : ''}</div>`
-      : '<span class="mut">No changes found for its branch yet.</span>';
-    if (atEnd) body.scrollTop = body.scrollHeight;
-  } catch { /* the sheet just keeps "Loading…" */ }
+// What a task's changes were loaded for: when it moves on (sent back, built again), they're loaded again.
+const changeStamp = t => `${t.branch}|${t.status}|${t.attempt}`;
+
+async function loadChanges(id) {
+  const t = byId(id);
+  if (!t?.branch) return;
+  const c = changes?.id === id ? changes : (changes = { id, data: null, error: '' });
+  c.stamp = changeStamp(t);
+  c.loading = true;
+  try { c.data = await api.changes(id); c.error = ''; }
+  catch (e) { c.error = e.message; }
+  c.loading = false;
+  if (changes === c && openSheetKey() === id) drawTask(id);
+}
+
+// Draws the open task's sheet from the task as it is now. Reading at the end of the session, it stays there as the
+// top fills in above.
+function drawTask(id) {
+  const t = byId(id);
+  if (!t) { if (openSheetKey() === id) closeSheet(); return; }
+  const body = $('#sBody'), atEnd = openSheetKey() === id && body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+  showSheet(id, {
+    color: isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status],
+    chip: isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status],
+    // A deleted task (opened from the archive) has nothing left to delete.
+    id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${t.status === 'removed' ? nothing : deleteButton(t)}`, wide: true,
+  });
+  if (atEnd) body.scrollTop = body.scrollHeight;
+  // It moved on (sent back, built again): what it changed is loaded again, and the lines that were open are let go.
+  if (t.branch && changes?.id === id && !changes.loading && changes.stamp !== changeStamp(t)) { forgetDiffs(); loadChanges(id); }
 }
 
 export function openTask(id) {
   const t = byId(id);
   if (!t) return;
-  const color = isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status];
-  const chip = isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status];
-  if (reply.id !== id) reply = { id, shots: [] };
-  showSheet(id, { color, chip, id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: deleteHTML(t), wide: true });
-  if (t.branch) loadChanges(t);
+  if (sheetTask !== id || openSheetKey() !== id) {
+    sheetTask = id;
+    ui = { confirm: false, big: new Set() };
+    resetParts(id);
+    if (changes?.id !== id) changes = null;
+    if (reply.id !== id) reply = { id, shots: [] };
+  }
+  drawTask(id);
+  if (t.branch && !changes) loadChanges(id);
   startSession(id);
 }
 
-function openApproved() {
+// A task by its id alone: one on the board opens as it is; one the board no longer carries (from the archive, a link,
+// the usage list) is fetched first. known: the task, when the caller already has it.
+export async function openTaskById(id, known = null) {
+  if (!state.tasks.some(t => t.id === id)) {
+    try { state.extra.set(id, taskFrom(known || await api.task(id))); }
+    catch (e) { toast(e.status === 404 ? `There's no task ${id} in this project` : `Couldn't open ${id}: ${e.message}`, 'var(--red)'); return; }
+  }
+  openTask(id);
+}
+
+function showApproved() {
   const list = approvedWork();
   showSheet('approved', {
     color: COLOR.done,
     chip: 'Approved today',
-    body: `<h2 class="s-title">${list.length} approved today</h2><div style="margin-top:12px">`
-      + list.map(t => `<div class="s-row" data-id="${t.id}">${icon.checkSm}<span>${esc(t.title)}</span>`
-        + `${t.pending === 'merge' ? '<span class="tag t-merge"><i></i>Merging</span>' : ''}<span class="at">${hhmm(t.doneAt)}</span></div>`).join('') + '</div>',
+    body: html`<h2 class="s-title">${list.length} approved today</h2><div style="margin-top:12px">${list.map(t => html`<div class="s-row" data-id=${t.id}>${icon.checkSm}<span>${t.title}</span>${
+      t.pending === 'merge' ? html`<span class="tag t-merge"><i></i>Merging</span>` : nothing}<span class="at">${hhmm(t.doneAt)}</span></div>`)}</div><div class="row s-older"><button class="btn-sm" data-archive>Earlier ones, in the archive</button></div>`,
   });
+}
+
+// A different project: nothing of the old one's stays (what was typed is kept by project, lib/drafts.js).
+export function resetWorkboard() {
+  player?.pause();
+  playing = '';
+  sendingAnswers.clear();
+  unsent.clear();
+  folding.clear();
+  sheetTask = null;
+  changes = null;
+  reply = { id: '', shots: [] };
+  resetParts();
+  dragId = null;
+  clearTimeout(orderTimer);
 }
 
 // ---- What the user does ----
 
-async function attempt(what, fn) {
-  try { await fn(); } catch (e) { toast(`Couldn't ${what}: ${e.message}`, 'var(--red)'); renderWorkboard(); }
+// Runs what the user asked for, and says so if it fails. id: the task it's for; while one thing is on its way for a
+// task, asking again does nothing.
+async function attempt(what, fn, id = '') {
+  const run = async () => { try { await fn(); } catch (e) { toast(`Couldn't ${what}: ${e.message}`, 'var(--red)'); } };
+  if (!id) { await run(); renderWorkboard(); return; }
+  if (busy(`task:${id}`)) return;
+  const done = once(`task:${id}`, run);
+  renderWorkboard();
+  await done;
+  renderWorkboard();
 }
 
 async function act(id, action, text) {
   const { opened } = await api.act(id, action, text);
   await refresh();
-  // After the caller's own toast.
-  if (opened) setTimeout(() => conductorOpened(opened), 1600);
+  // Beside the caller's own toast, which comes first.
+  if (opened) setTimeout(() => conductorOpened(opened), 300);
 }
 
-// Approve, answer, queue and dismiss can be taken back for a few seconds.
-const undoable = (id, message, color) => toast(message, color, { label: 'Undo', run: () => attempt('undo it', () => act(id, 'undo')) });
+// What a task's extra parts (taskparts.js) need from here: drawing its sheet again, and doing something to it.
+const partsContext = id => ({
+  redraw: () => { if (openSheetKey() === id) drawTask(id); },
+  run: (what, action, text, done) => attempt(what, async () => { await act(id, action, text); done?.(); }, id),
+});
 
-function collapse(el) {
+// Approve, answer, queue and dismiss can be taken back for a few seconds.
+const undoable = (id, message, color) => toast(message, color, { label: 'Undo', run: () => attempt('undo it', () => act(id, 'undo'), id) });
+
+const boardCard = id => document.querySelector(`#board .card[data-id="${CSS.escape(id)}"]`);
+
+function fold(el) {
   el.style.height = el.offsetHeight + 'px';
-  el.classList.add('collapse');
   requestAnimationFrame(() => Object.assign(el.style, { height: '0px', opacity: '0', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', borderWidth: '0px' }));
 }
 
 // The box lights up, the card folds away, then the server hears about it.
-async function approve(id) {
+function approve(id) {
   const t = byId(id);
   if (!t) return;
-  const box = document.querySelector(`[data-approve="${id}"]`), card = box && box.closest('.card');
   hidePopover();
-  if (box) { box.classList.add('on'); box.setAttribute('aria-checked', 'true'); }
-  setTimeout(() => card && collapse(card), 420);
-  await new Promise(r => setTimeout(r, 760));
-  await attempt('approve it', async () => {
-    await act(id, 'approve');
-    undoable(id, t.where === 'lane' ? `Approved. The conductor merges “${t.title}” into Main.` : `Approved “${t.title}”`, t.where === 'lane' ? 'var(--cyan)' : 'var(--green)');
-    const button = $('#approvedBtn');
-    button.classList.remove('bump'); void button.offsetWidth; button.classList.add('bump');
-  });
+  attempt('approve it', async () => {
+    folding.add(id);
+    renderBoard();
+    setTimeout(() => { const el = folding.has(id) && boardCard(id); if (el) fold(el); }, 420);
+    await new Promise(r => setTimeout(r, 760));
+    try {
+      await act(id, 'approve');
+      undoable(id, t.where === 'lane' ? `Approved. The conductor merges “${t.title}” into Main.` : `Approved “${t.title}”`, t.where === 'lane' ? 'var(--cyan)' : 'var(--green)');
+      const button = $('#approvedBtn');
+      button.classList.remove('bump'); void button.offsetWidth; button.classList.add('bump');
+    } finally {
+      // Still on the board (it didn't go through, or Undo brought it back): unfolded again.
+      folding.delete(id);
+      boardCard(id)?.removeAttribute('style');
+    }
+  }, id);
 }
 
-const queueIt = id => attempt('queue it', async () => { await act(id, 'queue'); undoable(id, 'Added to Up next', 'var(--violet)'); });
-const gotIt = id => attempt('close it', async () => { await act(id, 'approve'); undoable(id, 'Got it', 'var(--claude)'); });
-const askMore = (id, text) => attempt('ask it', async () => { await act(id, 'reopen', text); drafts.delete(id); renderWorkboard(); toast('Asked. The answer shows here.', 'var(--claude)'); });
-const unask = id => attempt('take it back', async () => { await act(id, 'remove'); undoable(id, 'Question taken back', 'var(--gray)'); });
-const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); });
+const queueIt = id => attempt('queue it', async () => { await act(id, 'queue'); undoable(id, 'Added to Up next', 'var(--violet)'); }, id);
+const gotIt = id => attempt('close it', async () => { await act(id, 'approve'); undoable(id, 'Got it', 'var(--claude)'); }, id);
+const askMore = (id, text) => attempt('ask it', async () => {
+  await act(id, 'reopen', text);
+  draft.clear(`reply:${id}`);
+  draft.clear(`sheet:${id}`);
+  toast('Asked. The answer shows here.', 'var(--claude)');
+}, id);
+const unask = id => attempt('take it back', async () => { await act(id, 'remove'); undoable(id, 'Question taken back', 'var(--gray)'); }, id);
+const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); }, id);
+const approvePlan = id => attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); }, id);
 const queueAll = () => attempt('queue them', async () => {
   const n = work('inbox').length;
   const { opened } = await api.send();
   await refresh();
   toast(`Added ${n} to Up next`, 'var(--violet)');
-  if (opened) setTimeout(() => conductorOpened(opened), 1600);
-});
+  if (opened) conductorOpened(opened);
+}, 'inbox');
 
 function answerText(t, extra) {
-  const picked = answers.get(t.id) || [];
+  const picked = picksOf(t.id);
   // "Pick a sound: Blade swing", "Every swing or only on hits? Only on hits"
   const line = (q, answer) => q.text.trim().endsWith('?') ? `${q.text.trim()} ${answer}` : `${q.text.trim().replace(/[.:]+$/, '')}: ${answer}`;
-  const lines = questionsOf(t).map((q, i) => picked[i] === undefined ? '' : line(q, picked[i] === SKIP ? 'your call' : picked[i])).filter(Boolean);
+  const lines = questionsOf(t).map((q, i) => picked[i] == null ? '' : line(q, picked[i] === SKIP ? 'your call' : picked[i])).filter(Boolean);
   if (extra) lines.push(extra);
   return lines.join('\n');
 }
 
-// Sent straight away, with a few seconds to take it back.
+// Sent straight away, with a few seconds to take it back. One that doesn't go through keeps its picks and what was
+// typed, on the card and in its sheet, to send again.
 async function sendAnswers(id, extra = '') {
   const t = byId(id), text = t && answerText(t, extra);
   if (!text) { toast('Pick an answer, or write one', 'var(--amber)'); return; }
+  if (sendingAnswers.has(id)) return;
+  sendingAnswers.add(id);
   closeSheet();
   renderWorkboard();
   try {
     await act(id, 'answer', text);
+    draft.clear(`answers:${id}`);
+    draft.clear(`sheet:${id}`);
+    unsent.delete(id);
     undoable(id, 'Answer sent to Rocco', 'var(--amber)');
   } catch (e) {
-    toast(`Couldn't send the answer: ${e.message}`, 'var(--red)');
+    unsent.set(id, extra);
+    toast(`Couldn't send the answer: ${String(e.message).replace(/\.$/, '')}. It's kept on the card`, 'var(--red)', { label: 'Try again', run: () => sendAnswers(id, extra) }, 8000);
   }
-  answers.delete(id);
+  sendingAnswers.delete(id);
   renderWorkboard();
 }
 
 // Picking the last unanswered question's option sends them all, with anything typed in the sheet's box.
 function pick(taskId, q, value) {
   const t = byId(taskId);
-  const picked = [...(answers.get(taskId) || [])];
+  if (!t || sendingAnswers.has(taskId)) return;
+  const picked = [...picksOf(taskId)];
   picked[q] = value;
-  answers.set(taskId, picked.slice(0, Math.max(q + 1, picked.length)));
-  if (t && questionsOf(t).every((_, i) => picked[i] !== undefined)) {
-    sendAnswers(taskId, openSheetKey() === taskId ? $('#answerText')?.value.trim() || '' : '');
+  for (let i = 0; i < picked.length; i++) picked[i] ??= null; // a question skipped over, in the sheet
+  draft.set(`answers:${taskId}`, picked);
+  if (questionsOf(t).every((_, i) => picked[i] != null)) {
+    sendAnswers(taskId, openSheetKey() === taskId ? sheetText(taskId).trim() : unsent.get(taskId) || '');
     return;
   }
-  if (openSheetKey() === taskId) openTask(taskId); else renderWorkboard();
+  renderWorkboard();
+}
+
+// The reply box on a plan or an answered question: open in this mode, or closed if it already was.
+function toggleReply(id, mode) {
+  const d = replyOf(id);
+  if (d && d.mode === mode) draft.clear(`reply:${id}`); else draft.set(`reply:${id}`, { mode, text: d?.text || '' });
+  renderWorkboard();
+  if (replyOf(id)) $(`[data-id="${CSS.escape(id)}"] :is(.plan-reply, .qa-reply) textarea`)?.focus();
 }
 
 // ---- Reordering Up next ----
@@ -606,6 +690,29 @@ function conflict(ids) {
 }
 
 let dragId = null;
+let orderTimer = 0;
+
+// The queue in this order: shown at once, then kept by the server. later: after a pause, for a key held down.
+function reorder(ids, later = false) {
+  const bad = conflict(ids);
+  if (bad) { toast(`${bad[0]} waits on ${bad[1]}, so it has to stay after it`, 'var(--amber)'); renderWorkboard(); return false; }
+  ids.forEach((id, i) => { byId(id).order = i + 1; });
+  renderWorkboard();
+  const save = () => attempt('reorder Up next', async () => { await api.order(ids); await refresh(); });
+  clearTimeout(orderTimer);
+  if (later) orderTimer = setTimeout(save, 500); else save();
+  return true;
+}
+
+// From the keyboard: the row that has focus moves one place, and keeps focus.
+function moveRow(id, by) {
+  const ids = queue().map(t => t.id), at = ids.indexOf(id), to = at + by;
+  if (at < 0 || to < 0 || to >= ids.length) return;
+  ids.splice(at, 1);
+  ids.splice(to, 0, id);
+  if (reorder(ids, true)) $(`#queue .q-row[data-id="${CSS.escape(id)}"]`)?.focus();
+}
+
 function initReorder() {
   const box = $('#queue');
   const clearMarks = () => box.querySelectorAll('.drop-before, .drop-after').forEach(r => r.classList.remove('drop-before', 'drop-after'));
@@ -635,18 +742,25 @@ function initReorder() {
     const ids = queue().map(t => t.id).filter(id => id !== dragId);
     const at = ids.indexOf(row.dataset.id) + (before ? 0 : 1);
     ids.splice(at < 0 ? ids.length : at, 0, dragId);
-    const bad = conflict(ids);
-    if (bad) { toast(`${bad[0]} waits on ${bad[1]}, so it has to stay after it`, 'var(--amber)'); renderWorkboard(); return; }
-    ids.forEach((id, i) => { byId(id).order = i + 1; });
-    renderWorkboard();
-    attempt('reorder Up next', async () => { await api.order(ids); await refresh(); });
+    reorder(ids);
+  });
+  box.addEventListener('keydown', e => {
+    const row = e.target.closest('.q-row');
+    if (!row || !e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    moveRow(row.dataset.id, e.key === 'ArrowUp' ? -1 : 1);
   });
 }
 
 export function initWorkboard() {
-  initPopover('.card', el => { const t = byId(el.dataset.id); return t ? summaryHTML(t) : ''; });
+  initPopover('.card', el => { const t = byId(el.dataset.id); return t ? summary(t) : null; });
   initReorder();
-  $('#approvedBtn').addEventListener('click', openApproved);
+  on('prose', renderWorkboard);
+  // What the open card's sessions used has come in (session.js): its line under the title follows.
+  on('session-usage', id => { if (openSheetKey() === id && sheetTask === id) drawTask(id); });
+  $('#approvedBtn').addEventListener('click', showApproved);
+  $('#archiveBtn').addEventListener('click', () => showArchive());
+  $('#usageBtn').addEventListener('click', showUsage);
 
   const view = $('.view[data-view="workboard"]');
   view.addEventListener('click', e => {
@@ -654,44 +768,35 @@ export function initWorkboard() {
     const card = hit('[data-id]')?.dataset.id;
     // A task's pictures (the conductor's questions handle their own).
     if (hit('[data-pic-src]') && hit('[data-pic-set][data-q]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pick(card, +set.dataset.q, label));
-    else if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
+    else if (hit('[data-play]')) play(hit('[data-play]').dataset.play);
     else if (hit('[data-plan-spec]')) showDoc(hit('[data-plan-spec]').dataset.planSpec);
     else if (hit('[data-pick]')) pick(card, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
-    else if (hit('[data-back]')) { answers.set(card, (answers.get(card) || []).slice(0, -1)); renderWorkboard(); }
+    else if (hit('[data-resend]')) sendAnswers(card, unsent.get(card) || '');
+    else if (hit('[data-back]')) { draft.set(`answers:${card}`, picksOf(card).slice(0, -1)); renderWorkboard(); }
     else if (hit('[data-approve]')) approve(hit('[data-approve]').dataset.approve);
     else if (hit('[data-queue]')) queueIt(hit('[data-queue]').dataset.queue);
     else if (hit('[data-dismiss]')) dismiss(hit('[data-dismiss]').dataset.dismiss);
     else if (hit('[data-queue-all]')) queueAll();
     else if (hit('[data-got-it]')) gotIt(card);
     else if (hit('[data-unask]')) unask(card);
-    else if (hit('[data-ask-more]')) {
-      const box = hit('.qa').querySelector('.qa-reply');
-      box.hidden = !box.hidden;
-      if (box.hidden) drafts.delete(card); else { drafts.set(card, { mode: 'more', text: box.querySelector('textarea').value }); box.querySelector('textarea').focus(); }
-    } else if (hit('[data-ask-send]')) {
-      const field = hit('.qa-reply').querySelector('textarea'), text = field.value.trim();
-      if (!text) { field.focus(); return; }
+    else if (hit('[data-ask-more]')) toggleReply(card, 'more');
+    else if (hit('[data-ask-send]')) {
+      const text = (replyOf(card)?.text || '').trim();
+      if (!text) { hit('.qa-reply').querySelector('textarea').focus(); return; }
       askMore(card, text);
     } else if (hit('.qa-reply')) { /* typing in it */ }
     else if (hit('.qa-q')) openTask(card);
-    else if (hit('[data-plan-approve]')) attempt('approve the plan', async () => { await act(card, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); });
-    else if (hit('[data-plan-dismiss]')) attempt('dismiss the plan', async () => { await act(card, 'remove'); drafts.delete(card); undoable(card, 'Plan dismissed', 'var(--gray)'); });
-    else if (hit('[data-plan-reply]')) {
-      const box = hit('.plan').querySelector('.plan-reply'), mode = hit('[data-plan-reply]').dataset.mode;
-      const field = box.querySelector('textarea');
-      box.hidden = box.dataset.mode === mode ? !box.hidden : false;
-      box.dataset.mode = mode;
-      field.placeholder = PLAN_PROMPT[mode];
-      if (box.hidden) drafts.delete(card); else { drafts.set(card, { mode, text: field.value }); field.focus(); }
-    } else if (hit('[data-plan-send]')) {
-      const box = hit('.plan-reply'), text = box.querySelector('textarea').value.trim();
-      if (!text) { box.querySelector('textarea').focus(); return; }
+    else if (hit('[data-plan-approve]')) approvePlan(card);
+    else if (hit('[data-plan-dismiss]')) attempt('dismiss the plan', async () => { await act(card, 'remove'); draft.clear(`reply:${card}`); undoable(card, 'Plan dismissed', 'var(--gray)'); }, card);
+    else if (hit('[data-plan-reply]')) toggleReply(card, hit('[data-plan-reply]').dataset.mode);
+    else if (hit('[data-plan-send]')) {
+      const d = replyOf(card), text = (d?.text || '').trim();
+      if (!text) { hit('.plan-reply').querySelector('textarea').focus(); return; }
       attempt('send it', async () => {
-        await act(card, box.dataset.mode === 'revise' ? 'revise' : 'followup', text);
-        drafts.delete(card);
-        renderWorkboard();
+        await act(card, d.mode === 'revise' ? 'revise' : 'followup', text);
+        draft.clear(`reply:${card}`);
         toast('Sent to Rocco', 'var(--accent-text)');
-      });
+      }, card);
     } else if (hit('.plan-reply')) { /* typing in it */ }
     else if (hit('.card, .sug, .q-row, .feat, .plan')) openTask(card);
   });
@@ -700,16 +805,18 @@ export function initWorkboard() {
   });
   view.addEventListener('input', e => {
     const box = e.target.closest('.plan-reply, .qa-reply'), id = e.target.closest('[data-id]')?.dataset.id;
-    if (box && id) drafts.set(id, { mode: box.dataset.mode || 'more', text: e.target.value });
+    if (box && id) draft.set(`reply:${id}`, { mode: replyOf(id)?.mode || 'more', text: e.target.value });
   });
 
+  // What's typed in a task's sheet is kept as it's typed.
+  $('#sheet').addEventListener('input', e => { if (e.target.matches('[data-sheet-text]') && sheetTask) draft.set(`sheet:${sheetTask}`, e.target.value); });
   // A typed answer, or what's still wrong, goes with Enter; Shift+Enter starts a new line.
   $('#sheet').addEventListener('keydown', e => {
-    if (e.key !== 'Enter' || e.shiftKey) return;
-    if (e.target.id === 'answerText' && e.target.value.trim()) { e.preventDefault(); sendAnswers(openSheetKey(), e.target.value.trim()); }
-    if (e.target.id === 'reopenText') { e.preventDefault(); sendBack(openSheetKey()); }
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || openSheetKey() !== sheetTask) return;
+    if (e.target.id === 'answerText' && e.target.value.trim()) { e.preventDefault(); sendAnswers(sheetTask, e.target.value.trim()); }
+    if (e.target.id === 'reopenText') { e.preventDefault(); sendBack(sheetTask); }
     // A message to a card's agent, as in a session (not a plan's changes or a question's follow-up: those have buttons).
-    if (e.target.id === 'followText' && $('[data-follow]') && e.target.value.trim()) { e.preventDefault(); sendFollowUp(openSheetKey(), e.target.value.trim()); }
+    if (e.target.id === 'followText' && $('#sheet [data-send="follow"]') && e.target.value.trim()) { e.preventDefault(); sendFollowUp(sheetTask, e.target.value.trim()); }
   });
   // Screenshots for sending a task back: pasted anywhere while its sheet is open, dropped on the box, or picked.
   document.addEventListener('paste', e => {
@@ -719,7 +826,12 @@ export function initWorkboard() {
     e.preventDefault();
     attachReply(files);
   });
-  $('#sheet').addEventListener('change', e => { if (e.target.id === 'replyInput') { attachReply([...e.target.files]); e.target.value = ''; } });
+  $('#sheet').addEventListener('change', e => {
+    if (e.target.id === 'replyInput') { attachReply([...e.target.files]); e.target.value = ''; return; }
+    // The lane or worker picked for the open task.
+    const t = openSheetKey() === sheetTask && byId(sheetTask);
+    if (t) partsChange(e, t, partsContext(t.id));
+  });
   $('#sheet').addEventListener('dragover', e => { const box = e.target.closest('#reply'); if (box) { e.preventDefault(); box.classList.add('drag'); } });
   $('#sheet').addEventListener('dragleave', e => e.target.closest('#reply')?.classList.remove('drag'));
   $('#sheet').addEventListener('drop', e => {
@@ -730,38 +842,42 @@ export function initWorkboard() {
     attachReply(imagesIn(e.dataTransfer.files));
   });
 
-  // The controls inside a task's sheet.
+  // The controls inside a task's sheet (and today's approvals, whose rows open their tasks).
   $('#sheet').addEventListener('click', e => {
     const el = e.target, hit = selector => el.closest(selector);
-    const id = openSheetKey();
+    const key = openSheetKey();
+    if (key === 'approved') { if (hit('.s-row')) openTask(hit('.s-row').dataset.id); else if (hit('[data-archive]')) showArchive(); return; }
+    if (!key || key !== sheetTask) return;
+    const id = key, text = () => sheetText(id).trim();
+    // Its extra parts first (taskparts.js): stepping in on its worker, its checks, a file's lines, a link to it.
+    if (byId(id) && partsClick(e, byId(id), partsContext(id))) return;
     if (hit('[data-pic-src]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pick(id, +set.dataset.q, label));
-    else if (hit('[data-play]')) play(hit('[data-play]').dataset.play, hit('[data-play]'));
+    else if (hit('[data-play]')) play(hit('[data-play]').dataset.play);
     else if (hit('[data-plan-spec]')) { closeSheet(); showDoc(hit('[data-plan-spec]').dataset.planSpec); }
     else if (hit('[data-pick]')) pick(id, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
-    else if (hit('[data-answer]')) sendAnswers(id, $('#answerText').value.trim());
+    else if (hit('[data-answer]')) sendAnswers(id, text());
     else if (hit('[data-approve-open]')) { closeSheet(); setTimeout(() => approve(id), 250); }
-    else if (hit('[data-reopen]')) sendBack(id);
+    else if (hit('[data-send="reopen"]')) sendBack(id);
     else if (hit('[data-reply-attach]')) $('#replyInput').click();
-    else if (hit('#replyShots')) shotClick(el, reply.shots).then(changed => { if (changed && $('#replyShots')) $('#replyShots').innerHTML = shotsHTML(reply.shots); });
-    else if (hit('[data-follow]') || hit('[data-revise]')) {
-      const text = $('#followText').value.trim();
-      if (!text) { $('#followText').focus(); return; }
+    else if (hit('#replyShots')) shotClick(el, reply.shots).then(changed => { if (changed && openSheetKey() === id) drawTask(id); });
+    else if (hit('[data-changes-retry]')) loadChanges(id);
+    else if (hit('[data-send="follow"]') || hit('[data-revise]')) {
+      if (!text()) { $('#followText').focus(); return; }
       if (hit('[data-revise]')) {
+        const words = text();
         closeSheet();
-        attempt('send it', async () => { await act(id, 'revise', text); toast('Changes asked for', 'var(--violet)'); });
-      } else sendFollowUp(id, text);
-    } else if (hit('[data-plan-approve]')) {
-      closeSheet();
-      attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); });
-    } else if (hit('[data-got-it]')) { closeSheet(); gotIt(id); }
+        attempt('send it', async () => { await act(id, 'revise', words); draft.clear(`sheet:${id}`); toast('Changes asked for', 'var(--violet)'); }, id);
+      } else sendFollowUp(id, text());
+    } else if (hit('[data-plan-approve]')) { closeSheet(); approvePlan(id); }
+    else if (hit('[data-got-it]')) { closeSheet(); gotIt(id); }
     else if (hit('[data-ask-more-send]')) {
-      const text = $('#followText').value.trim();
-      if (!text) { $('#followText').focus(); return; }
+      if (!text()) { $('#followText').focus(); return; }
+      const words = text();
       closeSheet();
-      askMore(id, text);
+      askMore(id, words);
     } else if (hit('[data-queue-open]')) { closeSheet(); queueIt(id); }
-    else if (hit('[data-delete]')) deleteTask(id, hit('[data-delete]'));
-    else if (el.matches('.shots img')) el.classList.toggle('big');
+    else if (hit('[data-delete]')) deleteTask(id);
+    else if (el.matches('.shots img')) { const src = el.getAttribute('src'); if (ui.big.has(src)) ui.big.delete(src); else ui.big.add(src); drawTask(id); }
     else if (hit('.s-row')) openTask(hit('.s-row').dataset.id);
     else if (hit('.ftag')) { const t = byId(id); if (t?.plan) openTask(t.plan); }
   });

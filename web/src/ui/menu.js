@@ -1,5 +1,6 @@
 // Floating menus (project picker, profile), placed next to the button that opened them.
 import { $$ } from '../lib/dom.js';
+import { render } from '../lib/html.js';
 
 export const menuOpen = () => !!document.querySelector('.menu.open');
 
@@ -8,12 +9,12 @@ export function closeMenus() {
   $$('[aria-haspopup][aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
-// Opens the menu, or closes it if it was already open. up: it grows upward from the button.
-export function openMenu(menu, anchor, html, { up = false } = {}) {
+// Opens the menu, or closes it if it was already open. content: its template. up: it grows upward from the button.
+export function openMenu(menu, anchor, content, { up = false } = {}) {
   const wasOpen = menu.classList.contains('open');
   closeMenus();
   if (wasOpen) return;
-  menu.innerHTML = html;
+  render(content, menu);
   place(menu, anchor, up);
   menu.classList.add('open');
   anchor.setAttribute('aria-expanded', 'true');
@@ -33,5 +34,5 @@ function place(menu, anchor, up) {
   }
 }
 
-document.addEventListener('click', e => { if (!e.target.closest('.menu, [aria-haspopup]')) closeMenus(); });
+document.addEventListener('click', /** @param {MouseEvent & { target: any }} e */ e => { if (!e.target.closest('.menu, [aria-haspopup]')) closeMenus(); });
 addEventListener('resize', closeMenus);

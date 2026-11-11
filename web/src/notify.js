@@ -11,7 +11,9 @@ export async function askPermission() {
 
 // onClick: what to open when the user clicks it.
 export function notify(title, body, onClick) {
-  if (!settings().notifications || !document.hidden || !notificationsAllowed()) return;
+  // In the background: its tab is hidden, or its window is behind another one (Studio, most of the time).
+  const away = document.hidden || !document.hasFocus();
+  if (!settings().notifications || !away || !notificationsAllowed()) return;
   const n = new Notification(title, { body, icon: 'assets/rocco.svg', tag: title + body });
   n.onclick = () => { window.focus(); n.close(); onClick?.(); };
 }

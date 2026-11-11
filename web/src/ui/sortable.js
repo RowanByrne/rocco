@@ -1,11 +1,27 @@
 // Drag to reorder a vertical list: the item follows the pointer and the others slide out of its way.
-// A press that doesn't move is still a click; Esc puts the item back. onDrop gets the items in their new order.
+// A press that doesn't move is still a click; Esc puts the item back. From the keyboard, Alt+Up and Alt+Down move the
+// item that has focus. onDrop gets the items in their new order.
 export function sortable(list, { items, handle = items, onDrop }) {
   const kids = () => [...list.children].filter(el => el.matches(items));
   let drag = null;
 
   // Links drag their URL by default, which would end the pointer's drag.
   list.addEventListener('dragstart', e => { if (e.target.closest(handle)) e.preventDefault(); });
+
+  // From the keyboard: the focused item moves one place, and keeps focus.
+  list.addEventListener('keydown', e => {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || drag) return;
+    const el = e.target.closest(handle)?.closest(items);
+    if (!el || el.parentElement !== list) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const all = kids(), at = all.indexOf(el), to = at + (e.key === 'ArrowUp' ? -1 : 1);
+    if (to < 0 || to >= all.length) return;
+    const focused = /** @type {HTMLElement} */ (document.activeElement);
+    list.insertBefore(el, e.key === 'ArrowUp' ? all[to] : all[to].nextSibling);
+    focused?.focus?.();
+    onDrop?.(kids());
+  });
 
   list.addEventListener('pointerdown', e => {
     if (e.button !== 0 || drag) return;

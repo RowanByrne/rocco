@@ -1,7 +1,9 @@
-// Logos for Connections: brand marks from Simple Icons (served by jsDelivr), else one of our line icons.
+// Logos for Connections: brand marks from Simple Icons, kept in assets/brands (simple-icons 16.33.0, CC0-1.0; each
+// mark belongs to its brand), else one of our line icons.
+import { html } from './html.js';
 import { icon } from './icons.js';
 
-const SIMPLE_ICONS = 'https://cdn.jsdelivr.net/npm/simple-icons@16.33.0/icons/';
+const MARKS = 'assets/brands/';
 
 // By connection name. Colors are each brand's own (Simple Icons' hex), or ours for tools without one.
 const BRANDS = {
@@ -27,18 +29,9 @@ const BRANDS = {
 const brandOf = item => BRANDS[item.name] || { glyph: / plugin$/.test(item.name) || item.group === 'Libraries' ? 'package' : 'plug', color: '#3b3f52' };
 
 // size: '' (40px), 'sm' (30px) or 'lg' (52px).
-export function logoHTML(item, size = '') {
+export function logo(item, size = '') {
   const b = brandOf(item);
   // Our own logo keeps its colors and fills the tile; brand marks are drawn white on the brand's color.
-  const mark = b.img ? `<img class="own" src="${b.img}" alt="" data-glyph="${b.glyph}">`
-    : b.logo ? `<img src="${SIMPLE_ICONS}${b.logo}.svg" alt="" data-glyph="${b.glyph}">` : icon[b.glyph];
-  return `<span class="brand${size ? ' ' + size : ''}" style="--brand:${b.color}">${mark}</span>`;
-}
-
-// Offline, the brand marks can't load: swap in the line icon.
-export function useGlyphFallback(root) {
-  root.addEventListener('error', e => {
-    const img = e.target;
-    if (img.tagName === 'IMG' && img.dataset.glyph) img.outerHTML = icon[img.dataset.glyph];
-  }, true);
+  const mark = b.img ? html`<img class="own" src=${b.img} alt="">` : b.logo ? html`<img src="${MARKS}${b.logo}.svg" alt="">` : icon[b.glyph];
+  return html`<span class="brand${size ? ` ${size}` : ''}" style="--brand:${b.color}">${mark}</span>`;
 }

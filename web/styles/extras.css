@@ -1,0 +1,71 @@
+/* A task's extra parts (views/taskparts.js), the archive and usage sheets, and the small marks that go with them. */
+
+/* Under a task's title: what it took, and stepping in on its worker. */
+.s-effort { margin-top: 4px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.s-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.s-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+.s-pick select { height: 26px; padding: 0 6px; border-radius: 8px; font-size: 12px; color: var(--text-2); }
+.s-step-note { flex-basis: 100%; font-size: 12px; color: var(--text-3); }
+.fchip.paused { color: var(--amber); background: rgba(251,191,36,.1); }
+.s-tools .icon-btn { margin-right: 4px; }
+.s-older { margin-top: 14px; }
+
+/* Checks: what its worker ran. */
+.checks { border: 1px solid var(--stroke); border-radius: var(--r); }
+.check + .check { border-top: 1px solid var(--stroke); }
+.check-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 12.5px; color: var(--text-2); }
+.check-mark { flex: none; display: inline-flex; width: 16px; justify-content: center; font-weight: 700; }
+.check.ok .check-mark { color: var(--green); }
+.check.bad .check-mark, .check.bad .check-text { color: var(--red); }
+.check-text { flex: 1; min-width: 0; }
+.check-row .at { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.check-out { margin: 0 12px 10px; padding: 10px 12px; max-height: 320px; overflow: auto; border-radius: 8px; font: 12px/1.5 var(--mono); color: var(--text-2); background: rgba(0,0,0,.25); white-space: pre-wrap; overflow-wrap: anywhere; }
+.check > .mut, .check > .load-error { margin: 0 12px 10px; }
+
+/* What changed: a file's row opens its lines. */
+.chg-file + .chg-file { border-top: 1px solid var(--stroke); }
+button.chg { width: 100%; border: 0; background: none; text-align: left; cursor: pointer; }
+button.chg:hover { background: var(--glass); }
+button.chg > svg { flex: none; width: 12px; height: 12px; color: var(--text-3); transform: rotate(-90deg); transition: transform .15s; }
+.chg-file.open button.chg > svg { transform: none; }
+.diff { margin: 0; padding: 8px 0; max-height: 460px; overflow: auto; font: 12px/1.5 var(--mono); background: rgba(0,0,0,.25); border-top: 1px solid var(--stroke); }
+.diff span { display: block; padding: 0 12px; white-space: pre; min-width: max-content; }
+.d-add { color: #a7f3d0; background: rgba(52,211,153,.10); }
+.d-del { color: #fecaca; background: rgba(248,113,113,.10); }
+.d-hunk { color: var(--cyan); background: rgba(34,211,238,.06); }
+.d-same { color: var(--text-3); }
+.diff-wait { padding: 8px 12px; border-top: 1px solid var(--stroke); }
+.chg-file > .load-error { margin: 8px 12px; }
+
+/* The archive. */
+.arch-find { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; color: var(--text-3); }
+.arch-find .input { flex: 1; height: 34px; padding: 0 10px; border-radius: 10px; }
+.arch-row .s-id, .use-row .s-id { flex: none; width: 46px; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.arch-title, .use-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arch-row.gone .arch-title { text-decoration: line-through; color: var(--text-3); }
+.arch-none { padding: 14px 4px; }
+.arch-more { margin-top: 10px; gap: 10px; align-items: center; }
+
+/* Usage. */
+.use-top { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 6px; }
+.use-stat { flex: 1; min-width: 130px; padding: 10px 12px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--stroke); }
+.use-stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+.use-stat span { font-size: 12px; color: var(--text-3); }
+.use-cols, .use-head { display: flex; align-items: center; gap: 10px; padding: 8px 4px; font-size: 12px; color: var(--text-3); }
+.use-head { margin-top: 10px; color: var(--text); font-weight: 600; border-bottom: 1px solid var(--stroke-2); }
+.use-cols .use-title { padding-left: 56px; }
+.use-n { flex: none; width: 62px; text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.use-n.out { color: var(--text-3); }
+.use-head .use-n { color: var(--text); }
+.use-foot { margin-top: 14px; }
+
+/* The conductor's line: what its session has used, and Restart when it has stopped answering. */
+.cond-used { margin-left: 8px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Another project wants the user: a number beside it in the project picker, and a dot on the picker itself. */
+.mi-wants { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; color: #1a1205; background: var(--amber); }
+#projBtn.wants { position: relative; }
+#projBtn.wants::after { content: ''; position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+/* Settings: the conductor's model. */
+.set-model { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

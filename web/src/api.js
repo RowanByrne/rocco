@@ -6,9 +6,13 @@ export const DEMO = new URLSearchParams(location.search).has('demo');
 
 const withProject = (path, extra = '') => `${path}?p=${encodeURIComponent(state.project)}${extra}`;
 
+// An error says which kind it is: offline (no answer at all: the server stopped), or status (it answered with an error,
+// and the message is what it said).
 async function request(path, options) {
-  const res = await fetch(path, { cache: 'no-store', ...options });
-  if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  let res;
+  try { res = await fetch(path, { cache: 'no-store', ...options }); }
+  catch { throw Object.assign(new Error("The Rocco server can't be reached"), { offline: true }); }
+  if (!res.ok) throw Object.assign(new Error((await res.text()) || res.statusText), { status: res.status });
   return res;
 }
 const getJson = async path => (await request(path)).json();
@@ -26,12 +30,25 @@ export const api = {
   me: () => DEMO ? demo.me() : getJson('/api/me'),
   connections: force => DEMO ? demo.connections() : getJson(withProject('/api/connections', force ? '&refresh=1' : '')),
   history: () => DEMO ? demo.history() : getJson(withProject('/api/history')),
-  note: (text, type) => DEMO ? demo.note(text, type) : post(withProject('/api/note'), { text, type }),
+  // hold: the task is made but not handed to the conductor yet, so its screenshots can go up first; release hands it over.
+  note: (text, type, hold = false) => DEMO ? demo.note(text, type, hold) : post(withProject('/api/note'), { text, type, hold }),
+  release: id => DEMO ? demo.release(id) : post(withProject(`/api/tasks/${id}/release`), {}),
   shot: (id, file) => DEMO ? demo.shot(id, file) : post(withProject(`/api/tasks/${id}/shot`), file, file.type),
   act: (id, action, text) => DEMO ? demo.act(id, action, text) : post(withProject(`/api/tasks/${id}/${action}`), { text }),
   // Up next in this order; the server refuses an order that puts a task before one it needs.
   order: ids => DEMO ? demo.order(ids) : post(withProject('/api/order'), { ids }),
   changes: id => DEMO ? demo.changes(id) : getJson(withProject(`/api/tasks/${id}/changes`)),
+  // One of those files' lines as git shows them: { path, text, binary, cut }.
+  diff: (id, path) => DEMO ? demo.diff(id, path) : getJson(withProject(`/api/tasks/${id}/diff`, `&path=${encodeURIComponent(path)}`)),
+  // One task by its id, on the board or put away: what a link to a task opens.
+  task: id => DEMO ? demo.task(id) : getJson(withProject(`/api/tasks/${id}`)),
+  // What the board no longer shows (approved more than a few days ago, or deleted), newest first, 50 at a time,
+  // narrowed to tasks with every word of q: { total, skip, tasks }.
+  archive: (q = '', skip = 0) => DEMO ? demo.archive(q, skip) : getJson(withProject('/api/archive', `&q=${encodeURIComponent(q)}&skip=${skip}`)),
+  // What each task took: its time at work, and the tokens its sessions used (server/sessions.ps1).
+  usage: () => DEMO ? demo.usage() : getJson(withProject('/api/usage')),
+  // The output of a check a worker ran (rocco.ps1 result -File), as text.
+  checkOutput: async (id, name) => DEMO ? demo.checkOutput(id, name) : (await request(withProject(`/files/${id}/${encodeURIComponent(name)}`))).text(),
   // A card's agent sessions (server/sessions.ps1), then one's lines from a byte offset: { text, next }.
   sessions: id => DEMO ? demo.sessions(id) : getJson(withProject(`/api/tasks/${id}/sessions`)),
   session: async (id, key, from) => {
@@ -51,13 +68,15 @@ export const api = {
   action: (id, value) => DEMO ? demo.action(id, value) : post(withProject(`/api/actions/${id}`), { value }),
   actionRun: run => DEMO ? demo.actionRun(run) : getJson(`/api/actions/runs/${run}`),
   // Rocco moves to a newer release and restarts; the page reloads when the new version answers.
-  updateRocco: tag => DEMO ? demo.updateRocco(tag) : post(withProject('/api/rocco/update'), { tag }),
+  updateRocco: tag => DEMO ? demo.updateRocco() : post(withProject('/api/rocco/update'), { tag }),
   send: () =>DEMO ? demo.send() : post(withProject('/api/send')),
   // Stop Rocco, and the Lync servers it runs with no windows (Settings).
   quit: () => DEMO ? Promise.resolve({ ok: true }) : post('/api/rocco/quit?p=' + encodeURIComponent(state.project)),
   // This PC's coding agent (server/agents.ps1).
   agent: () => DEMO ? demo.agent() : getJson('/api/agent'),
   setAgent: id => DEMO ? demo.setAgent(id) : post(withProject('/api/agent'), { id }),
+  // The model the next conductor is opened on ('' for the agent's own default).
+  setAgentModel: model => DEMO ? demo.setAgentModel(model) : post(withProject('/api/agent/model'), { model }),
   // The user's own accounts on this PC: each agent's sign-in, Codex for images, GitHub, and the linked keys (server/accounts.ps1).
   accounts: refresh => DEMO ? demo.accounts() : getJson(`/api/accounts${refresh ? '?refresh=1' : ''}`),
   // Onboarding (server/onboarding.ps1). A game being made isn't the open project yet, so these name theirs.
@@ -79,7 +98,11 @@ export const api = {
   conductorPermission: (id, allow) => DEMO ? demo.conductorPermission(id, allow) : post(withProject('/api/conductor/permission'), { id, allow }),
   conductorMessage: (text, to) => DEMO ? demo.conductorMessage(text, to) : post(withProject('/api/conductor/message'), { text, to }),
   showConductor: () => DEMO ? demo.showConductor() : post(withProject('/api/conductor/show-window')),
+  // The conductor has stopped answering: its session is ended and a new one opened on what's on the board. { agent }.
+  restartConductor: () => DEMO ? demo.restartConductor() : post(withProject('/api/conductor/restart')),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
+  // Stops a background job (a new project, opening lanes) and whatever it started.
+  cancelJob: id => DEMO ? demo.cancelJob(id) : post(`/api/jobs/${id}/cancel`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
   // A picture on one of the conductor's questions: '<question id>/<file>'. data: ones (the demo's) are already addresses.
   conductorFile: rel => /^(data|blob|https?):/.test(rel) ? rel : withProject(`/files/conductor/${rel.split('/').map(encodeURIComponent).join('/')}`),
@@ -94,6 +117,8 @@ export const api = {
   // Thumbnails: the game page's, directions, and concepts made with Codex.
   thumbnails: force => DEMO ? demo.thumbnails() : getJson(withProject('/api/thumbnails', force ? '&refresh=1' : '')),
   makeConcepts: (direction, count) => DEMO ? demo.makeConcepts(direction, count) : post(withProject('/api/thumbnails/generate'), { direction, count }),
+  // Stops the concepts being made. The ones already made stay.
+  cancelConcepts: () => DEMO ? demo.cancelConcepts() : post(withProject('/api/thumbnails/cancel')),
   useConcept: file => DEMO ? demo.useConcept(file) : post(withProject('/api/thumbnails/use'), { file }),
   askDirections: () => DEMO ? demo.askDirections() : post(withProject('/api/thumbnails/directions')),
   // A candidate image in ..\art\generated: 'thumbnails/<direction>/<file>' or 'events/<card>/<file>'.

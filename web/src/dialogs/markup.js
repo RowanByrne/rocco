@@ -1,23 +1,23 @@
 // Draw on a screenshot before it's sent: pen, arrow and box, in a few colors. Saves a new PNG at full size.
-import { $, esc } from '../lib/dom.js';
+import { $ } from '../lib/dom.js';
+import { html, render } from '../lib/html.js';
+import { lineIcon } from '../lib/icons.js';
 
 const modal = $('#markupModal');
 const view = $('#markupCanvas');
-const TOOLS = [['pen', 'Pen', '<path d="M4 20l4-1 11-11-3-3L5 16z"/>'], ['arrow', 'Arrow', '<path d="M5 19L19 5"/><path d="M10 5h9v9"/>'], ['box', 'Box', '<rect x="4" y="5" width="16" height="14" rx="2"/>']];
+const glyph = paths => lineIcon(paths, 16, 2);
+const TOOLS = [['pen', 'Pen', glyph('<path d="M4 20l4-1 11-11-3-3L5 16z"/>')], ['arrow', 'Arrow', glyph('<path d="M5 19L19 5"/><path d="M10 5h9v9"/>')], ['box', 'Box', glyph('<rect x="4" y="5" width="16" height="14" rx="2"/>')]];
+const UNDO = glyph('<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>'), CLEAR = glyph('<path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/>');
 const COLORS = ['#ff4d4f', '#fbbf24', '#ffffff'];
 
 let image = null, strokes = [], current = null, tool = 'pen', color = COLORS[0], resolveOpen = null;
 
 export const markupOpen = () => modal.classList.contains('open');
 
-function toolbarHTML() {
-  const icon = paths => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
-  return TOOLS.map(([id, label, paths]) => `<button class="tool${tool === id ? ' on' : ''}" data-tool="${id}" title="${label}" aria-label="${label}">${icon(paths)}</button>`).join('')
-    + '<span class="tool-sep"></span>'
-    + COLORS.map(c => `<button class="swatch${color === c ? ' on' : ''}" data-color="${c}" style="--sw:${c}" aria-label="Color ${esc(c)}"></button>`).join('')
-    + '<span class="tool-sep"></span>'
-    + `<button class="tool" data-undo title="Undo" aria-label="Undo">${icon('<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>')}</button>`
-    + `<button class="tool" data-clear title="Clear" aria-label="Clear">${icon('<path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/>')}</button>`;
+function drawToolbar() {
+  render(html`${TOOLS.map(([id, label, mark]) => html`<button class="tool${tool === id ? ' on' : ''}" data-tool=${id} title=${label} aria-label=${label}>${mark}</button>`)}<span class="tool-sep"></span>${
+    COLORS.map(c => html`<button class="swatch${color === c ? ' on' : ''}" data-color=${c} style="--sw:${c}" aria-label="Color ${c}"></button>`)
+  }<span class="tool-sep"></span><button class="tool" data-undo title="Undo" aria-label="Undo">${UNDO}</button><button class="tool" data-clear title="Clear" aria-label="Clear">${CLEAR}</button>`, $('#markupTools'));
 }
 
 const width = () => Math.max(3, Math.round(Math.min(image.width, image.height) / 160));
@@ -69,7 +69,7 @@ export function openMarkup(file) {
       const fit = Math.min(1, Math.min(innerWidth * .86, 1100) / img.width, innerHeight * .62 / img.height);
       view.width = Math.round(img.width * fit);
       view.height = Math.round(img.height * fit);
-      $('#markupTools').innerHTML = toolbarHTML();
+      drawToolbar();
       redraw();
       resolveOpen = resolve;
       modal.classList.add('open');
@@ -123,6 +123,6 @@ modal.addEventListener('click', e => {
   else if (el.hasAttribute('data-clear')) strokes = [];
   else if (el.dataset.markup === 'save') { save(); return; }
   else if (el.dataset.markup === 'cancel') { close(null); return; }
-  $('#markupTools').innerHTML = toolbarHTML();
+  drawToolbar();
   redraw();
 });

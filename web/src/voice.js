@@ -3,9 +3,11 @@
 import { emit } from './state.js';
 import { settings } from './settings.js';
 
-const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Not in the types the check knows: Chrome and Edge have it under one name or the other.
+const Recognition = /** @type {any} */ (window).SpeechRecognition || /** @type {any} */ (window).webkitSpeechRecognition;
 let rec = null;
 let startedAt = 0;
+let dropped = false; // the note was sent while it listened: what it still hears isn't for the next one
 
 export const voiceSupported = () => !!Recognition;
 export const listening = () => !!rec;
@@ -24,7 +26,9 @@ export function toggleVoice(onText) {
   rec.continuous = true;
   rec.interimResults = true;
   let done = '';
+  dropped = false;
   rec.onresult = e => {
+    if (dropped) return;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) done += e.results[i][0].transcript + ' ';
@@ -33,8 +37,15 @@ export function toggleVoice(onText) {
     onText(tidy(done + interim), false);
   };
   rec.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') emit('voice-error', e.error); };
-  rec.onend = () => { rec = null; onText(tidy(done), true); emit('voice'); };
+  rec.onend = () => { rec = null; if (!dropped) onText(tidy(done), true); emit('voice'); };
   startedAt = Date.now();
   rec.start();
   emit('voice');
+}
+
+// Stops listening and drops whatever it still hears: the note it was for has been sent.
+export function cancelVoice() {
+  if (!rec) return;
+  dropped = true;
+  rec.stop();
 }

@@ -4,7 +4,7 @@ export const hhmm = iso => {
   const d = new Date(iso);
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 };
-export const minsSince = iso => iso ? Math.max(0, Math.floor((Date.now() - new Date(iso)) / 60000)) : 0;
+export const minsSince = iso => iso ? Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000)) : 0;
 export const isToday = iso => !!iso && new Date(iso).toDateString() === new Date().toDateString();
 export const agoText = iso => {
   if (!iso) return 'unknown';

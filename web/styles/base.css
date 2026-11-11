@@ -1,4 +1,10 @@
 /* Reset, page, backdrop, buttons and fields, shared animations. */
+
+/* Inter, kept with the app so nothing loads from the internet: the latin subset as one variable font (every weight),
+   from @fontsource-variable/inter 5.3.0. SIL Open Font License 1.1, (c) The Inter Project Authors. */
+@font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(../assets/fonts/inter-latin-wght-normal.woff2) format('woff2'); }
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;

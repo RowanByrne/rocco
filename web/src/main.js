@@ -5,10 +5,12 @@ import { DEMO } from './api.js';
 import * as demo from './demo.js';
 import * as sync from './sync.js';
 import { register } from './hotkeys.js';
-import { loadProjects } from './projects.js';
-import { showView, go, syncUrl } from './router.js';
+import { loadProjects, switchProject } from './projects.js';
+import { showView, go, syncUrl, linkedTask } from './router.js';
 import { initSidebar, renderSidebar, renderMe, loadMe } from './sidebar.js';
-import { initWorkboard, renderWorkboard, openTask } from './views/workboard.js';
+import { initWorkboard, renderWorkboard, resetWorkboard, openTask, openTaskById } from './views/workboard.js';
+import { initArchive, resetArchive } from './views/archive.js';
+import { initUsage, resetUsage } from './views/usage.js';
 import { initSession } from './views/session.js';
 import { initProse } from './prose.js';
 import { initComposer, focusComposer, captureStudio, toggleVoiceNote, cycleType } from './views/composer.js';
@@ -26,17 +28,19 @@ import { loadAgent } from './agent.js';
 import { $ } from './lib/dom.js';
 import { openPalette, paletteOpen, closePalette } from './dialogs/palette.js';
 import { markupOpen, closeMarkup } from './dialogs/markup.js';
-import { closeSheet, openSheetKey } from './ui/sheet.js';
+import { closeSheet } from './ui/sheet.js';
 import { closeMenus, menuOpen } from './ui/menu.js';
+import { initFocus } from './ui/focus.js';
 import { picViewOpen, closePicView } from './ui/pics.js';
 
 // The project in the address, else the last one opened here (demo mode keeps its own sample projects).
 state.project = new URLSearchParams(location.search).get('p') || (DEMO ? '' : storage.get('rocco.project')) || '';
 
-// What re-renders when something changes. A task's sheet stays as it is until it closes.
+// What re-renders when something changes. Rendering touches only what differs, so the board and an open task's sheet
+// both follow every change, and what's typed in either stays (views/workboard.js).
 on('tasks', () => {
   renderSidebar();
-  if (!openSheetKey() || openSheetKey() === 'approved') renderWorkboard();
+  renderWorkboard();
   if (state.view === 'history' && state.history) renderHistory(); // lane cards show their tasks
 });
 on('side', renderSidebar);
@@ -52,6 +56,9 @@ on('settings', () => { renderSettings(); renderWorkboard(); });
 // This PC's agent changed (Settings), or loaded: everything that names it.
 on('agent', () => { renderSettings(); renderWorkboard(); renderConductor(); renderDocs(); renderUpdates(); renderThumbnails(); renderConnections(); renderMe(); loadConnections(true); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked
+on('open-project', id => switchProject(id)); // another project wants the user (sync.js), and they went to it
+// The sidebar's dot for other projects follows them.
+on('tasks', () => { $('#projBtn').classList.toggle('wants', state.others.length > 0); });
 // Rocco updated itself: load the new app, unless that would lose an edit in Docs.
 on('rocco-updated', version => {
   if (!hasDrafts()) { location.reload(); return; }
@@ -72,6 +79,9 @@ on('project', () => {
   closeMenus();
   syncUrl();
   sync.reset();
+  resetWorkboard();
+  resetArchive();
+  resetUsage();
   resetConductor();
   resetDocs();
   resetUpdates();
@@ -97,8 +107,14 @@ register('type', cycleType);
 register('palette', openPalette);
 for (const view of ['workboard', 'history', 'docs', 'updates', 'thumbnails', 'connections', 'settings']) register(`go-${view}`, () => go(view));
 
-// A view or doc typed or pasted into the address.
-addEventListener('hashchange', () => showView(location.hash.slice(1)));
+// A view, a doc or a task typed or pasted into the address. A task's link (#task/T-049) shows the Workboard and opens
+// the task, from the archive if the board no longer has it.
+function showAddress() {
+  const name = location.hash.slice(1), task = linkedTask(name);
+  showView(task ? 'workboard' : name);
+  if (task) { syncUrl(); openTaskById(task); }
+}
+addEventListener('hashchange', showAddress);
 
 // Esc closes the top-most thing.
 document.addEventListener('keydown', e => {
@@ -114,9 +130,12 @@ document.addEventListener('keydown', e => {
 });
 
 (async () => {
-  try { await loadProjects(); } catch { state.online = false; }
+  try { await loadProjects(); } catch (e) { if (e.offline) state.online = false; else state.problem = e.message; }
+  initFocus();
   initSidebar();
   initWorkboard();
+  initArchive();
+  initUsage();
   initSession();
   initProse();
   initComposer();
@@ -132,7 +151,7 @@ document.addEventListener('keydown', e => {
   initThumbnails();
   $('#firstGameBtn').addEventListener('click', () => openOnboarding());
   $('#docsDetails').addEventListener('click', () => openDetails());
-  showView(location.hash.slice(1));
+  showAddress();
   syncUrl();
   renderMe();
   renderSidebar();
@@ -145,6 +164,6 @@ document.addEventListener('keydown', e => {
   loadConnections(false); // for the sidebar badge
   if (state.view !== 'docs') loadDocs(); // for the palette; opening Docs loads them anyway
   setInterval(() => loadConnections(false), 5 * 60000);
-  setInterval(() => { if (!openSheetKey()) { renderSidebar(); renderWorkboard(); } }, 30000); // keeps "12m" and "4m ago" current
+  setInterval(() => { renderSidebar(); renderWorkboard(); }, 30000); // keeps "12m" and "4m ago" current
   if (DEMO) demo.start();
 })();

@@ -1,5 +1,9 @@
-// Line icons on a 24-unit grid, drawn in currentColor.
-const svg = (paths, size = 14, stroke = 2) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+// Line icons on a 24-unit grid, drawn in currentColor. Each is a template (lib/html.js), ready to go in another.
+import { fixed } from './html.js';
+
+// A line icon from its paths: for one a view draws itself.
+export const lineIcon = (paths, size = 14, stroke = 2) => fixed(`<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`);
+const svg = lineIcon;
 
 export const icon = {
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 13, 2.8),

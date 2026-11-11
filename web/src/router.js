@@ -5,6 +5,9 @@ import { DEMO } from './api.js';
 
 const VIEWS = ['workboard', 'history', 'docs', 'metrics', 'updates', 'thumbnails', 'ads', 'connections', 'settings'];
 
+// A link to one task, #task/T-049: the Workboard, with that task to open (main.js opens it).
+export const linkedTask = name => (String(name).match(/^task\/(T-\d+)$/) || [])[1] || '';
+
 export function showView(name) {
   const [view, ...doc] = String(name).split('/');
   state.view = VIEWS.includes(view) ? view : 'workboard';

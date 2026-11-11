@@ -1,5 +1,6 @@
 // The summary that appears when the pointer rests on a card or a doc.
 import { $ } from '../lib/dom.js';
+import { render } from '../lib/html.js';
 
 const pop = $('#pop');
 const sources = []; // { selector, summary } for each kind of thing that has one
@@ -12,7 +13,7 @@ export function hidePopover() {
   pop.classList.remove('show');
 }
 
-// selector: what to hover over; summary(el): its HTML, or '' for none.
+// selector: what to hover over; summary(el): its template, or null for none.
 export function initPopover(selector, summary) {
   if (!sources.length) {
     document.addEventListener('mouseover', over);
@@ -33,9 +34,9 @@ function over(e) {
 }
 
 // To the right of the element, else below it, kept on screen.
-function show(el, html) {
-  if (!html || !el.isConnected) return;
-  pop.innerHTML = html;
+function show(el, content) {
+  if (!content || !el.isConnected) return;
+  render(content, pop);
   const r = el.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
   let left = r.right + 10, top = r.top;
   if (left + w > innerWidth - 8) { left = Math.max(8, Math.min(r.left, innerWidth - w - 8)); top = r.bottom + 8; }

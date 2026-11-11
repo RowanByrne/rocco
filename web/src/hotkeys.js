@@ -51,7 +51,7 @@ document.addEventListener('keydown', e => {
   if (paused || e.repeat) return;
   const combo = comboOf(e);
   if (!combo) return;
-  const typing = e.target.matches?.('input, textarea, select, [contenteditable]');
+  const typing = /** @type {Element} */ (e.target).matches?.('input, textarea, select, [contenteditable]');
   const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
   if (plain && (typing || document.querySelector('.modal.open'))) return;
   const action = ACTIONS.find(a => keyFor(a.id) === combo);

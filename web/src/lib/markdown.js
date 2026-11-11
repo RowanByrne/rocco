@@ -173,6 +173,9 @@ function code(text, o) {
   return path ? docLink(path, `<code>${esc(text)}</code>`, o) : `<code>${esc(text)}</code>`;
 }
 
+// A link's address as written: one with a stray % in it stays as it is.
+const decode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+
 // A path relative to the open doc's folder.
 function resolve(base, rel) {
   const parts = base.split('/').slice(0, -1);
@@ -184,8 +187,8 @@ function link(label, url, image, o) {
   const text = prose(label, o, false);
   if (image) return `<span class="md-img" title="${esc(url)}">${text || 'image'}</span>`;
   if (/^(https?:|mailto:)/i.test(url)) return `<a href="${esc(url)}" target="_blank" rel="noreferrer">${text}</a>`;
-  if (url.startsWith('#')) return `<a href="#" data-anchor="${esc(slug(decodeURIComponent(url.slice(1)).replace(/-/g, ' ')))}">${text}</a>`;
-  const target = decodeURIComponent(url.split('#')[0]);
+  if (url.startsWith('#')) return `<a href="#" data-anchor="${esc(slug(decode(url.slice(1)).replace(/-/g, ' ')))}">${text}</a>`;
+  const target = decode(url.split('#')[0]);
   const path = /\.md$/i.test(target) ? o.docRef(resolve(o.base, target), o.base) || o.docRef(target, o.base) : '';
   return path ? docLink(path, text, o) : `<span class="md-link" title="${esc(url)}">${text}</span>`;
 }
