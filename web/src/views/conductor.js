@@ -28,6 +28,7 @@ let decisionsOpen = false;   // a feature thread's decisions are listed
 const unfolded = new Set();  // step groups and runs of check-ins the user opened, by their first line
 const expanded = new Set();  // long messages the user opened in full
 const seen = new Set();      // open questions and requests already announced
+const whyOf = new Map();     // an open question -> what the agent said just before asking it (historyView)
 const answering = new Set(); // questions whose answers are on their way
 const deciding = new Set();  // permission requests whose answer is on its way
 let first = true;
@@ -174,7 +175,8 @@ function askCard(ask) {
     : html`<button class="opt${ticked.includes(o.label) ? ' on' : ''}" data-c-pick=${o.label} data-ask=${ask.id} title=${ifDefined(o.detail || undefined)}><span>${o.label}</span></button>`;
   const pictured = (q.options || []).some(o => o.image);
   return html`<div class="c-ask${ask.expired ? ' late' : ''}" data-ask-card=${ask.id}><div class="c-ask-head"><span class="c-who">Rocco asks</span>${q.header ? html`<span class="c-tag">${q.header}</span>` : nothing}${
-    ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${proseLine(q.text)}</div><div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(fileOf))}${
+    ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${proseLine(q.text)}</div>${
+    whyOf.get(ask.id) && !i ? html`<details class="c-why"><summary>Why Rocco asks</summary><div class="prose">${prose(whyOf.get(ask.id))}</div></details>` : nothing}<div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(fileOf))}${
     q.options?.length ? html`<div class="opts${pictured ? ' with-pics' : ''}">${q.options.map(opt)}</div>` : nothing
   }</div><div class="c-reply"><textarea data-c-input=${ask.id} rows="1" placeholder=${q.options?.length ? (q.multi ? 'Tick some, or type your answer' : 'Or type your answer') : 'Type your answer'} aria-label="Your answer to Rocco" .value=${live(typedOf(ask.id))}></textarea><button type="button" class="send round" data-c-send=${ask.id} title="Send your answer" aria-label="Send your answer">${SEND_ICON}</button></div><div class="ask-foot">${
     q.multi ? html`<button class="btn-sm go" data-c-multi=${ask.id} ?disabled=${!ticked.length}>Send these</button>` : nothing
@@ -386,13 +388,13 @@ function taskChip(id, title = '', typed = '') {
 // "Reply" on a line about a card: what's typed next goes to that card (sent back if it's waiting to be tested).
 const replyTo = id => { const t = byId(id); return t && !['done', 'removed', 'inbox'].includes(t.status) && t.kind !== 'plan' ? html`<button class="linkish h-reply" data-reply-card=${id}>Reply</button>` : nothing; };
 
-function row(e, all) {
+function row(e, all, prev = '') {
   const at = html`<span class="h-at">${hhmm(e.at)}</span>`;
   const task = e.task || undefined; // a row about a task opens it
   switch (e.kind) {
     case 'said': {
       const long = (String(e.text || '').length > 900 || String(e.text || '').split('\n').length > 18) && !expanded.has(e.id);
-      return html`<div class="h-msg them"><div class="h-body"><div class="h-head">${e.re ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
+      return html`<div class="h-msg them"><div class="h-body"><div class="h-head">${e.re && task !== prev ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
         long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div></div>`;
     }
     case 'message':
@@ -406,6 +408,8 @@ function row(e, all) {
     }
     case 'asked': {
       const reply = all.find(x => x.kind === 'answered' && x.to === e.id);
+      // Still open: it's asked under the chat, with its own answer box. Here, just a line that says so.
+      if (!reply) return html`<div class="h-event asking"><span class="h-dot"></span><span class="h-line">Waiting for your answer below</span>${at}</div>`;
       return html`<div class="h-msg them"><div class="h-body"><div class="h-head"><span class="h-act ask">Asked</span>${at}</div>${e.questions.map((q, i) => {
         // The picture of the option picked, when it had one.
         const pic = reply && (q.options || []).find(o => o.image && o.label === reply.answers?.[i])?.image;
@@ -449,8 +453,19 @@ function historyView() {
     return html`<div class="h-empty">${active ? "Nothing here yet. What this feature's agent does and says shows here, and what you type goes straight to it."
       : 'Tell Rocco what you noticed, ask it something, or describe a feature. What it does and says shows here, with a line for each card as it moves.'}</div>${failed}`;
   }
-  const rows = [...items.map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  // What the agent said just before a question that's still open is that question's reasons: it goes with the
+  // question, under the chat ("Why"), so the chat doesn't say it twice. Once it's answered, the chat has it again.
+  const answeredTo = new Set(history.items.filter(x => x.kind === 'answered').map(x => x.to));
+  const hidden = new Set();
+  whyOf.clear();
+  items.forEach((e, i) => {
+    if (e.kind !== 'asked' || answeredTo.has(e.id)) return;
+    const before = items.slice(0, i).reverse().find(x => !isIdle(x));
+    if (before?.kind === 'said' && Date.parse(e.at) - Date.parse(before.at) < 10 * 60e3) { hidden.add(before.id); whyOf.set(e.id, before.text); }
+  });
+  const rows = [...items.filter(e => !hidden.has(e.id)).map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const out = [];
+  let prev = ''; // the card the last line was about: a message about it right after doesn't name it again
   let group = [], day = '', idle = null; // idle: the run of check-ins being read, and the steps since its last one
   let marked = !v.since || !rows.some(r => String(r.at) <= v.since); // "new" is marked once, and never above everything
   const flushSteps = () => { if (group.length) { out.push(stepGroup(group)); group = []; } };
@@ -483,7 +498,8 @@ function historyView() {
     }
     flushIdle();
     flushSteps();
-    out.push(row(r.e, history.items));
+    out.push(row(r.e, history.items, prev));
+    prev = r.e.task || '';
   }
   flushIdle();
   flushSteps();
@@ -514,7 +530,7 @@ async function loadHistory() {
     const hadError = !!v.loadError, wasEmpty = !v.history;
     v.loadError = '';
     if (!r.same) v.history = r;
-    if (id === active && (!r.same || hadError)) { renderHistory(wasEmpty); renderHead(); }
+    if (id === active && (!r.same || hadError)) { renderHistory(wasEmpty); renderHead(); renderAsks(); }
   } catch (e) {
     if (v.loadError !== e.message) { v.loadError = e.message; if (id === active) renderHistory(); }
   }

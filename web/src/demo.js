@@ -196,6 +196,8 @@ function sampleThread() {
           { label: '2: Neon arcade', detail: 'shop-02: dark blue and magenta, glass cases along the walls', image: scene(250) },
           { label: '3: Sunny bazaar', detail: 'shop-03: bright yellow awnings, crates and plants', image: scene(52) },
           { label: '4: Clean showroom', detail: 'shop-04: white and grey, items on plinths, room for menus', image: scene(200) }] }] },
+    // Said just before asking: it shows with the question, as its reasons, while the question is open.
+    { id: 'C-000023', at: at(2.2), who: 'conductor', kind: 'said', text: "The trade window works end to end. The countdown just ends silently, which felt flat in a playtest, so it needs a sound." },
     { id: 'C-000012', at: at(2), who: 'conductor', kind: 'asked', via: 'hook', questions: [
       { text: 'The trade countdown needs a sound when it ends. Which one?', header: 'Trade sound', multi: false,
         options: [{ label: 'Soft chime', detail: 'A short two-note chime' }, { label: 'Cash register', detail: 'Ka-ching, a bit louder' }, { label: 'None', detail: 'Silent, the window just closes' }] },

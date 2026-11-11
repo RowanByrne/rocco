@@ -151,7 +151,7 @@ function Restart-Conductor {
 }
 
 # Told to a conductor that has Rocco's hooks. Also how Rocco knows its own prompt when the hook passes it on.
-$InRocco = 'Rocco shows the user what you do, your messages, your questions (AskUserQuestion) and permission prompts, so talk to them as usual: they read Rocco, not this window. What they write to you comes back through wait, as a [message].'
+$InRocco = 'Rocco shows the user what you do, your messages, your questions (AskUserQuestion) and permission prompts, so talk to them as usual: they read Rocco, not this window. What they write to you comes back through wait, as a [message]. To ask them something, ask it once, with AskUserQuestion, and put any reasons in the question itself: don''t write the same thing out as a message first.'
 
 # Claude Code's settings for a conductor Rocco opens (--settings), so only that session and its workers load them:
 #   PermissionRequest, and PreToolUse on AskUserQuestion: rocco.ps1 hook waits for the user's answer in Rocco

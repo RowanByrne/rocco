@@ -17,6 +17,11 @@
 .c-ask-head .ask-n { margin-left: auto; }
 .c-ask-q { margin-top: 5px; font-size: 14px; font-weight: 500; line-height: 1.45; color: var(--text); white-space: pre-wrap; }
 .c-ask .opts { margin-top: 10px; }
+/* What the agent said just before asking, folded under the question */
+.c-why { margin-top: 6px; font-size: 13px; color: var(--text-2); }
+.c-why summary { width: max-content; cursor: pointer; font-size: 12px; color: var(--text-3); }
+.c-why summary:hover { color: var(--text-2); }
+.c-why .prose { margin-top: 4px; padding-left: 10px; border-left: 2px solid rgba(var(--amber-rgb), .4); }
 .c-ask .ask-foot { align-items: center; }
 /* Its own answer box, under its options */
 .c-reply { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; padding: 4px 4px 4px 12px; border-radius: var(--r);

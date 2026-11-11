@@ -104,7 +104,8 @@
 .h-event .h-at, .h-steps-head .h-at { margin-left: auto; opacity: 0; transition: opacity .15s; }
 .h-event:hover .h-at, .h-steps-head:hover .h-at { opacity: 1; }
 .h-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--c, var(--text-3)); }
-.h-event.perm .h-dot { background: var(--amber); }
+.h-event.perm .h-dot, .h-event.asking .h-dot { background: var(--amber); }
+.h-event.asking .h-line { color: var(--amber-text); }
 .h-verdict { flex: none; font-size: 12px; color: var(--text-3); }
 .h-verdict.v-yes { color: var(--green-text); }
 .h-verdict.v-no { color: var(--red-text); }
