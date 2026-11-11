@@ -1,11 +1,14 @@
-// The Workboard. Top: the note box, then what needs the user's OK: feature plans to approve, and what the agent
-// spotted (the inbox). Middle: features in progress, then three columns: To test, Stuck and Working.
-// Bottom: Up next, the queue in order, which the user can reorder (never ahead of what a task waits on).
-// Everything is drawn from the tasks each time they change, an open task's sheet included, and only what differs
-// is touched, so a column stays where it was scrolled and a box keeps what's typed in it.
+// The cards beside the chat (views/conductor.js), in a rail: To test, Needs you (a stuck card's questions, a feature
+// plan to approve, what the agent spotted), Working, and Up next, the queue in order, which the user can reorder
+// (never ahead of what a task waits on). On a feature's tab the rail lists that feature's cards. On a narrow window
+// the rail is a row of counts above the chat, which opens to the lists.
+// A card opens as its own conversation in the chat's place (ui/sheet.js, docked): what it is, what to try, what it
+// changed, its agent's session word for word, and a box that sends it back or adds to it.
+// Everything is drawn from the tasks each time they change, an open card included, and only what differs is
+// touched, so a list stays where it was scrolled and a box keeps what's typed in it.
 import { state, byId, of, approvedToday, on } from '../state.js';
 import { $, webUrl } from '../lib/dom.js';
-import { html, render, nothing, repeat, live, ifDefined } from '../lib/html.js';
+import { html, render, nothing, repeat, live } from '../lib/html.js';
 import { hhmm, minsSince, featureVars } from '../lib/format.js';
 import { icon } from '../lib/icons.js';
 import { draft } from '../lib/drafts.js';
@@ -24,24 +27,30 @@ import { startSession, scrollSessionToEnd } from './session.js';
 import { stepIn, stepChips, effort, checks, changedFile, linkButton, partsClick, partsChange, resetParts, forgetDiffs } from './taskparts.js';
 import { showArchive } from './archive.js';
 import { showUsage } from './usage.js';
+import { activeThread, openThread } from './conductor.js';
+import { storage } from '../lib/storage.js';
 
-const NAMES = { ready: 'To test', stuck: 'Stuck', working: 'Working', queued: 'Up next', inbox: 'Inbox', done: 'Approved', removed: 'Deleted' };
-const EMPTY = { ready: 'Nothing to test', stuck: 'Nothing stuck', working: 'No one working' };
+const NAMES = { ready: 'To test', stuck: 'Needs you', working: 'Working', queued: 'Up next', inbox: 'Suggested', done: 'Approved', removed: 'Deleted' };
 const COLOR = { ready: 'var(--green)', stuck: 'var(--amber)', working: 'var(--blue)', queued: 'var(--gray)', inbox: 'var(--claude)', done: 'var(--green)', removed: 'var(--gray)' };
-const TYPES = { bug: 'Bug', tweak: 'Tweak', idea: 'Idea', feature: 'Feature', question: 'Question' };
+const TYPES = { bug: 'Bug', tweak: 'Tweak', idea: 'Idea', fix: 'Fix', feature: 'Feature', question: 'Question' };
 const SKIP = 'skip'; // "Let Rocco decide", as a pick no option's label can be
 const place = t => t.where === 'lane' ? 'Lane ' + t.lane : 'Main';
 const isPlan = t => t.kind === 'plan';
 const isQuestion = t => t.kind === 'question';
-const work = status => of(status).filter(t => !isPlan(t) && !isQuestion(t));
-// The user's questions to the conductor: waiting, or answered and not yet marked "got it".
-const openQuestions = () => state.tasks.filter(t => isQuestion(t) && t.status !== 'done' && t.status !== 'removed');
+// On a feature's tab, the rail is that feature's: its plan and its steps. On the conductor's, everything.
+const inView = t => { const thread = activeThread(); return !thread || t.id === thread || t.plan === thread; };
+const work = status => of(status).filter(t => !isPlan(t) && !isQuestion(t) && inView(t));
+// The user's questions to the conductor: waiting, or answered and not yet marked "got it". (Rocco answers most in
+// the chat and keeps no card: rocco.ps1 reply -Answer. These are the ones it's still on.)
+const openQuestions = () => state.tasks.filter(t => isQuestion(t) && t.status !== 'done' && t.status !== 'removed' && inView(t));
 const answered = () => openQuestions().filter(t => t.status === 'ready');
 const approvedWork = () => approvedToday().filter(t => !isPlan(t) && !isQuestion(t));
 const queue = () => work('queued').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id));
-const plansToApprove = () => state.tasks.filter(t => isPlan(t) && t.status === 'inbox');
+const plansToApprove = () => state.tasks.filter(t => isPlan(t) && t.status === 'inbox' && inView(t));
 // Features under way: not one whose every step was deleted, which has nothing left to show (planCount, below).
 const features = () => state.tasks.filter(t => isPlan(t) && ['queued', 'working', 'stuck', 'ready'].includes(t.status) && planCount(t).total > 0);
+// A thread with an agent of its own (server/leads.ps1): a feature's, or a card's. It's talked to on its tab.
+const hasThread = id => (state.meta.leads || []).some(l => l.id === id);
 const childrenOf = plan => state.tasks.filter(t => t.plan === plan.id && t.status !== 'removed');
 // A plan's count, as the server finishes it (tasks.ps1 Sync-Plan): its tasks done, out of its steps, or its tasks if
 // there are more. A step whose task was deleted is dropped, not waiting.
@@ -55,12 +64,9 @@ const unfinishedDeps = t => (t.after || []).filter(id => { const d = byId(id); r
 const questionsOf = t => t.questions?.length ? t.questions : (t.question ? [{ text: t.question, options: (t.options || []).map(label => ({ label })) }] : []);
 
 // What the user is in the middle of, kept by project and task (lib/drafts.js) until it's sent: the answers picked so
-// far on a stuck task (one per question, null where none is picked yet), the reply boxes on the board (a plan's
-// "Change it" and "Ask", an answer's "Ask more": { mode, text }), and what's typed in a task's sheet.
+// far on a stuck task (one per question, null where none is picked yet), and what's typed in a card's own box.
 const picksOf = id => draft.get(`answers:${id}`, []);
-const replyOf = id => draft.get(`reply:${id}`, null);
 const sheetText = id => draft.get(`sheet:${id}`);
-const PLAN_PROMPT = { revise: 'What should change?', followup: 'Your question' };
 
 const sendingAnswers = new Set(); // tasks whose answers are on their way
 const unsent = new Map();         // task -> what was typed with answers that didn't send, to go with them next time
@@ -146,75 +152,75 @@ function card(t) {
     t.feature && !t.plan ? icon.branch : nothing}<span>${t.title}</span></div><div class="c-meta">${typeTag(t)}${featureTag(t)}${info}</div></div>${right}</div>${extra}${bar}</div>`;
 }
 
-function column(status) {
-  const list = work(status);
-  return html`<div class="col c-${status}"><div class="col-head"><span class="sdot"></span>${NAMES[status]}<span class="count">${list.length}</span></div><div class="col-list">${
-    list.length ? repeat(list, t => t.id, card) : html`<div class="empty">${EMPTY[status]}</div>`}</div></div>`;
+// ---- The rail's groups ----
+
+// The groups the user folded away, kept in this browser.
+const FOLD_KEY = 'rocco.rail';
+let folded = new Set();
+try { folded = new Set(JSON.parse(storage.get(FOLD_KEY) || '[]')); } catch { /* none folded */ }
+let railOpen = false; // on a narrow window: the row of counts is opened to the lists
+
+// One group: its name and count (click to fold it), then its cards. An empty one is just its name.
+function group(key, name, color, count, body) {
+  const shut = folded.has(key) || !count;
+  return html`<section class="rail-group g-${key}${shut ? ' shut' : ''}${count ? '' : ' none'}" style="--c:${color}" data-group=${key}><button class="rail-head" data-fold=${key} aria-expanded=${shut ? 'false' : 'true'} ?disabled=${!count}><span class="sdot"></span><span class="rail-name">${name}</span><span class="count">${count}</span><span class="sp"></span>${count ? icon.chev : nothing}</button>${
+    shut ? nothing : html`<div class="rail-list">${body}</div>`}</section>`;
 }
 
-// ---- Feature plans: their own look, in the feature's color ----
+// ---- Feature plans ----
 
 const planSteps = p => html`<ol class="plan-steps">${(p.steps || []).map((s, i) => html`<li><span class="ps-n">${i + 1}</span><span class="ps-t">${s.title}</span><span class="ps-meta">${s.lane ? `Lane ${s.lane}` : ''}${s.lane && s.tier ? ' · ' : ''}${s.tier || ''}</span></li>`)}</ol>`;
 
 // A plan's spec (rocco.ps1 plan -Spec): what it builds, in full, opened in Docs.
 const specButton = p => html`<button class="btn-sm" data-plan-spec=${p.spec} title=${p.spec}>${icon.doc}Read the spec</button>`;
 
+// A plan waiting for the user's go-ahead, in the rail: what it is and Approve. The plan itself (its steps, its spec,
+// asking for changes) is its card.
 function planCard(p) {
-  const d = replyOf(p.id);
-  return html`<div class="plan${p.fresh ? ' fresh' : ''}" style=${featureVars(p.id)} data-id=${p.id}><div class="plan-top"><span class="plan-badge">${icon.layers}Feature plan</span><span class="sp"></span><span class="s-id">${p.id}</span><button class="plan-x" data-plan-dismiss=${p.id} title="Dismiss this plan" aria-label="Dismiss this plan">×</button></div><div class="plan-title">${p.title}</div>${
-    p.summary ? html`<div class="plan-sum">${prose(p.summary)}</div>` : nothing}${planSteps(p)}${
-    p.pending === 'revise' ? html`<div class="plan-note">Changes asked for · waiting for Rocco</div>` : nothing
-  }<div class="plan-actions"><button class="btn-sm go" data-plan-approve=${p.id}>Approve plan</button><button class="btn-sm" data-plan-reply=${p.id} data-mode="revise">Change it</button><button class="btn-sm" data-plan-reply=${p.id} data-mode="followup">Ask</button>${
-    p.spec ? html`<span class="sp"></span>${specButton(p)}` : nothing
-  }</div><div class="plan-reply" data-mode=${ifDefined(d?.mode)} ?hidden=${!d}><textarea class="field" placeholder=${d ? PLAN_PROMPT[d.mode] || '' : ''} .value=${live(d?.text || '')}></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-plan-send=${p.id}>Send</button></div></div></div>`;
+  const n = (p.steps || []).length;
+  return html`<div class="card s-plan${p.fresh ? ' fresh' : ''}" style=${featureVars(p.id)} data-id=${p.id} tabindex="0" role="button" aria-label=${p.title}><div class="c-title">${icon.layers}<span>${p.title}</span></div><div class="c-meta"><span class="note-meta">Feature plan${n ? ` · ${n} step${n === 1 ? '' : 's'}` : ''}</span>${
+    p.pending === 'revise' ? html`<span class="fchip">Changes asked for</span>` : nothing}</div><div class="card-actions"><button class="btn-sm go" data-plan-approve=${p.id}>Approve plan</button><button class="btn-sm" data-open=${p.id}>Read it</button></div></div>`;
 }
 
+// A feature under way with no agent of its own (one that has is a tab above the chat).
 const feature = p => {
   const { done, total } = planCount(p);
   return html`<button class="feat" style=${featureVars(p.id)} data-id=${p.id} title=${p.title}><span class="feat-dot"></span><span class="feat-name">${p.title}</span><span class="feat-bar"><i style="width:${Math.round(done / Math.max(total, 1) * 100)}%"></i></span><span class="feat-count">${done}/${total}</span></button>`;
 };
 
-// ---- Questions: asked from the note box, answered by the conductor ----
+// ---- Questions Rocco is still on, or has answered and kept for a "Got it" ----
 
 function question(t) {
-  const done = t.status === 'ready', d = replyOf(t.id);
-  return html`<div class="qa${done ? ' answered' : ''}${t.fresh ? ' fresh' : ''}" data-id=${t.id}><div class="qa-q" title="Open the whole thread"><span class="qa-icon">?</span><span class="qa-text">${t.note || t.title}</span>${
-    done ? html`<span class="qa-state on">Answered</span>` : html`<span class="qa-state"><span class="spin"></span>Waiting for an answer</span>`}</div>${
-    // After "Ask more", the follow-up it's waiting on.
-    !done && t.attempt > 1 ? html`<div class="qa-follow">${t.log.filter(l => l.who === 'you').at(-1)?.text || ''}</div>` : nothing}${
-    done ? html`<div class="qa-a">${prose(t.summary || '')}</div><div class="qa-actions"><button class="btn-sm go" data-got-it=${t.id}>${icon.check}Got it</button><button class="btn-sm" data-ask-more=${t.id}>Ask more</button></div><div class="qa-reply" ?hidden=${!d}><textarea class="field" placeholder="Ask a follow-up" .value=${live(d?.text || '')}></textarea><div class="row"><span class="sp"></span><button class="btn-sm go" data-ask-send=${t.id}>Ask</button></div></div>`
-      : html`<div class="qa-actions"><button class="linkish" data-unask=${t.id}>Take it back</button></div>`}</div>`;
+  const done = t.status === 'ready';
+  return html`<div class="card s-question${t.fresh ? ' fresh' : ''}" data-id=${t.id} tabindex="0" role="button" aria-label=${t.title}><div class="c-title"><span class="qa-icon">?</span><span>${t.note || t.title}</span></div><div class="c-meta">${
+    done ? html`<span class="note-meta">Answered</span>` : html`<span class="note-meta"><span class="spin"></span>Waiting for an answer</span>`}</div>${
+    done ? html`<div class="card-actions"><button class="btn-sm go" data-got-it=${t.id}>${icon.check}Got it</button><button class="btn-sm" data-open=${t.id}>Read it</button></div>`
+      : html`<div class="card-actions"><button class="linkish" data-unask=${t.id}>Take it back</button></div>`}</div>`;
 }
 
-// ---- Inbox: what the agent spotted ----
+// ---- What the agent spotted ----
 
-function inbox() {
-  const list = work('inbox');
-  if (!list.length) return nothing;
-  const why = t => t.summary || (t.note && t.note !== t.title ? t.note : '');
-  return html`<div class="inbox-head">${icon.sparkle}Rocco spotted ${list.length === 1 ? 'something' : `${list.length} things`}<span class="sp"></span>${
-    list.length > 1 ? html`<button class="btn-sm" data-queue-all>Queue all</button>` : nothing}</div><div class="inbox-items">${repeat(list, t => t.id, t => html`<div class="sug${t.fresh ? ' fresh' : ''}" data-id=${t.id}><div class="sug-title">${t.title}</div>${
-    why(t) ? html`<div class="sug-why">${why(t)}</div>` : nothing
-  }<div class="sug-actions"><button class="btn-sm go" data-queue=${t.id}>Queue</button><button class="btn-sm" data-dismiss=${t.id}>Dismiss</button></div></div>`)}</div>`;
-}
+const why = t => t.summary || (t.note && t.note !== t.title ? t.note : '');
+const suggestion = t => html`<div class="card s-inbox${t.fresh ? ' fresh' : ''}" data-id=${t.id} tabindex="0" role="button" aria-label=${t.title}><div class="c-title">${icon.sparkle}<span>${t.title}</span></div>${
+  why(t) ? html`<div class="sug-why">${why(t)}</div>` : nothing
+}<div class="card-actions"><button class="btn-sm go" data-queue=${t.id}>Queue</button><button class="btn-sm" data-dismiss=${t.id}>Dismiss</button></div></div>`;
 
 // ---- Up next ----
 
 function queueRow(t, i) {
   const src = source(t), deps = unfinishedDeps(t);
-  return html`<div class="q-row${t.fresh ? ' fresh' : ''}" data-id=${t.id} draggable="true" tabindex="0" role="button" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><span class="grip" aria-hidden="true">${icon.grip}</span><span class="q-num">${i + 1}</span><span class="q-title">${
-    t.feature && !t.plan ? icon.branch : nothing}<span>${t.title}</span>${t.shots[0] ? html`<img src=${t.shots[0]} alt="">` : nothing}</span>${typeTag(t)}${featureTag(t)}${stepChips(t)}${
+  return html`<div class="q-row${t.fresh ? ' fresh' : ''}" data-id=${t.id} draggable="true" tabindex="0" role="button" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="Drag to reorder, or Alt+↑ and Alt+↓"><span class="q-num">${i + 1}</span><div class="q-main"><div class="q-title">${
+    t.feature && !t.plan ? icon.branch : nothing}<span>${t.title}</span></div><div class="q-meta">${typeTag(t)}${featureTag(t)}${stepChips(t)}${
     src ? html`<span class="q-src" style="--sc:${src[1]}">${src[0]}</span>` : nothing}${
     // A task waiting on another shows that, with the reason on hover; the rest show what they wait for.
     deps.length ? html`<span class="q-dep" title=${t.waiting || `Needs ${deps.join(', ')} done first`}>${icon.lock}After ${deps.join(', ')}</span>`
-      : html`<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${waitText(t) || 'Queued'}</span></span>`}</div>`;
+      : html`<span class="q-wait${t.pending ? ' conductor' : ''}">${icon.clock}<span>${waitText(t) || 'Queued'}</span></span>`}</div></div>${
+    t.shots[0] ? html`<img class="q-shot" src=${t.shots[0]} alt="">` : nothing}<span class="grip" aria-hidden="true">${icon.grip}</span></div>`;
 }
 
 function upNext() {
   const list = queue();
-  // Whether a conductor is there to pick things up is the status line above the note box (conductor.js).
-  return html`<div class="col-head">${icon.queue}Up next<span class="count">${list.length}</span>${list.length > 1 ? html`<span class="q-hint">Drag to reorder, or Alt+↑ and Alt+↓</span>` : nothing}</div>${
-    list.length ? html`<div class="q-list">${repeat(list, t => t.id, queueRow)}</div>` : html`<div class="empty">Nothing queued. Notes you add go here.</div>`}`;
+  return group('queued', 'Up next', COLOR.queued, list.length, repeat(list, t => t.id, queueRow));
 }
 
 // The server opened a conductor because none was running: say so.
@@ -230,24 +236,30 @@ export function renderWorkboard() {
 }
 
 function renderBoard() {
-  const ready = work('ready').length, stuck = work('stuck').length, asks = work('inbox').length + plansToApprove().length, replies = answered().length;
-  const waiting = ready + stuck + asks + replies;
-  $('#boardSub').textContent = [ready && `${ready} to test`, stuck && `${stuck} stuck`, asks && `${asks} waiting for your OK`, replies && `${replies} answer${replies === 1 ? '' : 's'} for you`].filter(Boolean).join(' · ');
-  $('#boardBadge').textContent = waiting;
-  $('#boardBadge').hidden = !waiting;
+  const ready = work('ready'), stuck = work('stuck'), working = work('working'), spotted = work('inbox'), plans = plansToApprove();
+  const asked = openQuestions().sort((a, b) => a.id.localeCompare(b.id)), replies = answered();
+  const needs = stuck.length + plans.length + spotted.length + replies.length, waiting = ready.length + needs;
+  // The sidebar's badge and the tab's title count everything that waits on the user, whichever tab is showing.
+  const all = state.tasks.filter(t => (['ready', 'stuck', 'inbox'].includes(t.status) && !isQuestion(t)) || (isQuestion(t) && t.status === 'ready')).length;
+  $('#boardBadge').textContent = String(all);
+  $('#boardBadge').hidden = !all;
+  document.title = all ? `(${all}) Rocco` : 'Rocco';
   $('#approvedText').textContent = `${approvedWork().length} approved today`;
-  const questions = openQuestions().sort((a, b) => a.id.localeCompare(b.id)), plans = plansToApprove(), feats = features();
-  render(repeat(questions, t => t.id, question), $('#questions'));
-  $('#questions').hidden = !questions.length;
-  render(repeat(plans, p => p.id, planCard), $('#plans'));
-  $('#plans').hidden = !plans.length;
-  render(inbox(), $('#inbox'));
-  $('#inbox').hidden = !work('inbox').length;
+  // Features with no agent of their own: the ones that have one are tabs.
+  const feats = activeThread() ? [] : features().filter(p => !hasThread(p.id));
   render(repeat(feats, p => p.id, feature), $('#features'));
   $('#features').hidden = !feats.length;
-  render(html`${column('ready')}${column('stuck')}${column('working')}`, $('#board'));
+  render(html`${group('ready', 'To test', COLOR.ready, ready.length, repeat(ready, t => t.id, card))}${
+    group('stuck', 'Needs you', COLOR.stuck, needs, html`${repeat(stuck, t => t.id, card)}${repeat(replies, t => t.id, question)}${repeat(plans, p => p.id, planCard)}${repeat(spotted, t => t.id, suggestion)}${
+      spotted.length > 1 ? html`<button class="linkish rail-all" data-queue-all>Queue all ${spotted.length} that Rocco spotted</button>` : nothing}`)}${
+    group('working', 'Working', COLOR.working, working.length + asked.length - replies.length, html`${repeat(working, t => t.id, card)}${repeat(asked.filter(t => t.status !== 'ready'), t => t.id, question)}`)}`, $('#board'));
   render(upNext(), $('#queue'));
-  document.title = waiting ? `(${waiting}) Rocco` : 'Rocco';
+  // On a narrow window, the rail is this row of counts, which opens to the lists.
+  const count = (key, name, n, color) => html`<button class="rc${n ? '' : ' none'}" data-rail=${key} style="--c:${color}"><span class="sdot"></span>${name}<b>${n}</b></button>`;
+  render(html`${count('ready', 'To test', ready.length, COLOR.ready)}${count('stuck', 'Needs you', needs, COLOR.stuck)}${count('working', 'Working', working.length, COLOR.working)}${
+    count('queued', 'Up next', queue().length, COLOR.queued)}<span class="sp"></span><button class="rc-toggle" data-rail="" aria-expanded=${railOpen ? 'true' : 'false'} title=${railOpen ? 'Hide the cards' : 'Show the cards'}>${icon.chev}</button>`, $('#railCounts'));
+  $('#rail').classList.toggle('open', railOpen);
+  $('#rail').classList.toggle('waiting', waiting > 0);
   state.tasks.forEach(t => { t.fresh = false; });
 }
 
@@ -258,7 +270,8 @@ const trySteps = steps => steps.length > 1 ? html`<ul>${steps.map(s => html`<li>
 function waitText(t) {
   if (t.waitingFor !== 'lane') return t.waiting;
   const count = state.meta.lanes?.count || 0;
-  const held = new Set(state.tasks.filter(x => x.lane && (x.status === 'working' || x.status === 'stuck' || (x.where === 'lane' && (x.status === 'ready' || x.status === 'queued')))).map(x => x.lane));
+  const held = new Set(state.tasks.filter(x => x.lane && (x.status === 'working' || x.status === 'stuck' || (x.where === 'lane' && (x.status === 'ready' || x.status === 'queued'))
+    || (x.lead && x.status !== 'done' && x.status !== 'removed'))).map(x => x.lane));
   const free = Array.from({ length: count }, (_, i) => i + 1).filter(n => !held.has(n));
   return free.length ? `Lane ${free[0]} is free: Rocco starts it next` : `Waiting for a free lane: all ${count} are busy`;
 }
@@ -311,7 +324,7 @@ function whereLine(t) {
   if (isQuestion(t)) return t.status === 'ready' ? 'Answered' : t.status === 'done' ? `Got it at ${hhmm(t.doneAt)}` : 'Waiting for an answer';
   switch (t.status) {
     case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
-    case 'stuck': return t.lane ? `Lane ${t.lane}` : '';
+    case 'stuck': return ['Needs your answer', t.lane ? `lane ${t.lane}` : ''].filter(Boolean).join(' · ');
     case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
     case 'queued': return t.held ? 'Paused' : waitText(t) || 'Queued';
     case 'inbox': return `Rocco spotted this. Queue it to have it done.`;
@@ -332,10 +345,16 @@ function sheetQuestions(t) {
 // A task to test is approved from what to try; sending it back is the box at the foot.
 const approveButton = t => isQuestion(t) ? nothing : html`<button class="btn go s-approve" data-approve-open>${icon.checkSm}Approve</button>`;
 
+// A card that keeps coming back can be given an agent of its own (server/leads.ps1), to work it through with the
+// user directly, on a tab of its own. Offered from the third attempt, where a feature's own agent isn't already on it.
+const canPromote = t => !isPlan(t) && !isQuestion(t) && !t.lead && !(t.plan && hasThread(t.plan)) && ['ready', 'working', 'stuck', 'queued'].includes(t.status) && state.agent?.leads !== false;
+const promoteOffer = t => t.lead && t.pending === 'handoff' ? html`<div class="s-offer">${icon.clock}<span>Its worker is wrapping up. Then an agent of its own takes over, on a tab above the chat.</span></div>`
+  : t.attempt >= 3 && canPromote(t) ? html`<div class="s-offer"><span><b>Attempt ${t.attempt}.</b> Give it an agent of its own, and work it through with that agent directly?</span><button class="btn-sm go" data-promote>Give it its own agent</button></div>` : nothing;
+
 // The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
 function sheetTop(t) {
   const kids = isPlan(t) ? childrenOf(t) : [];
-  return html`<h2 class="s-title">${t.title}</h2><div class="s-where">${whereLine(t)}</div>${effort(t)}${
+  return html`<h2 class="s-title">${t.title}</h2><div class="s-where">${whereLine(t)}</div>${effort(t)}${promoteOffer(t)}${
     hasType(t) || featureOf(t) ? html`<div class="c-meta">${typeTag(t)}${featureTag(t)}</div>` : nothing}${stepIn(t)}${
     t.summary ? html`<div class="s-sum">${prose(t.summary)}</div>` : nothing}${
     isPlan(t) ? html`${planSteps(t)}${t.spec ? html`<div class="row s-spec">${specButton(t)}</div>` : nothing}${
@@ -486,15 +505,19 @@ function drawTask(id) {
     chip: isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status],
     // A deleted task (opened from the archive) has nothing left to delete.
     id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${t.status === 'removed' ? nothing : deleteButton(t)}`, wide: true,
+    dock: true, // in the chat's place, with the rail still beside it
   });
   if (atEnd) body.scrollTop = body.scrollHeight;
   // It moved on (sent back, built again): what it changed is loaded again, and the lines that were open are let go.
   if (t.branch && changes?.id === id && !changes.loading && changes.stamp !== changeStamp(t)) { forgetDiffs(); loadChanges(id); }
 }
 
-export function openTask(id) {
+// Opens a card as its own conversation, in the chat's place. A feature or a card with an agent of its own is talked
+// to on its tab instead, unless it's the card itself that's wanted (asCard: its plan, its details).
+export function openTask(id, asCard = false) {
   const t = byId(id);
   if (!t) return;
+  if (!asCard && hasThread(id)) { closeSheet(); openThread(id); return; }
   if (sheetTask !== id || openSheetKey() !== id) {
     sheetTask = id;
     ui = { confirm: false, big: new Set() };
@@ -574,6 +597,12 @@ const undoable = (id, message, color) => toast(message, color, { label: 'Undo', 
 
 const boardCard = id => document.querySelector(`#board .card[data-id="${CSS.escape(id)}"]`);
 
+// The card whose conversation is open is marked in the rail.
+function markOpenCard() {
+  const open = openSheetKey();
+  for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#rail [data-id]'))) el.classList.toggle('open', !!open && el.dataset.id === open);
+}
+
 function fold(el) {
   el.style.height = el.offsetHeight + 'px';
   requestAnimationFrame(() => Object.assign(el.style, { height: '0px', opacity: '0', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', borderWidth: '0px' }));
@@ -612,7 +641,12 @@ const askMore = (id, text) => attempt('ask it', async () => {
 }, id);
 const unask = id => attempt('take it back', async () => { await act(id, 'remove'); undoable(id, 'Question taken back', 'var(--gray)'); }, id);
 const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); }, id);
-const approvePlan = id => attempt('approve the plan', async () => { await act(id, 'approve-plan'); toast('Plan approved. Rocco starts it.', 'var(--accent-text)'); }, id);
+// An approved feature is built by an agent of its own, on a tab of its own (unless this PC turned that off).
+const approvePlan = id => attempt('approve the plan', async () => {
+  await act(id, 'approve-plan');
+  if (hasThread(id)) { closeSheet(); openThread(id); toast('Plan approved. It has a tab of its own now, with its own agent.', 'var(--accent-text)'); }
+  else toast('Plan approved. Rocco starts it.', 'var(--accent-text)');
+}, id);
 const queueAll = () => attempt('queue them', async () => {
   const n = work('inbox').length;
   const { opened } = await api.send();
@@ -666,14 +700,6 @@ function pick(taskId, q, value) {
     return;
   }
   renderWorkboard();
-}
-
-// The reply box on a plan or an answered question: open in this mode, or closed if it already was.
-function toggleReply(id, mode) {
-  const d = replyOf(id);
-  if (d && d.mode === mode) draft.clear(`reply:${id}`); else draft.set(`reply:${id}`, { mode, text: d?.text || '' });
-  renderWorkboard();
-  if (replyOf(id)) $(`[data-id="${CSS.escape(id)}"] :is(.plan-reply, .qa-reply) textarea`)?.focus();
 }
 
 // ---- Reordering Up next ----
@@ -762,12 +788,31 @@ export function initWorkboard() {
   $('#archiveBtn').addEventListener('click', () => showArchive());
   $('#usageBtn').addEventListener('click', showUsage);
 
-  const view = $('.view[data-view="workboard"]');
-  view.addEventListener('click', e => {
+  // A different tab above the chat: the rail lists that thread's cards, and a card that was open gives way to the chat.
+  on('thread', () => { closeSheet(); renderWorkboard(); });
+  // A card's sheet was opened or closed: the rail marks the one that's open.
+  on('sheet-opened', markOpenCard);
+  on('sheet-closed', markOpenCard);
+
+  const rail = $('#rail');
+  rail.addEventListener('click', e => {
     const hit = selector => e.target.closest(selector);
     const card = hit('[data-id]')?.dataset.id;
+    // The rail itself: a group folded away, and, on a narrow window, the row of counts opened to the lists.
+    if (hit('[data-fold]')) {
+      const key = hit('[data-fold]').dataset.fold;
+      if (folded.has(key)) folded.delete(key); else folded.add(key);
+      storage.set(FOLD_KEY, JSON.stringify([...folded]));
+      renderBoard();
+    } else if (hit('[data-rail]')) {
+      const key = hit('[data-rail]').dataset.rail;
+      railOpen = key ? true : !railOpen;
+      if (key) folded.delete(key);
+      renderBoard();
+      if (key) rail.querySelector(`[data-group="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' });
+    }
     // A task's pictures (the conductor's questions handle their own).
-    if (hit('[data-pic-src]') && hit('[data-pic-set][data-q]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pick(card, +set.dataset.q, label));
+    else if (hit('[data-pic-src]') && hit('[data-pic-set][data-q]')) openPicsFrom(hit('[data-pic-src]'), (label, set) => pick(card, +set.dataset.q, label));
     else if (hit('[data-play]')) play(hit('[data-play]').dataset.play);
     else if (hit('[data-plan-spec]')) showDoc(hit('[data-plan-spec]').dataset.planSpec);
     else if (hit('[data-pick]')) pick(card, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
@@ -779,33 +824,16 @@ export function initWorkboard() {
     else if (hit('[data-queue-all]')) queueAll();
     else if (hit('[data-got-it]')) gotIt(card);
     else if (hit('[data-unask]')) unask(card);
-    else if (hit('[data-ask-more]')) toggleReply(card, 'more');
-    else if (hit('[data-ask-send]')) {
-      const text = (replyOf(card)?.text || '').trim();
-      if (!text) { hit('.qa-reply').querySelector('textarea').focus(); return; }
-      askMore(card, text);
-    } else if (hit('.qa-reply')) { /* typing in it */ }
-    else if (hit('.qa-q')) openTask(card);
     else if (hit('[data-plan-approve]')) approvePlan(card);
-    else if (hit('[data-plan-dismiss]')) attempt('dismiss the plan', async () => { await act(card, 'remove'); draft.clear(`reply:${card}`); undoable(card, 'Plan dismissed', 'var(--gray)'); }, card);
-    else if (hit('[data-plan-reply]')) toggleReply(card, hit('[data-plan-reply]').dataset.mode);
-    else if (hit('[data-plan-send]')) {
-      const d = replyOf(card), text = (d?.text || '').trim();
-      if (!text) { hit('.plan-reply').querySelector('textarea').focus(); return; }
-      attempt('send it', async () => {
-        await act(card, d.mode === 'revise' ? 'revise' : 'followup', text);
-        draft.clear(`reply:${card}`);
-        toast('Sent to Rocco', 'var(--accent-text)');
-      }, card);
-    } else if (hit('.plan-reply')) { /* typing in it */ }
-    else if (hit('.card, .sug, .q-row, .feat, .plan')) openTask(card);
+    // A plan or an answer is read as its card, whatever thread it has.
+    else if (hit('[data-open]')) openTask(card, true);
+    else if (hit('.card, .q-row, .feat')) openTask(card, hit('.s-plan, .s-question') != null);
+    else return;
+    // A card picked from the opened row of counts: the row closes, so the card's conversation shows.
+    if (railOpen && hit('.card, .q-row, .feat') && openSheetKey()) { railOpen = false; renderBoard(); }
   });
-  view.addEventListener('keydown', e => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id); }
-  });
-  view.addEventListener('input', e => {
-    const box = e.target.closest('.plan-reply, .qa-reply'), id = e.target.closest('[data-id]')?.dataset.id;
-    if (box && id) draft.set(`reply:${id}`, { mode: replyOf(id)?.mode || 'more', text: e.target.value });
+  rail.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id, e.target.matches('.s-plan, .s-question')); }
   });
 
   // What's typed in a task's sheet is kept as it's typed.
@@ -876,6 +904,12 @@ export function initWorkboard() {
       closeSheet();
       askMore(id, words);
     } else if (hit('[data-queue-open]')) { closeSheet(); queueIt(id); }
+    else if (hit('[data-promote]')) attempt('give it its own agent', async () => {
+      await act(id, 'promote');
+      // Its tab, once it has one (a worker still on it lets go first).
+      if (hasThread(id) && byId(id)?.pending !== 'handoff') { closeSheet(); openThread(id); toast('It has an agent of its own now, on this tab', 'var(--accent-text)'); }
+      else toast('It gets an agent of its own, on a tab above the chat, once its worker has let go', 'var(--accent-text)');
+    }, id);
     else if (hit('[data-delete]')) deleteTask(id);
     else if (el.matches('.shots img')) { const src = el.getAttribute('src'); if (ui.big.has(src)) ui.big.delete(src); else ui.big.add(src); drawTask(id); }
     else if (hit('.s-row')) openTask(hit('.s-row').dataset.id);

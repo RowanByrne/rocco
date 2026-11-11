@@ -47,8 +47,8 @@
 
 /* What he says */
 .m-bubble { position: absolute; left: 50%; bottom: 35px; padding: 3px 8px; border-radius: 9px; white-space: nowrap; pointer-events: none;
-  font-size: 11.5px; font-weight: 600; color: var(--text); background: rgba(30,31,44,.96); border: 1px solid var(--stroke-2);
-  box-shadow: 0 6px 18px rgba(0,0,0,.45); opacity: 0; transform: translate(-50%, 4px) scale(.9); transition: opacity .15s, transform .15s; }
+  font-size: 11.5px; font-weight: 600; color: var(--text); background: var(--panel); border: 1px solid var(--stroke-2);
+  box-shadow: 0 6px 18px rgba(var(--shade), calc(.45 * var(--shade-k))); opacity: 0; transform: translate(-50%, 4px) scale(.9); transition: opacity .15s, transform .15s; }
 .m-bubble::after { content: ''; position: absolute; left: 50%; bottom: -4px; width: 7px; height: 7px; margin-left: -4px; transform: rotate(45deg);
   background: inherit; border-right: 1px solid var(--stroke-2); border-bottom: 1px solid var(--stroke-2); }
 .m-bubble.show { opacity: 1; transform: translate(-50%, 0) scale(1); }

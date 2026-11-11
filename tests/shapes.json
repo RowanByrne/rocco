@@ -3,10 +3,11 @@
     "path": "/api/state",
     "demo": "snapshot",
     "fields": {
-      ".": ["rocco", "project", "lanes", "conductor", "main", "tasks", "others"],
+      ".": ["rocco", "project", "lanes", "conductor", "leads", "main", "tasks", "others"],
       "project": ["id", "name", "phase", "template"],
       "lanes": ["count", "open", "main"],
       "conductor": ["state", "agent", "doing", "open"],
+      "leads": ["id", "title", "kind", "lane", "done", "handoff", "waiting", "conductor"],
       "tasks": ["id", "title", "note", "kind", "type", "status", "pending", "attempt", "lane", "branch", "where", "step", "summary", "test", "questions", "waiting", "shots", "after", "order", "plan", "steps", "created", "log"]
     },
     "demoFields": {
@@ -21,7 +22,7 @@
   "agent": {
     "path": "/api/agent",
     "demo": "agent",
-    "fields": { ".": ["id", "name", "short", "installed", "agents", "model", "takesModel", "models"], "agents": ["id", "name", "short", "installed"] }
+    "fields": { ".": ["id", "name", "short", "installed", "agents", "model", "takesModel", "models", "leads"], "agents": ["id", "name", "short", "installed"] }
   },
   "thread": {
     "path": "/api/conductor/thread",

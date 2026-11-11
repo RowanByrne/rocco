@@ -1,13 +1,16 @@
-// The conductor in Rocco (README.md "The conductor in Rocco"): a status line above the note box that says what it's
-// doing; its questions and permission requests above the note box, each question with its pictures and its own answer
-// box; and its history, which slides open from the status line, everything below moving down to make room. The data
-// is its thread (server/thread.ps1).
-import { state, on, emit } from '../state.js';
+// The chat in the middle of the Workboard (README.md "The chat"). Its first tab is the conductor's thread: what you
+// send Rocco, what it says and asks, and a line for each thing that happens to a card. A feature with an agent of its
+// own (server/leads.ps1), or a card given one, has a tab and a thread of its own, and what you type there goes
+// straight to that agent. Under the chat: the open questions and permission requests, each with its own answer box,
+// the agent's status line, and the note box. The data is a thread (server/thread.ps1), named by ?t= when it isn't
+// the conductor's.
+import { state, on, emit, byId } from '../state.js';
 import { $ } from '../lib/dom.js';
 import { html, render, nothing, repeat, live, ifDefined } from '../lib/html.js';
-import { hhmm } from '../lib/format.js';
+import { hhmm, featureVars } from '../lib/format.js';
 import { icon } from '../lib/icons.js';
 import { draft } from '../lib/drafts.js';
+import { storage } from '../lib/storage.js';
 import { once } from '../lib/busy.js';
 import { api } from '../api.js';
 import { refresh } from '../sync.js';
@@ -18,11 +21,10 @@ import { go } from '../router.js';
 import { prose, proseLine } from '../prose.js';
 import { pics, picOption, openPicsFrom } from '../ui/pics.js';
 
-let shown = false;           // the history is open
-let history = null;          // { stamp, items, steps }
-let loading = false;
-let loadError = '';          // why the history couldn't be read
-let mode = null;             // what the note box sends: { kind: 'reply', to }, else a note
+let active = '';             // the thread shown: '' for the conductor's, else the id of a feature or card with its own agent
+const threads = new Map();   // thread -> { history: { stamp, items, steps }, loading, loadError, since }
+let mode = null;             // what the note box sends when it isn't a note: { kind: 'reply', to } or { kind: 'card', task }
+let decisionsOpen = false;   // a feature thread's decisions are listed
 const unfolded = new Set();  // step groups and runs of check-ins the user opened, by their first line
 const expanded = new Set();  // long messages the user opened in full
 const seen = new Set();      // open questions and requests already announced
@@ -38,44 +40,80 @@ const tickedOf = id => draft.get(`askticks:${id}`, []);
 const ASK_DRAFTS = ['ask:', 'askpicks:', 'askticks:'];
 
 const SKIP = "No preference: it's your call.";
-const conductor = () => state.meta.conductor || { state: 'none' };
+const leads = () => state.meta.leads || [];
+const leadOf = id => leads().find(l => l.id === id);
+const agentOf = id => (id ? leadOf(id)?.conductor : state.meta.conductor) || { state: 'none' };
+const conductor = () => agentOf(active);
 const opened = () => (conductor().open || []);
 const openAsks = () => opened().filter(e => e.kind === 'asked');
 const openPermissions = () => opened().filter(e => e.kind === 'permission');
-const firstLine = text => String(text || '').split('\n').map(s => s.trim()).find(Boolean) || '';
+const view = (id = active) => { let v = threads.get(id); if (!v) threads.set(id, v = { history: null, loading: false, loadError: '', since: '' }); return v; };
+// A picture on one of this thread's questions.
+const fileOf = rel => api.conductorFile(rel, active);
+
+// The thread shown, for the cards beside it (workboard.js lists a feature's own cards on its tab).
+export const activeThread = () => active;
 
 // A check-in with nothing in it: "Watching.", "Still watching the board." The history folds a run of them into one line.
 const IDLE = /^(still |back to )?(watching|listening|waiting|standing by)\b[^\n]{0,70}$/i;
 const isIdle = e => e.kind === 'said' && IDLE.test(String(e.text || '').trim());
 
-// ---- The note box: a note, or a reply to one of the conductor's messages ----
-// Its questions aren't answered here: each has its own answer box, on the question.
+// ---- When each thread was last looked at: what's new in it since ----
 
+const seenKey = id => `rocco.seen:${state.project}:${id || 'main'}`;
+const seenAt = id => storage.get(seenKey(id)) || '';
+const markSeen = id => { if (!document.hidden && state.view === 'workboard') storage.set(seenKey(id), new Date().toISOString()); };
+const unread = id => { const last = agentOf(id).last?.at || ''; return !!last && id !== active && last > seenAt(id); };
+
+// ---- The note box: a note, or something for one message, card or thread ----
+// The conductor's questions aren't answered here: each has its own answer box, on the question.
+
+const cardVerb = t => t.status === 'ready' ? 'Send back' : t.status === 'stuck' ? 'Answer' : 'Add to';
+const cardAction = t => t.status === 'ready' ? 'reopen' : t.status === 'stuck' ? 'answer' : 'followup';
+
+// What the note box is for right now, when it isn't a new note: { kind, label, placeholder }.
 export function noteMode() {
-  return mode?.kind === 'reply' ? { kind: 'reply', label: `Replying to Rocco`, placeholder: `Reply to Rocco` } : null;
+  if (mode?.kind === 'reply') return { kind: 'reply', label: 'Replying to Rocco', placeholder: 'Reply to Rocco' };
+  if (mode?.kind === 'card') {
+    const t = byId(mode.task);
+    if (t) return { kind: 'card', label: cardVerb(t), detail: t.title, placeholder: t.status === 'ready' ? "What's still wrong? Enter sends it back" : t.status === 'stuck' ? 'Your answer' : 'Add something for its agent' };
+  }
+  const lead = active && leadOf(active);
+  if (lead) return { kind: 'thread', label: '', placeholder: `Message ${lead.title}'s agent` };
+  return null;
 }
 
 function setMode(to) {
-  mode = to ? { kind: 'reply', to } : null;
-  draft.set('note-to', to || '');
+  mode = to || null;
+  draft.set('note-to', !mode ? '' : mode.kind === 'card' ? `card:${mode.task}` : mode.to);
   renderNoteMode();
 }
+const savedMode = () => { const to = draft.get('note-to'); return !to ? null : String(to).startsWith('card:') ? { kind: 'card', task: String(to).slice(5) } : { kind: 'reply', to }; };
 
-// Back to a plain note (the chip's ×, or picking a note type).
-export function leaveMode() { setMode(''); }
+// Back to a plain note (the chip's ×, or picking what the note is).
+export function leaveMode() { setMode(null); }
 
 // What the user typed, sent in the note box's mode. Returns false when it's a plain note.
 export async function sendInMode(text) {
-  if (!noteMode()) return false;
-  const to = mode.to;
-  setMode('');
+  const m = noteMode();
+  if (!m) return false;
+  const was = mode, thread = active;
+  setMode(null);
   try {
-    const r = await api.conductorMessage(text, to);
-    await refresh();
-    toast(`Sent to Rocco${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--claude)');
+    if (m.kind === 'card') {
+      const t = byId(was.task);
+      const r = await api.act(t.id, cardAction(t), text);
+      await refresh();
+      toast(`${t.status === 'ready' ? 'Sent back' : t.status === 'stuck' ? 'Answer sent' : 'Added'}: ${t.title}${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
+    } else {
+      const r = await api.conductorMessage(text, m.kind === 'reply' ? was.to : '', thread);
+      await refresh();
+      if (r.opened) toast(`${r.opened} started, minimized in your taskbar, to pick it up`, 'var(--claude)');
+    }
+    stickToEnd();
   } catch (e) {
-    // Still a reply: the note box gets its words back (composer.js).
-    setMode(to);
+    // Still what it was: the note box gets its words back (composer.js).
+    setMode(was);
     toast(`Couldn't send it: ${e.message}`, 'var(--red)');
     throw e;
   }
@@ -83,10 +121,10 @@ export async function sendInMode(text) {
 }
 
 function renderNoteMode() {
-  const m = noteMode(), box = $('#noteMode');
-  box.hidden = !m;
-  render(m ? html`<span class="nm-label">${icon.send}${m.label}</span><button type="button" class="nm-x" data-leave-mode title="Write a note instead" aria-label="Write a note instead">×</button>` : nothing, box);
-  $('#composer').classList.toggle('to-conductor', !!m);
+  const m = noteMode(), chip = m && m.label, box = $('#noteMode');
+  box.hidden = !chip;
+  render(chip ? html`<span class="nm-label">${icon.send}${m.label}</span>${m.detail ? html`<span class="nm-detail">${m.detail}</span>` : nothing}<button type="button" class="nm-x" data-leave-mode title="Write a note instead" aria-label="Write a note instead">×</button>` : nothing, box);
+  $('#composer').classList.toggle('to-conductor', !!chip);
   emit('note-mode');
 }
 
@@ -95,7 +133,7 @@ function renderNoteMode() {
 // One answer per question: a picked option (several, for a multi-select), the user's words, or "your call".
 // Returns false when it couldn't be sent: the picks before it are kept, to answer the last question again.
 async function answer(id, given) {
-  const ask = openAsks().find(e => e.id === id);
+  const ask = openAsks().find(e => e.id === id), thread = active;
   if (!ask || answering.has(id)) return false;
   const got = [...picksOf(id)];
   if (given) got.push(given);
@@ -106,10 +144,10 @@ async function answer(id, given) {
   const text = ask.questions.map((q, i) => `${q.text.trim()} ${got[i]}`).join('\n');
   let ok = true;
   try {
-    const r = await api.conductorAnswer(id, got, text);
+    const r = await api.conductorAnswer(id, got, text, thread);
     draft.clear(`askpicks:${id}`);
     await refresh();
-    toast(`Answer sent to Rocco${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
+    toast(`Answer sent${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
   } catch (e) { ok = false; draft.set(`askpicks:${id}`, got.slice(0, -1)); toast(`Couldn't send the answer: ${e.message}`, 'var(--red)'); }
   answering.delete(id);
   renderAll();
@@ -132,13 +170,13 @@ function askCard(ask) {
   const got = picksOf(ask.id), i = got.length, q = ask.questions[i];
   if (!q || answering.has(ask.id)) return html`<div class="c-ask done"><span class="spin"></span>Sending your answer</div>`;
   const ticked = tickedOf(ask.id);
-  const opt = o => o.image ? picOption(o, api.conductorFile(o.image), { cPick: o.label, ask: ask.id }, ticked.includes(o.label))
+  const opt = o => o.image ? picOption(o, fileOf(o.image), { cPick: o.label, ask: ask.id }, ticked.includes(o.label))
     : html`<button class="opt${ticked.includes(o.label) ? ' on' : ''}" data-c-pick=${o.label} data-ask=${ask.id} title=${ifDefined(o.detail || undefined)}><span>${o.label}</span></button>`;
   const pictured = (q.options || []).some(o => o.image);
   return html`<div class="c-ask${ask.expired ? ' late' : ''}" data-ask-card=${ask.id}><div class="c-ask-head"><span class="c-who">Rocco asks</span>${q.header ? html`<span class="c-tag">${q.header}</span>` : nothing}${
-    ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${proseLine(q.text)}</div><div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(api.conductorFile))}${
+    ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${proseLine(q.text)}</div><div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(fileOf))}${
     q.options?.length ? html`<div class="opts${pictured ? ' with-pics' : ''}">${q.options.map(opt)}</div>` : nothing
-  }</div><div class="c-reply"><textarea data-c-input=${ask.id} rows="1" placeholder=${q.options?.length ? (q.multi ? 'Tick some, or type your answer' : 'Or type your answer') : 'Type your answer'} aria-label="Your answer to Rocco" .value=${live(typedOf(ask.id))}></textarea><button type="button" class="send" data-c-send=${ask.id} title="Send your answer" aria-label="Send your answer">${SEND_ICON}</button></div><div class="ask-foot">${
+  }</div><div class="c-reply"><textarea data-c-input=${ask.id} rows="1" placeholder=${q.options?.length ? (q.multi ? 'Tick some, or type your answer' : 'Or type your answer') : 'Type your answer'} aria-label="Your answer to Rocco" .value=${live(typedOf(ask.id))}></textarea><button type="button" class="send round" data-c-send=${ask.id} title="Send your answer" aria-label="Send your answer">${SEND_ICON}</button></div><div class="ask-foot">${
     q.multi ? html`<button class="btn-sm go" data-c-multi=${ask.id} ?disabled=${!ticked.length}>Send these</button>` : nothing
   }<button class="linkish" data-c-skip=${ask.id}>Let Rocco decide</button>${i ? html`<button class="linkish" data-c-back=${ask.id}>Back</button>` : nothing}</div></div>`;
 }
@@ -159,16 +197,103 @@ const elsewhere = list => list.length ? html`<div class="c-perm late"><div class
 
 // Only what changed is touched, so each answer box keeps what's typed in it and where the caret is.
 function renderAsks() {
-  const box = $('#condAsks');
+  const box = $('#condAsks'), list = $('#condList');
+  const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   render(html`${repeat(openPermissions(), p => p.id, permission)}${elsewhere(conductor().elsewhere || [])}${repeat(openAsks(), a => a.id, askCard)}`, box);
   for (const input of box.querySelectorAll('[data-c-input]')) grow(input);
+  if (atEnd) list.scrollTop = list.scrollHeight; // the chat got shorter: it stays at its end
+}
+
+// ---- The tabs: the conductor's thread, then each thread with an agent of its own ----
+
+// How an agent is doing, in one word: asking, busy, listening, or not running.
+function toneOf(c) {
+  if ((c.open || []).length || (c.elsewhere || []).length || c.inWindow || c.stalled) return 'ask';
+  return c.state === 'busy' ? 'busy' : c.state === 'listening' ? 'on' : 'none';
+}
+
+function progressOf(id) {
+  const plan = byId(id), all = state.tasks.filter(t => t.plan === id), kids = all.filter(t => t.status !== 'removed');
+  return { done: kids.filter(k => k.status === 'done').length, total: Math.max(kids.length, (plan?.steps || []).length - (all.length - kids.length)) };
+}
+
+function renderTabs() {
+  const tab = (id, name, sub, vars) => html`<button class="tab${id === active ? ' on' : ''}" role="tab" aria-selected=${id === active ? 'true' : 'false'} data-thread=${id} style=${ifDefined(vars)} title=${name}><i class="tab-dot t-${toneOf(agentOf(id))}"></i><span class="tab-name">${name}</span>${
+    sub ? html`<span class="tab-sub">${sub}</span>` : nothing}${unread(id) ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
+  render(html`${tab('', 'Rocco', '')}${repeat(leads(), l => l.id, l => {
+    const p = l.kind === 'feature' ? progressOf(l.id) : null;
+    return tab(l.id, l.title, p ? `${p.done}/${p.total}` : l.id, featureVars(l.id));
+  })}`, $('#threadTabs'));
+}
+
+// Shows a thread: the conductor's (''), or a feature's or a card's own. What's new since it was last looked at is
+// marked, and the chat opens at its end.
+export function openThread(id) {
+  if (id && !leadOf(id)) id = '';
+  if (id === active) return;
+  markSeen(active);
+  active = id;
+  decisionsOpen = false;
+  view().since = seenAt(id);
+  if (mode) setMode(null);
+  renderConductor();
+  renderHistory(true);
+  emit('thread');
+}
+
+// ---- A feature's thread: its steps, pinned above the chat, and what was decided in it ----
+
+const STATUS = { ready: ['To test', 'var(--green)'], stuck: ['Needs you', 'var(--amber)'], working: ['Working', 'var(--blue)'], queued: ['Up next', 'var(--gray)'],
+  inbox: ['Suggested', 'var(--claude)'], done: ['Approved', 'var(--green)'], removed: ['Deleted', 'var(--gray)'] };
+
+// Each step of the plan with the task that builds it: by its title, else by its place.
+function stepsOf(plan) {
+  const kids = state.tasks.filter(t => t.plan === plan.id && t.status !== 'removed').sort((a, b) => a.id.localeCompare(b.id));
+  const steps = plan.steps || [];
+  if (!steps.length) return kids.map(k => ({ title: k.title, task: k }));
+  const left = [...kids];
+  const take = fn => { const i = left.findIndex(fn); return i < 0 ? null : left.splice(i, 1)[0]; };
+  const named = steps.map(s => take(k => k.title.trim().toLowerCase() === String(s.title).trim().toLowerCase()));
+  return steps.map((s, i) => ({ title: s.title, task: named[i] || left.shift() || null })).concat(left.map(k => ({ title: k.title, task: k })));
+}
+
+// Questions asked and answered in this thread: the feature's decisions.
+const decisions = () => {
+  const items = view().history?.items || [];
+  return items.filter(e => e.kind === 'asked').flatMap(e => {
+    const reply = items.find(x => x.kind === 'answered' && x.to === e.id);
+    return reply ? e.questions.map((q, i) => ({ at: reply.at, q: q.text, a: reply.answers?.[i] ?? '' })) : [];
+  });
+};
+
+function renderHead() {
+  const lead = active && leadOf(active), t = lead && byId(lead.id), box = $('#threadHead');
+  box.hidden = !t;
+  if (!t) { render(nothing, box); return; }
+  const lane = lead.lane ? `Lane ${lead.lane}` : '', made = decisions();
+  const waiting = lead.handoff ? 'Its worker is wrapping up, then its own agent takes over' : lead.waiting;
+  if (lead.kind === 'card') {
+    const s = STATUS[t.status] || ['', 'var(--gray)'];
+    render(html`<div class="thd-row"><span class="thd-title">${t.title}</span><span class="chip" style="--c:${s[1]}"><i></i>${s[0]}</span><span class="thd-sub">${[t.id, lane, t.attempt > 1 ? `attempt ${t.attempt}` : ''].filter(Boolean).join(' · ')}</span><span class="sp"></span><button class="btn-sm" data-open-card=${t.id}>Open the card</button></div>${
+      waiting ? html`<div class="thd-wait">${icon.clock}${waiting}</div>` : nothing}`, box);
+    return;
+  }
+  const p = progressOf(t.id), steps = stepsOf(t);
+  render(html`<div class="thd-row" style=${featureVars(t.id)}><span class="thd-title">${t.title}</span><span class="thd-sub">${[`${p.done} of ${p.total} done`, lane, t.branch].filter(Boolean).join(' · ')}</span><span class="sp"></span>${
+    made.length ? html`<button class="btn-sm${decisionsOpen ? ' on' : ''}" data-decisions aria-expanded=${decisionsOpen ? 'true' : 'false'}>${made.length} decision${made.length === 1 ? '' : 's'}</button>` : nothing
+  }<button class="btn-sm" data-open-card=${t.id}>The plan</button></div><ol class="thd-steps">${steps.map((s, i) => {
+    const st = s.task ? STATUS[s.task.status] : null;
+    return html`<li class="thd-step${s.task ? '' : ' todo'}" style="--c:${st ? st[1] : 'var(--gray)'}" data-open-task=${ifDefined(s.task?.id)} title=${st ? `${s.title}: ${st[0]}` : `${s.title}: not started`}><span class="thd-n">${s.task?.status === 'done' ? icon.check : i + 1}</span><span class="thd-name">${s.title}</span>${
+      st && s.task.status !== 'done' ? html`<span class="thd-state">${st[0]}</span>` : nothing}</li>`;
+  })}</ol>${waiting ? html`<div class="thd-wait">${icon.clock}${waiting}</div>` : nothing}${
+    decisionsOpen ? html`<div class="thd-decisions">${made.map(d => html`<div class="thd-dec"><span class="thd-q">${proseLine(d.q)}</span><span class="thd-a">${d.a}</span><span class="h-at">${hhmm(d.at)}</span></div>`)}</div>` : nothing}`, box);
 }
 
 // ---- The status line ----
 
 function statusOf() {
-  // Rocco, whichever agent runs as the conductor (agent.js).
-  const c = conductor(), name = 'Rocco';
+  // Rocco, whichever agent runs as the conductor (agent.js). On a feature's tab, its own agent.
+  const c = conductor(), lead = active && leadOf(active), name = lead ? 'Its agent' : 'Rocco';
   if (openPermissions().length) return { tone: 'ask', text: `${name} wants your OK` };
   if (openAsks().length) return { tone: 'ask', text: `${name} is asking you something` };
   if ((c.elsewhere || []).length) return { tone: 'ask', text: `${name} is waiting for your OK in its window` };
@@ -178,29 +303,26 @@ function statusOf() {
   // stopped mid-way, or it's asking in its own window. Its window, or a restart, is the way out.
   if (c.stalled) return { tone: 'ask', text: `${name} hasn't answered for ${c.quiet} minutes`, faded: `${c.waiting} thing${c.waiting === 1 ? ' is' : 's are'} waiting on it`, show: true, restart: true };
   if (c.state === 'busy') return { tone: 'busy', text: name, doing: c.doing || 'Working' };
-  if (c.state === 'listening') {
-    // The last thing it said, unless that was only a check-in.
-    const last = c.last && !c.last.replied && Date.now() - new Date(c.last.at).getTime() < 12 * 3600e3 ? firstLine(c.last.text) : '';
-    return { tone: 'on', text: `${name} is listening`, faded: IDLE.test(last) ? '' : last };
-  }
-  return { tone: 'none', text: 'No conductor', faded: 'Sending a note starts one' };
+  if (c.state === 'listening') return { tone: 'on', text: `${name} is listening` };
+  if (lead) return { tone: 'none', text: 'Its agent is not running', faded: lead.waiting || lead.handoff ? '' : 'Sending it a message starts it' };
+  return { tone: 'none', text: 'No conductor', faded: 'Sending a message starts one' };
 }
 
 function renderBar() {
   const s = statusOf(), c = conductor();
-  const cutOff = state.tasks.some(t => t.status === 'working');
-  const waiting = state.tasks.some(t => t.pending);
+  const cutOff = !active && state.tasks.some(t => t.status === 'working');
+  const waiting = !active && state.tasks.some(t => t.pending);
   const start = c.state === 'none' && (waiting || cutOff) && state.agent?.installed
     ? html`<button class="btn-sm go cond-start" data-start-conductor title=${cutOff ? 'No conductor is running, and work was cut off: this carries it on' : 'No conductor is running for this game'}>${cutOff ? 'Carry on with' : 'Start'} ${agentName()}</button>` : nothing;
-  render(html`<button class="cond-stat t-${s.tone}" data-cond-toggle aria-expanded=${shown ? 'true' : 'false'} title="${shown ? 'Hide' : 'Show'} what Rocco has been doing"><i class="cond-dot"></i><span class="cond-text"><b>${s.text}</b>${
+  render(html`<span class="cond-stat t-${s.tone}"><i class="cond-dot"></i><span class="cond-text"><b>${s.text}</b>${
     s.doing ? html`<span class="cond-doing"> · ${s.doing}</span>` : nothing}${s.faded ? html`<span class="cond-faded"> · ${s.faded}</span>` : nothing
-  }</span><span class="cond-more"><span class="cond-more-label">History</span><span class="cond-chev${shown ? ' up' : ''}">${icon.chev}</span></span></button>${start}${
+  }</span></span>${start}${
     s.show ? html`<button class="btn-sm cond-start" data-show-window>Show its window</button>` : nothing}${
     s.restart ? html`<button class="btn-sm cond-start${restartArmed ? ' danger confirm' : ''}" data-restart-conductor title="End its session and open a new one, which picks the work up from the board and the lanes">${restartArmed ? 'End its session and start again?' : 'Restart it'}</button>` : nothing}${
     usageNote(c)}`, $('#condBar'));
 }
 
-// What the conductor's own session has used so far, and the model it's on, when Rocco can read them: small, at the
+// What the agent's own session has used so far, and the model it's on, when Rocco can read them: small, at the
 // end of its line.
 function usageNote(c) {
   const u = c.usage, total = u ? (u.in || 0) + (u.out || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0) : 0;
@@ -210,63 +332,89 @@ function usageNote(c) {
   return html`<span class="cond-used" title=${total ? `Its session so far: ${u.messages} messages, ${Math.round(u.out || 0).toLocaleString()} tokens written, ${Math.round(u.cacheRead || 0).toLocaleString()} read from the cache` : 'The model it was opened on'}>${[model, total ? `${size} tokens` : ''].filter(Boolean).join(' · ')}</span>`;
 }
 
-// Restart asks once more for a few seconds: it ends the conductor's session, and its workers with it.
+// Restart asks once more for a few seconds: it ends the agent's session, and its workers with it.
 let restartArmed = 0;
 function restartConductor(button) {
   if (!restartArmed) { restartArmed = setTimeout(() => { restartArmed = 0; renderBar(); }, 4000); renderBar(); return; }
   clearTimeout(restartArmed);
   restartArmed = 0;
   renderBar();
+  const thread = active;
   once('conductor:restart', async () => {
     try {
-      const r = await api.restartConductor();
+      const r = await api.restartConductor(thread);
       await refresh();
-      toast(r.agent ? `${r.agent} started again as the conductor, on what's on the board` : "Its session is ended. No agent could be opened in its place", r.agent ? 'var(--claude)' : 'var(--amber)');
-    } catch (err) { toast(`Couldn't restart the conductor: ${err.message}`, 'var(--red)'); }
+      toast(r.agent ? `${r.agent} started again, on what's on the board` : "Its session is ended. No agent could be opened in its place", r.agent ? 'var(--claude)' : 'var(--amber)');
+    } catch (err) { toast(`Couldn't restart it: ${err.message}`, 'var(--red)'); }
   }, button);
 }
 
 async function showWindow() {
-  try { const r = await api.showConductor(); if (!r.shown) toast("Couldn't find its window. It's in your taskbar", 'var(--amber)'); } catch (err) { toast(err.message, 'var(--red)'); }
+  try { const r = await api.showConductor(active); if (!r.shown) toast("Couldn't find its window. It's in your taskbar", 'var(--amber)'); } catch (err) { toast(err.message, 'var(--red)'); }
 }
 
-// ---- The history ----
+// ---- The chat ----
 
-const ACT = {
-  note: 'Note', question: 'Question', answer: 'Answer', reopen: 'Sent back', followup: 'Follow-up', approve: 'Approved',
-  'approve-plan': 'Approved the plan', revise: 'Asked for changes', queue: 'Queued', remove: 'Deleted', undo: 'Took back',
-  'got-it': 'Got it', 'ask-more': 'Asked more',
-  pause: 'Paused', resume: 'Resumed', restart: 'Started again', assign: 'Lane or worker',
+// What the user did to a card, as a line: "You approved", then the card.
+const DID = {
+  approve: 'approved', 'approve-plan': 'approved the plan for', queue: 'queued', remove: 'deleted', undo: 'took back what you did to',
+  'got-it': 'closed', pause: 'paused', resume: 'resumed', restart: 'started again', assign: 'picked a lane or worker for',
+  promote: 'gave an agent of its own to', 'make-task': 'made a task of', reopen: 'sent back', followup: 'added to', answer: 'answered',
+  revise: 'asked for changes to', 'ask-more': 'asked more about',
 };
+// What the user typed about a card, above their words.
+const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revise: 'Asked for changes', 'ask-more': 'Asked more', restart: 'Started again', 'make-task': 'Made a task' };
+
+const ROCCO = html`<span class="h-av rocco" aria-hidden="true">R</span>`;
+const meAvatar = () => html`<span class="h-av">${state.me?.avatar ? html`<img src=${state.me.avatar} alt="" referrerpolicy="no-referrer">` : (state.me?.name || 'You').trim().charAt(0).toUpperCase()}</span>`;
+
+// A card, small, where the chat mentions it: its name and where it is now. It opens the card's own conversation.
+function taskChip(id, title = '') {
+  const t = byId(id), s = t && STATUS[t.status];
+  const where = !t ? '' : t.kind === 'plan' ? (t.status === 'inbox' ? 'Plan to approve' : t.status === 'done' ? 'Built' : 'Feature')
+    : t.kind === 'question' ? (t.status === 'queued' ? 'Asked' : 'Answered') : s?.[0] || '';
+  return html`<button class="tchip" data-open-task=${id} style="--c:${s ? s[1] : 'var(--gray)'}" title="Open ${id}"><i class="sdot"></i><span class="tchip-name">${t?.title || title || id}</span>${where ? html`<span class="tchip-state">${where}</span>` : nothing}</button>`;
+}
+
+// "Reply" on a line about a card: what's typed next goes to that card (sent back if it's waiting to be tested).
+const replyTo = id => { const t = byId(id); return t && !['done', 'removed', 'inbox'].includes(t.status) && t.kind !== 'plan' ? html`<button class="linkish h-reply" data-reply-card=${id}>Reply</button>` : nothing; };
 
 function row(e, all) {
   const at = html`<span class="h-at">${hhmm(e.at)}</span>`;
   const task = e.task || undefined; // a row about a task opens it
   switch (e.kind) {
     case 'said': {
-      const long = (String(e.text || '').length > 700 || String(e.text || '').split('\n').length > 14) && !expanded.has(e.id);
-      return html`<div class="h-msg them"><div class="h-head"><span class="h-who">Rocco</span>${e.re ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
-        long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div>`;
+      const long = (String(e.text || '').length > 900 || String(e.text || '').split('\n').length > 18) && !expanded.has(e.id);
+      return html`<div class="h-msg them">${ROCCO}<div class="h-body"><div class="h-head"><span class="h-who">Rocco</span>${at}${e.re ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
+        long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div></div>`;
     }
     case 'message':
-      return html`<div class="h-msg you"><div class="h-head">${e.via === 'terminal' ? html`<span class="h-re">In Rocco's window</span>` : nothing}${at}</div><div class="h-text">${e.text}</div></div>`;
-    case 'sent':
-      return html`<div class="h-sent" data-open-task=${ifDefined(task)}><span class="h-act">${ACT[e.act] || e.act}</span><span class="h-what">${e.text || e.title || ''}</span>${at}</div>`;
+      return html`<div class="h-msg you">${meAvatar()}<div class="h-body"><div class="h-head"><span class="h-who">You</span>${at}${e.via === 'terminal' ? html`<span class="h-re">in its window</span>` : nothing}</div><div class="h-text plain">${e.text}</div></div></div>`;
+    case 'sent': {
+      // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
+      const typed = e.act === 'note' || e.act === 'question';
+      if (typed || (SAID[e.act] && e.text)) return html`<div class="h-msg you">${meAvatar()}<div class="h-body"><div class="h-head"><span class="h-who">You</span>${at}${typed ? nothing : html`<span class="h-act">${SAID[e.act]}</span>`}</div><div class="h-text plain">${e.text || e.title || ''}</div>${
+        task ? html`<div class="h-chips">${taskChip(task, e.title)}</div>` : nothing}</div></div>`;
+      return html`<div class="h-event mine"><span class="h-dot"></span><span class="h-line">You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span class="h-line">${e.title || ''}</span>`}${at}</div>`;
+    }
     case 'asked': {
       const reply = all.find(x => x.kind === 'answered' && x.to === e.id);
-      return html`<div class="h-q"><div class="h-head"><span class="h-who">Rocco asked</span>${at}</div>${e.questions.map((q, i) => {
+      return html`<div class="h-msg them">${ROCCO}<div class="h-body"><div class="h-head"><span class="h-who">Rocco</span>${at}<span class="h-act ask">Asked</span></div>${e.questions.map((q, i) => {
         // The picture of the option picked, when it had one.
         const pic = reply && (q.options || []).find(o => o.image && o.label === reply.answers?.[i])?.image;
-        return html`<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${pic ? html`<img class="h-pic" src=${api.conductorFile(pic)} alt="" loading="lazy">` : nothing}${reply ? reply.answers?.[i] ?? '' : 'Waiting for your answer'}</div>`;
-      })}</div>`;
+        return html`<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${pic ? html`<img class="h-pic" src=${fileOf(pic)} alt="" loading="lazy">` : nothing}${reply ? reply.answers?.[i] ?? '' : 'Waiting for your answer, below'}</div>`;
+      })}</div></div>`;
     }
     case 'permission': {
       const d = all.find(x => x.kind === 'decided' && x.to === e.id), gone = all.find(x => x.kind === 'expired' && x.to === e.id);
       const verdict = d ? (d.allow ? 'Allowed' : 'Denied') : gone ? 'Asked in its window' : 'Waiting for your OK';
-      return html`<div class="h-event perm"><span class="h-dot"></span><span>${e.worker ? 'A worker' : 'Rocco'} asked to: ${e.text}</span><span class="h-verdict v-${d ? (d.allow ? 'yes' : 'no') : 'wait'}">${verdict}</span>${at}</div>`;
+      return html`<div class="h-event perm"><span class="h-dot"></span><span class="h-line">${e.worker ? 'A worker' : 'Rocco'} asked to: ${e.text}</span><span class="h-verdict v-${d ? (d.allow ? 'yes' : 'no') : 'wait'}">${verdict}</span>${at}</div>`;
     }
-    case 'event':
-      return html`<div class="h-event" data-open-task=${ifDefined(task)}><span class="h-dot"></span><span>${e.text}</span>${at}</div>`;
+    case 'event': {
+      // A line about a card, in the color of where the card is now.
+      const t = task && byId(task), s = t && STATUS[t.status];
+      return html`<div class="h-event${task ? ' card' : ''}" data-open-task=${ifDefined(task)} style=${ifDefined(s ? `--c:${s[1]}` : undefined)}><span class="h-dot"></span><span class="h-line">${e.text}</span>${task ? replyTo(task) : nothing}${at}</div>`;
+    }
   }
   return nothing;
 }
@@ -286,13 +434,18 @@ function idleRun(lines) {
 }
 
 function historyView() {
-  const failed = loadError ? html`<div class="load-error">${icon.alert}<span>Couldn't load Rocco's history: ${loadError}</span><button class="btn-sm" data-history-retry>Retry</button></div>` : nothing;
-  if (!history) return loadError ? failed : html`<div class="h-empty"><span class="spin"></span>Loading</div>`;
+  const v = view(), history = v.history;
+  const failed = v.loadError ? html`<div class="load-error">${icon.alert}<span>Couldn't load the chat: ${v.loadError}</span><button class="btn-sm" data-history-retry>Retry</button></div>` : nothing;
+  if (!history) return v.loadError ? failed : html`<div class="h-empty"><span class="spin"></span>Loading</div>`;
   const items = history.items.filter(e => !['answered', 'decided', 'expired', 'handled'].includes(e.kind));
-  if (!items.length && !history.steps.length) return html`<div class="h-empty">Nothing yet. What Rocco does and says, and what you send it, shows here.</div>${failed}`;
+  if (!items.length && !history.steps.length) {
+    return html`<div class="h-empty">${active ? "Nothing here yet. What this feature's agent does and says shows here, and what you type goes straight to it."
+      : 'Tell Rocco what you noticed, ask it something, or describe a feature. What it does and says shows here, with a line for each card as it moves.'}</div>${failed}`;
+  }
   const rows = [...items.map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const out = [];
   let group = [], day = '', idle = null; // idle: the run of check-ins being read, and the steps since its last one
+  let marked = !v.since || !rows.some(r => String(r.at) <= v.since); // "new" is marked once, and never above everything
   const flushSteps = () => { if (group.length) { out.push(stepGroup(group)); group = []; } };
   const flushIdle = () => {
     if (!idle) return;
@@ -306,7 +459,14 @@ function historyView() {
       flushIdle();
       flushSteps();
       day = d;
-      out.push(html`<div class="h-day">${d === new Date().toDateString() ? 'Today' : new Date(r.at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>`);
+      out.push(html`<div class="h-day"><span>${d === new Date().toDateString() ? 'Today' : new Date(r.at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>`);
+    }
+    // The first thing from the agent since the thread was last looked at.
+    if (!marked && String(r.at) > v.since && r.e && r.e.who !== 'you' && !isIdle(r.e)) {
+      flushIdle();
+      flushSteps();
+      marked = true;
+      out.push(html`<div class="h-new" id="chatNew"><span>New since you were last here</span></div>`);
     }
     if (r.s) { (idle ? idle.after : group).push(r.s); continue; }
     if (isIdle(r.e)) {
@@ -323,79 +483,91 @@ function historyView() {
   return html`${out}${failed}`;
 }
 
-function renderHistory() {
+let toEnd = false; // the next draw ends at the chat's end, whatever was scrolled (the user just sent something)
+function stickToEnd() { toEnd = true; renderHistory(); }
+
+// fresh: the thread was just opened. It starts at what's new, or at its end.
+function renderHistory(fresh = false) {
   const list = $('#condList');
-  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  const atEnd = toEnd || fresh || list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+  toEnd = false;
   render(historyView(), list);
-  if (atBottom) list.scrollTop = list.scrollHeight;
+  const mark = fresh && list.querySelector('#chatNew');
+  if (mark) mark.scrollIntoView({ block: 'start' });
+  else if (atEnd) list.scrollTop = list.scrollHeight;
+  if (view().history) markSeen(active);
 }
 
 async function loadHistory() {
-  if (loading || !shown) return;
-  loading = true;
+  const id = active, v = view(id);
+  if (v.loading) return;
+  v.loading = true;
   try {
-    const r = await api.conductorThread(history?.stamp || '');
-    const hadError = !!loadError;
-    loadError = '';
-    if (!r.same) history = r;
-    if (!r.same || hadError) renderHistory();
+    const r = await api.conductorThread(v.history?.stamp || '', id);
+    const hadError = !!v.loadError, wasEmpty = !v.history;
+    v.loadError = '';
+    if (!r.same) v.history = r;
+    if (id === active && (!r.same || hadError)) { renderHistory(wasEmpty); renderHead(); }
   } catch (e) {
-    if (loadError !== e.message) { loadError = e.message; renderHistory(); }
+    if (v.loadError !== e.message) { v.loadError = e.message; if (id === active) renderHistory(); }
   }
-  loading = false;
-}
-
-function toggleHistory() {
-  shown = !shown;
-  $('#condHistory').classList.toggle('open', shown);
-  renderBar();
-  if (shown) {
-    renderHistory();
-    const list = $('#condList');
-    list.scrollTop = list.scrollHeight;
-    loadHistory();
-  }
+  v.loading = false;
 }
 
 // ---- Keeping it current ----
 
-// New questions and requests get a toast and a desktop notification; what was already open when Rocco loaded doesn't.
+// New questions and requests get a toast and a desktop notification, whichever thread they're in; what was already
+// open when Rocco loaded doesn't.
 function announce() {
-  if (!('stamp' in conductor())) return; // not loaded yet
-  for (const e of opened()) {
-    if (seen.has(e.id)) continue;
-    seen.add(e.id);
-    if (first) continue;
-    const message = e.kind === 'permission' ? `Rocco wants your OK: ${e.text}` : `Rocco asks: ${e.questions?.[0]?.text || ''}`;
-    toast(message, 'var(--amber)');
-    notify('Rocco', message, () => { go('workboard'); $('#condAsks').scrollIntoView({ block: 'center' }); });
+  if (!('stamp' in (state.meta.conductor || {}))) return; // not loaded yet
+  for (const id of ['', ...leads().map(l => l.id)]) {
+    const lead = id && leadOf(id);
+    for (const e of agentOf(id).open || []) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+      if (first) continue;
+      const who = lead ? `${lead.title}'s agent` : 'Rocco';
+      const message = e.kind === 'permission' ? `${who} wants your OK: ${e.text}` : `${who} asks: ${e.questions?.[0]?.text || ''}`;
+      const show = () => { go('workboard'); openThread(id); $('#condAsks').scrollIntoView({ block: 'center' }); };
+      toast(message, 'var(--amber)', id !== active ? { label: 'Show', run: show } : null);
+      notify('Rocco', message, show);
+    }
   }
   first = false;
 }
 
 function renderAll() {
+  renderTabs();
+  renderHead();
   renderBar();
   renderAsks();
   renderNoteMode();
 }
 
 export function renderConductor() {
+  // A thread whose feature is finished or deleted is gone: back to the conductor's.
+  if (active && !leadOf(active) && 'stamp' in (state.meta.conductor || {})) { active = ''; view().since = seenAt(''); emit('thread'); }
   // A question that's gone (answered elsewhere) leaves nothing behind. Not before its state has loaded, or what was
   // being typed when the page reloaded would go too.
-  if ('stamp' in conductor()) {
-    const ids = openAsks().map(e => e.id);
+  if ('stamp' in (state.meta.conductor || {})) {
+    const ids = ['', ...leads().map(l => l.id)].flatMap(id => (agentOf(id).open || []).filter(e => e.kind === 'asked').map(e => e.id));
     for (const kind of ASK_DRAFTS) draft.prune(kind, ids);
   }
+  // A card the note box was for that's gone or finished: a plain note again.
+  if (mode?.kind === 'card') { const t = byId(mode.task); if (state.tasks.length && (!t || ['done', 'removed'].includes(t.status))) mode = null; }
   announce();
   renderAll();
-  if (shown && (history?.stamp !== conductor().stamp || loadError)) loadHistory();
+  const v = view();
+  if (v.history?.stamp !== conductor().stamp || v.loadError || !v.history) loadHistory();
 }
 
-// A different project: its own thread, and its own reply in progress.
+// A different project: its own threads, and its own reply in progress.
 export function resetConductor() {
-  history = null;
-  loadError = '';
-  mode = draft.get('note-to') ? { kind: 'reply', to: draft.get('note-to') } : null;
+  threads.clear();
+  active = '';
+  view().since = seenAt('');
+  mode = savedMode();
+  decisionsOpen = false;
   unfolded.clear();
   expanded.clear();
   seen.clear();
@@ -407,11 +579,22 @@ export function resetConductor() {
 export function initConductor() {
   resetConductor();
   on('conductor', renderConductor);
-  on('prose', () => { renderAsks(); if (shown) renderHistory(); });
+  on('project', () => renderHistory(true));
+  on('prose', () => { renderAsks(); renderHistory(); renderHead(); });
+  // The cards changed: the chat's lines about them follow (where each is now), and so do the tabs' counts.
+  on('tasks', () => { renderTabs(); renderHead(); renderHistory(); renderNoteMode(); });
+  on('me', () => renderHistory());
+  on('note-sent', stickToEnd); // what the user just sent is at the chat's end: it's shown
   $('#composer').addEventListener('click', e => { if (e.target.closest('[data-leave-mode]')) { leaveMode(); $('#noteText').focus(); } });
+  $('#threadTabs').addEventListener('click', e => { const tab = e.target.closest('[data-thread]'); if (tab) openThread(tab.dataset.thread); });
+  $('#threadHead').addEventListener('click', e => {
+    const hit = s => e.target.closest(s);
+    if (hit('[data-decisions]')) { decisionsOpen = !decisionsOpen; renderHead(); }
+    else if (hit('[data-open-card]')) emit('open-card', hit('[data-open-card]').dataset.openCard);
+    else if (hit('[data-open-task]')) emit('open-task', hit('[data-open-task]').dataset.openTask);
+  });
   $('#condBar').addEventListener('click', e => {
-    if (e.target.closest('[data-cond-toggle]')) toggleHistory();
-    else if (e.target.closest('[data-show-window]')) showWindow();
+    if (e.target.closest('[data-show-window]')) showWindow();
     else if (e.target.closest('[data-restart-conductor]')) restartConductor(e.target.closest('[data-restart-conductor]'));
     else if (e.target.closest('[data-start-conductor]')) once('conductor:start', async () => {
       try {
@@ -455,11 +638,11 @@ export function initConductor() {
       draft.clear(`askticks:${id}`);
       renderAsks();
     } else if (hit('[data-allow]') || hit('[data-deny]')) {
-      const allow = !!hit('[data-allow]'), id = (hit('[data-allow]') || hit('[data-deny]')).dataset[allow ? 'allow' : 'deny'];
+      const allow = !!hit('[data-allow]'), id = (hit('[data-allow]') || hit('[data-deny]')).dataset[allow ? 'allow' : 'deny'], thread = active;
       if (deciding.has(id)) return;
       deciding.add(id);
       renderAsks();
-      try { await api.conductorPermission(id, allow); await refresh(); toast(allow ? 'Allowed' : `Denied. Rocco hears you said no`, allow ? 'var(--green)' : 'var(--gray)'); }
+      try { await api.conductorPermission(id, allow, thread); await refresh(); toast(allow ? 'Allowed' : `Denied. Rocco hears you said no`, allow ? 'var(--green)' : 'var(--gray)'); }
       catch (err) { toast(err.message, 'var(--red)'); await refresh(); }
       deciding.delete(id);
       renderAsks();
@@ -472,7 +655,11 @@ export function initConductor() {
       if (unfolded.has(key)) unfolded.delete(key); else unfolded.add(key);
       renderHistory();
     } else if (hit('[data-reply]')) {
-      setMode(hit('[data-reply]').dataset.reply);
+      setMode({ kind: 'reply', to: hit('[data-reply]').dataset.reply });
+      $('#noteText').focus();
+    } else if (hit('[data-reply-card]')) {
+      // What's typed next is filed into this card: sent back if it's waiting to be tested, added to it otherwise.
+      setMode({ kind: 'card', task: hit('[data-reply-card]').dataset.replyCard });
       $('#noteText').focus();
     } else if (hit('[data-more]')) {
       expanded.add(hit('[data-more]').dataset.more);
@@ -480,4 +667,11 @@ export function initConductor() {
     } else if (hit('[data-history-retry]')) loadHistory();
     else if (hit('[data-open-task]') && !hit('a')) emit('open-task', hit('[data-open-task]').dataset.openTask);
   });
+  // The chat's room changes (a question opens under it, the note box grows): read at its end, it stays at its end.
+  const list = $('#condList');
+  let pinned = true;
+  list.addEventListener('scroll', () => { pinned = list.scrollHeight - list.scrollTop - list.clientHeight < 60; }, { passive: true });
+  new ResizeObserver(() => { if (pinned) list.scrollTop = list.scrollHeight; }).observe(list);
+  // Looked at again after being away: what came in meanwhile is marked, once.
+  document.addEventListener('visibilitychange', () => { if (document.hidden) view().since = new Date().toISOString(); else renderHistory(); });
 }

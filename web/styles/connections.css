@@ -7,8 +7,8 @@
 
 /* Brand marks: a colored tile with the logo in white */
 .brand { position: relative; width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 11px; color: #fff;
-  background: linear-gradient(145deg, rgba(255,255,255,.24), rgba(255,255,255,0) 55%), var(--brand);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 8px 22px color-mix(in srgb, var(--brand) 28%, transparent); }
+  background: linear-gradient(145deg, rgba(var(--ink), .24), rgba(var(--ink), 0) 55%), var(--brand);
+  box-shadow: inset 0 0 0 1px rgba(var(--ink), .14), 0 8px 22px color-mix(in srgb, var(--brand) 28%, transparent); }
 .brand.sm { width: 32px; height: 32px; border-radius: 9px; }
 .brand.lg { width: 52px; height: 52px; border-radius: 14px; }
 .brand img, .brand svg { width: 52%; height: 52%; }
@@ -18,10 +18,9 @@
 /* Health summary */
 .health { position: relative; display: flex; align-items: center; gap: 16px; padding: 18px 20px; border-radius: var(--r-lg); overflow: hidden;
   background: linear-gradient(110deg, color-mix(in srgb, var(--c) 12%, transparent), transparent 60%), var(--glass);
-  border: 1px solid color-mix(in srgb, var(--c) 22%, var(--stroke)); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+  border: 1px solid color-mix(in srgb, var(--c) 22%, var(--stroke)); }
 .health-mark { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--c);
-  background: color-mix(in srgb, var(--c) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 35%, transparent), 0 0 28px color-mix(in srgb, var(--c) 30%, transparent); }
+  background: color-mix(in srgb, var(--c) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 35%, transparent); }
 .health-mark svg { width: 20px; height: 20px; }
 .health-text { flex: 1; min-width: 0; }
 .health-title { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
@@ -39,14 +38,14 @@
 .attn-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 500; }
 .attn-ver { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .attn-fix { margin-top: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12.5px; color: var(--text-2); }
-.attn-fix code { padding: 3px 7px; border-radius: 6px; font-size: 12px; color: var(--text); background: rgba(0,0,0,.35); border: 1px solid var(--stroke); }
+.attn-fix code { padding: 3px 7px; border-radius: 6px; font-size: 12px; color: var(--text); background: rgba(var(--shade), calc(.35 * var(--shade-k))); border: 1px solid var(--stroke); }
 .state-pill { flex: none; margin-top: 4px; padding: 2px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 500; color: var(--c);
   background: color-mix(in srgb, var(--c) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 28%, transparent); white-space: nowrap; }
 .copy { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; color: var(--text-2);
   background: var(--glass); border: 1px solid var(--stroke-2); }
 .copy:hover { color: var(--text); background: var(--glass-2); }
-.ver { padding: 2px 7px; border-radius: 6px; font-size: 12px; color: var(--text-2); background: rgba(255,255,255,.04); border: 1px solid var(--stroke); font-variant-numeric: tabular-nums; }
-.ver.new { color: var(--accent-text); background: rgba(124,108,255,.1); border-color: rgba(124,108,255,.35); }
+.ver { padding: 2px 7px; border-radius: 6px; font-size: 12px; color: var(--text-2); background: rgba(var(--ink), .04); border: 1px solid var(--stroke); font-variant-numeric: tabular-nums; }
+.ver.new { color: var(--accent-text); background: rgba(var(--accent-rgb), .1); border-color: rgba(var(--accent-rgb), .35); }
 .arrow { color: var(--text-3); }
 
 /* Tiles */
@@ -57,12 +56,11 @@
 .kind-head { margin: 0 2px 8px; font-size: 12px; font-weight: 500; color: var(--text-2); }
 .tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 .tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; padding: 14px; border-radius: var(--r-lg);
-  text-align: left; color: var(--text); background: var(--glass); border: 1px solid var(--stroke); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04); transition: background .15s, border-color .15s, box-shadow .2s, transform .15s; }
+  text-align: left; color: var(--text); background: var(--glass); border: 1px solid var(--stroke); transition: background .15s, border-color .15s, box-shadow .2s, transform .15s; }
 .tile:hover { background: var(--glass-2); border-color: var(--stroke-2); transform: translateY(-1px);
-  box-shadow: 0 12px 30px rgba(0,0,0,.35), 0 0 0 1px color-mix(in srgb, var(--c) 14%, transparent); }
+  box-shadow: 0 12px 30px rgba(var(--shade), calc(.35 * var(--shade-k))), 0 0 0 1px color-mix(in srgb, var(--c) 14%, transparent); }
 .tile-top { display: flex; align-items: flex-start; justify-content: space-between; align-self: stretch; margin-bottom: 9px; }
-.tile-dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
+.tile-dot { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: var(--c); }
 .tile-name { font-weight: 600; }
 .tile-detail { align-self: stretch; font-size: 12px; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .tile-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 10px; }
@@ -102,5 +100,5 @@
 .link-help { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--text-3); }
 .link-help a { color: var(--accent-text); text-decoration: none; }
 .link-help a:hover { text-decoration: underline; }
-.btn-sm.danger { color: #fecaca; }
-.btn-sm.danger:hover, .btn-sm.danger.confirm { color: #fff; background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.45); }
+.btn-sm.danger { color: var(--red-text); }
+.btn-sm.danger:hover, .btn-sm.danger.confirm { color: #fff; background: rgba(var(--red-rgb), .18); border-color: rgba(var(--red-rgb), .45); }

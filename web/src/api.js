@@ -5,6 +5,8 @@ import * as demo from './demo.js';
 export const DEMO = new URLSearchParams(location.search).has('demo');
 
 const withProject = (path, extra = '') => `${path}?p=${encodeURIComponent(state.project)}${extra}`;
+// The thread a call is about, when it isn't the conductor's.
+const inThread = thread => thread ? `&t=${encodeURIComponent(thread)}` : '';
 
 // An error says which kind it is: offline (no answer at all: the server stopped), or status (it answered with an error,
 // and the message is what it said).
@@ -92,20 +94,23 @@ export const api = {
   openLanes: (project, count = null) => DEMO ? demo.openLanes(project, count) : post(`/api/lanes?p=${encodeURIComponent(project || state.project)}`, { count }),
   // The user's agent as this project's conductor, when none is running (server/conductor.ps1): { agent }.
   openConductor: () => DEMO ? demo.openConductor() : post(withProject('/api/conductor')),
-  // The conductor's thread (server/thread.ps1): its history (only if it changed since stamp), and the user's side of it.
-  conductorThread: stamp => DEMO ? demo.conductorThread(stamp) : getJson(withProject('/api/conductor/thread', stamp ? `&stamp=${encodeURIComponent(stamp)}` : '')),
-  conductorAnswer: (id, answers, text) => DEMO ? demo.conductorAnswer(id, answers, text) : post(withProject('/api/conductor/answer'), { id, answers, text }),
-  conductorPermission: (id, allow) => DEMO ? demo.conductorPermission(id, allow) : post(withProject('/api/conductor/permission'), { id, allow }),
-  conductorMessage: (text, to) => DEMO ? demo.conductorMessage(text, to) : post(withProject('/api/conductor/message'), { text, to }),
-  showConductor: () => DEMO ? demo.showConductor() : post(withProject('/api/conductor/show-window')),
-  // The conductor has stopped answering: its session is ended and a new one opened on what's on the board. { agent }.
-  restartConductor: () => DEMO ? demo.restartConductor() : post(withProject('/api/conductor/restart')),
+  // A thread (server/thread.ps1): its history (only if it changed since stamp), and the user's side of it. thread:
+  // '' for the conductor's (the main chat), or the id of a feature or card with an agent of its own (server/leads.ps1).
+  conductorThread: (stamp, thread = '') => DEMO ? demo.conductorThread(stamp, thread) : getJson(withProject('/api/conductor/thread', (stamp ? `&stamp=${encodeURIComponent(stamp)}` : '') + inThread(thread))),
+  conductorAnswer: (id, answers, text, thread = '') => DEMO ? demo.conductorAnswer(id, answers, text, thread) : post(withProject('/api/conductor/answer', inThread(thread)), { id, answers, text }),
+  conductorPermission: (id, allow, thread = '') => DEMO ? demo.conductorPermission(id, allow, thread) : post(withProject('/api/conductor/permission', inThread(thread)), { id, allow }),
+  conductorMessage: (text, to, thread = '') => DEMO ? demo.conductorMessage(text, to, thread) : post(withProject('/api/conductor/message', inThread(thread)), { text, to }),
+  showConductor: (thread = '') => DEMO ? demo.showConductor() : post(withProject('/api/conductor/show-window', inThread(thread))),
+  // An agent has stopped answering: its session is ended and a new one opened on what's on the board. { agent }.
+  restartConductor: (thread = '') => DEMO ? demo.restartConductor(thread) : post(withProject('/api/conductor/restart', inThread(thread))),
+  // Whether a feature the user approves gets an agent of its own, on this PC (Settings).
+  setLeads: on => DEMO ? demo.setLeads(on) : post(withProject('/api/agent/leads'), { on }),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   // Stops a background job (a new project, opening lanes) and whatever it started.
   cancelJob: id => DEMO ? demo.cancelJob(id) : post(`/api/jobs/${id}/cancel`),
   file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
   // A picture on one of the conductor's questions: '<question id>/<file>'. data: ones (the demo's) are already addresses.
-  conductorFile: rel => /^(data|blob|https?):/.test(rel) ? rel : withProject(`/files/conductor/${rel.split('/').map(encodeURIComponent).join('/')}`),
+  conductorFile: (rel, thread = '') => /^(data|blob|https?):/.test(rel) ? rel : withProject(`/files/conductor/${rel.split('/').map(encodeURIComponent).join('/')}`, inThread(thread)),
   // Updates: the calendar's cards (live/CALENDAR.md) and the game page's events.
   updates: force => DEMO ? demo.updates() : getJson(withProject('/api/updates', force ? '&refresh=1' : '')),
   saveUpdate: card => DEMO ? demo.saveUpdate(card) : post(withProject('/api/updates/save'), card),

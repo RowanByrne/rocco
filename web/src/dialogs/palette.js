@@ -10,11 +10,12 @@ import { showArchive } from '../views/archive.js';
 import { showUsage } from '../views/usage.js';
 import { showDoc } from '../views/docs.js';
 import { openOnboarding } from './onboarding.js';
+import { shownTheme, toggleTheme } from '../theme.js';
 
 const modal = $('#paletteModal');
 const input = $('#paletteInput');
 const list = $('#paletteList');
-const STATUS = { inbox: 'Inbox', queued: 'Up next', working: 'Working', stuck: 'Stuck', ready: 'To test', done: 'Approved' };
+const STATUS = { inbox: 'Suggested', queued: 'Up next', working: 'Working', stuck: 'Needs you', ready: 'To test', done: 'Approved' };
 let items = [], shown = [], active = 0;
 
 export const paletteOpen = () => modal.classList.contains('open');
@@ -23,6 +24,7 @@ function collect() {
   const views = ['workboard', 'history', 'docs', 'updates', 'thumbnails', 'connections', 'settings', 'metrics', 'ads'];
   return [
     ...ACTIONS.filter(a => !a.id.startsWith('go-') && a.id !== 'palette').map(a => ({ group: 'Actions', label: a.label, hint: keyFor(a.id), run: () => run(a.id) })),
+    { group: 'Actions', label: shownTheme() === 'dark' ? 'Light mode' : 'Dark mode', hint: 'Theme', run: toggleTheme },
     { group: 'Actions', label: 'New project', run: () => openOnboarding() },
     { group: 'Actions', label: 'Archive: older tasks', run: () => { go('workboard'); showArchive(); } },
     { group: 'Actions', label: 'Usage: time and tokens by task', run: () => { go('workboard'); showUsage(); } },

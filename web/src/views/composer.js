@@ -1,5 +1,5 @@
-// The note box at the top of the Workboard: type or say a note, pick its type, attach, paste, drop or
-// capture screenshots (and draw on them); Enter adds it to Up next. What's typed is kept, by project, until it's sent
+// The note box under the chat: type or say a message, say what it is (or leave that to Rocco), attach, paste, drop
+// or capture screenshots (and draw on them); Enter sends it. What's typed is kept, by project, until it's sent
 // (lib/drafts.js), so a reload doesn't lose it.
 import { state, on, emit } from '../state.js';
 import { $ } from '../lib/dom.js';
@@ -16,10 +16,17 @@ import { voiceSupported, listening, listeningFor, toggleVoice, cancelVoice } fro
 import { shotOf, imagesIn, shotThumbs, shotClick } from '../ui/shots.js';
 import { openSheetKey } from '../ui/sheet.js';
 import { go } from '../router.js';
-import { noteMode, sendInMode, leaveMode } from './conductor.js';
+import { noteMode, sendInMode } from './conductor.js';
 
-// Question isn't work: it goes to the conductor to answer, and the answer shows under the note box.
-const TYPES = [['bug', 'Bug'], ['tweak', 'Tweak'], ['idea', 'Idea'], ['question', 'Question']];
+// What a message is (README.md "Sorting"). Auto leaves it to Rocco, which sorts each one first: a question is
+// answered in the chat with no card kept, a fix becomes a card that's done and handed back to test, and a feature
+// is planned first, then built in a thread of its own. Picking one says so yourself.
+const TYPES = [
+  ['', 'Auto', 'Rocco sorts it: an answer, a fix, or a feature', 'Message Rocco: something to fix, a question, a feature'],
+  ['fix', 'Fix', 'A small change: a card that gets done, then you test it', 'What needs fixing?'],
+  ['question', 'Ask', 'Just a question: answered here, with no card', 'What do you want to know?'],
+  ['feature', 'Feature', 'Something bigger: Rocco plans it first, then it gets a thread of its own', 'Describe the feature'],
+];
 const CAMERA = lineIcon('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/>', 16, 1.9);
 const STOP = lineIcon('<rect x="7" y="7" width="10" height="10" rx="2"/>', 16, 1.9);
 const MIC = lineIcon('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', 16, 1.9);
@@ -45,11 +52,11 @@ export function renderComposerTools() {
   render(capturing()
     ? html`<span class="cap on"><button type="button" class="tool-label" data-capture title="Capture Studio${hint('capture')}"><i></i>Capture</button><button type="button" class="cap-stop" data-capture-stop title="Stop sharing Studio" aria-label="Stop sharing Studio">×</button></span>`
     : html`<button type="button" class="tool-label" data-capture title="Pick Studio's window once, then capture it any time${hint('capture')}">${CAMERA}Capture Studio</button>`, $('#captureSlot'));
-  render(TYPES.map(([id, label]) => html`<button type="button" class="type t-${id}${type === id ? ' on' : ''}" data-type=${id} role="radio" aria-checked=${type === id ? 'true' : 'false'} title="${id === 'question' ? 'Just need to know something? Ask, and the answer shows here' : label}${hint('type')}">${label}</button>`), $('#types'));
-  const asking = type === 'question', mode = noteMode();
-  text().placeholder = mode ? mode.placeholder : asking ? 'What do you want to know?' : 'What did you notice?';
-  $('#sendBtn').title = mode ? 'Send' : asking ? 'Ask' : 'Add to Up next';
-  $('#sendBtn').setAttribute('aria-label', $('#sendBtn').title);
+  // Something for one message, card or thread isn't sorted: it has no kind to pick.
+  const mode = noteMode(), kind = TYPES.find(t => t[0] === type) || TYPES[0];
+  render(mode ? nothing : TYPES.map(([id, label, title]) => html`<button type="button" class="type${type === id ? ' on' : ''}" data-type=${id} role="radio" aria-checked=${type === id ? 'true' : 'false'} title="${title}${hint('type')}">${label}</button>`), $('#types'));
+  text().placeholder = mode ? mode.placeholder : kind[3];
+  $('#sendBtn').title = `${mode ? 'Send' : type === 'question' ? 'Ask' : 'Send to Rocco'} (Enter)`;
   const mic = !settings().voice || !voiceSupported() ? nothing : listening()
     ? html`<button type="button" class="mic on" data-voice title="Stop${hint('voice')}">${STOP}<span>${Math.floor(listeningFor() / 60)}:${String(listeningFor() % 60).padStart(2, '0')}</span></button>`
     : html`<button type="button" class="mic" data-voice title="Voice note${hint('voice')}" aria-label="Voice note">${MIC}</button>`;
@@ -64,8 +71,10 @@ function attach(file) {
 }
 
 function grow() {
-  text().style.height = 'auto';
-  text().style.height = text().scrollHeight + 'px';
+  const box = text();
+  box.style.height = 'auto';
+  // Empty, it's one line: there's nothing to measure (a placeholder that wraps would be measured instead).
+  if (box.value) box.style.height = box.scrollHeight + 'px';
 }
 
 // The screenshots, one at a time; returns the ones that didn't go up.
@@ -139,8 +148,8 @@ async function addNote() {
   emit('note-sent', noteType);
   if (failed.length) shotsFailed(made.id, failed);
   if (handed === null) return; // its own toast said so
-  toast((noteType === 'question' ? 'Asked. The answer shows here.' : 'Added to Up next') + (opened ? ` ${opened} started, minimized in your taskbar, to pick it up.` : ''),
-    noteType === 'question' || opened ? 'var(--claude)' : 'var(--violet)');
+  // It shows in the chat, so nothing more is said, unless an agent had to be opened for it.
+  if (opened) toast(`${opened} started, minimized in your taskbar, to pick it up.`, 'var(--claude)');
 }
 
 export const focusComposer = () => { go('workboard'); text().focus(); };
@@ -165,7 +174,7 @@ export function toggleVoiceNote() {
 }
 
 export function cycleType() {
-  const ids = ['', ...TYPES.map(t => t[0])];
+  const ids = TYPES.map(t => t[0]);
   type = ids[(ids.indexOf(type) + 1) % ids.length];
   renderComposerTools();
 }
@@ -181,8 +190,7 @@ export function initComposer() {
   form.addEventListener('click', async e => {
     const el = e.target.closest('button, img');
     if (!el) return;
-    // Picking a type makes it a note, even with the conductor's question open.
-    if (el.dataset.type) { type = type === el.dataset.type ? '' : el.dataset.type; if (type && noteMode()) leaveMode(); renderComposerTools(); }
+    if (el.hasAttribute('data-type')) { type = el.dataset.type; renderComposerTools(); text().focus(); }
     else if (el.hasAttribute('data-capture')) captureStudio();
     else if (el.hasAttribute('data-capture-stop')) stopCapture();
     else if (el.hasAttribute('data-voice')) toggleVoiceNote();
@@ -203,6 +211,10 @@ export function initComposer() {
   form.addEventListener('dragleave', () => form.classList.remove('drag'));
   form.addEventListener('drop', e => { e.preventDefault(); form.classList.remove('drag'); [...e.dataTransfer.files].forEach(attach); });
 
+  // Measured again once the page has its size, and whenever that changes: what's typed wraps differently.
+  requestAnimationFrame(grow);
+  addEventListener('resize', grow);
+  on('view', grow);
   on('capture', renderComposerTools);
   on('settings', renderComposerTools);
   on('note-mode', renderComposerTools);

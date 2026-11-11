@@ -61,7 +61,8 @@ function seed(id) {
           { who: 'you', at: ago(46), text: 'They get stuck when I jump off the tower.' }, { who: 'worker', at: ago(9), text: 'Teleport when 40+ studs behind. Always catches up within 1 s.' }] },
 
       // Trading: an approved feature plan, built as three tasks on its own branch.
-      { ...base, id: 'T-040', status: 'queued', pending: '', kind: 'plan', type: 'feature', where: 'lane', lane: 6, branch: 'feature/trading', title: 'Trading between players',
+      // It has an agent of its own (server/leads.ps1): a tab above the chat, with its own thread (featureThread).
+      { ...base, id: 'T-040', status: 'queued', pending: '', kind: 'plan', type: 'feature', where: 'lane', lane: 6, branch: 'feature/trading', title: 'Trading between players', lead: true,
         note: 'players should be able to trade items', summary: 'Two players swap items through a trade window, with a countdown before it goes through.',
         steps: [{ title: 'Trade requests', lane: 6, tier: 'standard' }, { title: 'Trade window and the confirm countdown', lane: 6, tier: 'heavy' }, { title: 'Trade history', lane: 6, tier: 'light' }],
         log: [{ who: 'conductor', at: ago(130), text: 'Plan: three tasks on feature/trading.' }, { who: 'you', at: ago(124), text: 'Approved the plan.' }] },
@@ -133,7 +134,32 @@ function seed(id) {
     ],
     conductor: { state: 'busy', agent: 'Claude Code', doing: 'Merge the daily reward fix into main' },
     thread: sampleThread(),
+    // The threads with an agent of their own, and what each agent is doing.
+    threads: { 'T-040': featureThread() },
+    agents: { 'T-040': { state: 'listening', agent: 'Claude Code' } },
   };
+}
+
+// A feature's own thread: its agent building it step by step, and the user talking to it directly.
+function featureThread() {
+  const at = ago;
+  const items = [
+    { id: 'C-000101', at: at(124), who: 'rocco', kind: 'event', text: 'Rocco opened Claude Code for this feature, in lane 6', task: 'T-040' },
+    { id: 'C-000102', at: at(122), who: 'conductor', kind: 'said', text: "I'm on Trading. Three steps on `feature/trading`, one at a time in this lane:\n1. Trade requests\n2. The trade window and its countdown\n3. Trade history\n\nYou get each one to test as it's done." },
+    { id: 'C-000103', at: at(118), who: 'conductor', kind: 'asked', via: 'hook', questions: [
+      { text: 'Can a player have more than one trade request open at a time?', header: 'Requests', multi: false, options: [{ label: 'One at a time' }, { label: 'Up to three' }] }] },
+    { id: 'C-000104', at: at(116), who: 'you', kind: 'answered', to: 'C-000103', answers: ['One at a time'], text: 'Can a player have more than one trade request open at a time? One at a time' },
+    { id: 'C-000105', at: at(84), who: 'rocco', kind: 'event', text: 'Ready to test: Trade requests', task: 'T-042' },
+    { id: 'C-000106', at: at(80), who: 'you', kind: 'sent', act: 'approve', task: 'T-042', title: 'Trade requests', text: '' },
+    { id: 'C-000107', at: at(78), who: 'conductor', kind: 'said', text: 'Trade requests are in. Starting the trade window: both inventories side by side, an offer slot each, and a confirm button that starts the countdown.' },
+    { id: 'C-000108', at: at(40), who: 'you', kind: 'message', text: 'make the accept button green, and put it on the right', via: 'rocco' },
+    { id: 'C-000109', at: at(38), who: 'conductor', kind: 'said', text: 'Done: the accept button is green and on the right, with Cancel on the left.' },
+    { id: 'C-000110', at: at(12), who: 'rocco', kind: 'event', text: 'Needs your answer: Trade window and the confirm countdown', task: 'T-045' },
+    { id: 'C-000111', at: at(11), who: 'conductor', kind: 'said', text: "The window works end to end. Two rules are yours to decide before I finish it: what happens when someone opens the shop mid-trade, and how long the countdown is. They're on the card." },
+  ];
+  const steps = [[121, 'Reading LEAD.md'], [120, 'Reading docs/game/features/trading.md'], [110, 'Editing TradeService.luau'], [95, 'Using Studio: start stop play'], [70, 'Editing TradeWindow.luau'],
+    [52, 'Editing TradeWindow.luau'], [39, 'Editing TradeWindow.luau'], [20, 'Using Studio: start stop play'], [13, 'Asking on the card'], [10, 'Wait for what the feature needs']].map(([m, text]) => ({ at: at(m), text }));
+  return { items, steps };
 }
 
 // The conductor's thread (server/thread.ps1): what it said and asked, what the user sent, milestones, and its steps.
@@ -146,6 +172,10 @@ function sampleThread() {
     { id: 'C-000004', at: at(170), who: 'rocco', kind: 'event', text: 'Started in lane 5: Pets follow the player', task: 'T-044' },
     { id: 'C-000005', at: at(130), who: 'rocco', kind: 'event', text: 'Posted a plan for your OK: Trading between players', task: 'T-040' },
     { id: 'C-000006', at: at(124), who: 'you', kind: 'sent', act: 'approve-plan', task: 'T-040', title: 'Trading between players', text: '' },
+    { id: 'C-000018', at: at(124), who: 'rocco', kind: 'event', text: 'Trading between players has its own thread now: an agent of its own builds it there', task: 'T-040' },
+    // A question, answered here with no card kept (rocco.ps1 reply -Answer).
+    { id: 'C-000019', at: at(90), who: 'you', kind: 'sent', act: 'question', task: 'T-039', title: 'Does the shop restock while nobody is online?', text: 'does the shop restock while nobody is online?' },
+    { id: 'C-000020', at: at(89), who: 'conductor', kind: 'said', re: 'Does the shop restock while nobody is online?', task: 'T-039', text: "No. The restock timer only runs while a server is up, and it starts again from the shop's saved time when the first player joins. So after a quiet night the shop restocks about a minute after you join, once." },
     { id: 'C-000007', at: at(61), who: 'conductor', kind: 'permission', tool: 'Bash', text: 'Push main to GitHub', detail: 'git push origin main', worker: false },
     { id: 'C-000008', at: at(60), who: 'you', kind: 'decided', to: 'C-000007', allow: true },
     { id: 'C-000009', at: at(31), who: 'conductor', kind: 'said', text: "**Done**\n- Daily reward can't be claimed twice: it saves on claim now (T-038, lane 2).\n- Shop prices fit on phones (T-041).\n\n**Flagged**\n- The trade countdown has no sound yet. I'll ask you which one when it's built.\n- `T-046` found the camera only checks walls behind the head; the fix is in progress." },
@@ -178,40 +208,51 @@ function sampleThread() {
   return { items, steps };
 }
 
-const threadOf = d => (d.thread ??= { items: [], steps: [] });
-const addLine = (d, kind, fields, who = 'conductor') => { const e = { id: `C-${String(next++).padStart(6, '0')}`, at: new Date().toISOString(), who, kind, ...fields }; threadOf(d).items.push(e); return e; };
+// A thread's lines: the conductor's (the main chat), or, by its id, one of a feature or card with an agent of its own.
+const threadOf = (d, id = '') => id ? ((d.threads ??= {})[id] ??= { items: [], steps: [] }) : (d.thread ??= { items: [], steps: [] });
+const addLine = (d, kind, fields, who = 'conductor', thread = '') => { const e = { id: `C-${String(next++).padStart(6, '0')}`, at: new Date().toISOString(), who, kind, ...fields }; threadOf(d, thread).items.push(e); return e; };
+// Each thread's agent: what it's doing.
+const agentOf = (d, id = '') => (id ? (d.agents ??= {})[id] : d.conductor) || { state: 'listening', agent: 'Claude Code' };
+const setAgentState = (d, id, value) => { if (id) (d.agents ??= {})[id] = value; else d.conductor = value; };
 
-// What the status line shows, worked out as the server does (thread.ps1, Get-ConductorThread).
-function conductorView(d) {
-  const t = threadOf(d), has = (kind, id) => t.items.some(x => x.kind === kind && x.to === id);
+// What a thread's status line shows, worked out as the server does (thread.ps1, Get-ConductorThread).
+function conductorView(d, id = '') {
+  const t = threadOf(d, id), has = (kind, to) => t.items.some(x => x.kind === kind && x.to === to);
   const open = t.items.filter(e => (e.kind === 'asked' && !has('answered', e.id)) || (e.kind === 'permission' && !has('decided', e.id) && !has('expired', e.id)));
   const last = [...t.items].reverse().find(e => e.kind === 'said');
   const replied = !!last && t.items.some(e => e.who === 'you' && e.at > last.at);
-  return { doing: '', ...(d.conductor || { state: 'listening', agent: 'Claude Code' }), open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
+  return { doing: '', ...agentOf(d, id), open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
 }
 
-export async function conductorThread(stamp) {
-  const d = current(), t = threadOf(d), now = `${t.items.length}.${t.steps.length}`;
+// The threads with an agent of their own (server/leads.ps1, Get-LeadsState).
+const leadsView = d => d.tasks.filter(t => t.lead && onBoard(t)).map(t => ({
+  id: t.id, title: t.title, kind: t.kind === 'plan' ? 'feature' : 'card', lane: t.lane || null, done: t.status === 'done', handoff: t.pending === 'handoff',
+  waiting: t.pending === 'handoff' ? '' : t.leadWaiting || '', conductor: conductorView(d, t.id),
+}));
+
+export async function conductorThread(stamp, thread = '') {
+  const d = current(), t = threadOf(d, thread), now = `${t.items.length}.${t.steps.length}`;
   return stamp === now ? { same: true } : { stamp: now, items: t.items, steps: t.steps };
 }
 
-// The demo's conductor carries on a moment after the user answers or writes.
-function carryOn(d, text, step) {
-  setTimeout(() => { threadOf(d).steps.push({ at: new Date().toISOString(), text: step }); d.conductor = { ...d.conductor, state: 'busy', doing: step }; }, 1200);
-  setTimeout(() => { addLine(d, 'said', { text }); d.conductor = { ...d.conductor, state: 'listening', doing: '' }; }, 3500);
+// The demo's agents carry on a moment after the user answers or writes.
+function carryOn(d, text, step, thread = '') {
+  setTimeout(() => { threadOf(d, thread).steps.push({ at: new Date().toISOString(), text: step }); setAgentState(d, thread, { ...agentOf(d, thread), state: 'busy', doing: step }); }, 1200);
+  setTimeout(() => { addLine(d, 'said', { text }, 'conductor', thread); setAgentState(d, thread, { ...agentOf(d, thread), state: 'listening', doing: '' }); }, 3500);
 }
 
-export async function conductorAnswer(id, answers, text) {
+export async function conductorAnswer(id, answers, text, thread = '') {
   const d = current();
-  addLine(d, 'answered', { to: id, answers, text }, 'you');
-  carryOn(d, `Going with: ${answers.join('; ')}. This is the demo, so nothing is built.`, 'Wiring the trade countdown sound');
+  addLine(d, 'answered', { to: id, answers, text }, 'you', thread);
+  carryOn(d, `Going with: ${answers.join('; ')}. This is the demo, so nothing is built.`, 'Wiring the trade countdown sound', thread);
   return { ok: true, opened: '' };
 }
-export async function conductorPermission(id, allow) { addLine(current(), 'decided', { to: id, allow }, 'you'); return { ok: true }; }
-export async function conductorMessage(text, to) {
+export async function conductorPermission(id, allow, thread = '') { addLine(current(), 'decided', { to: id, allow }, 'you', thread); return { ok: true }; }
+export async function conductorMessage(text, to, thread = '') {
   const d = current();
-  const e = addLine(d, 'message', { text, to, via: 'rocco' }, 'you');
-  carryOn(d, 'Got it. In a real project the conductor reads this through rocco.ps1 wait and answers here.', 'Reading your message');
+  const e = addLine(d, 'message', { text, to, via: 'rocco' }, 'you', thread);
+  carryOn(d, thread ? "Got it. In a real project this feature's own agent reads this through rocco.ps1 wait, and answers here."
+    : 'Got it. In a real project the conductor reads this through rocco.ps1 wait and answers here.', 'Reading your message', thread);
   return { id: e.id, opened: '' };
 }
 export async function showConductor() { return { shown: true }; }
@@ -232,7 +273,7 @@ export async function snapshot() {
   const d = current();
   // Another sample project with a card waiting, to show the project picker's mark for it.
   const others = state.project === 'sample-game' ? [{ id: 'sky-farm', name: 'Sky Farm', stuck: 1, ready: 0, asks: 0 }] : [];
-  return JSON.stringify({ rocco: 'demo', project: { template: false, ...PROJECTS.find(p => p.id === state.project) }, lanes: d.lanes, conductor: conductorView(d), main: d.main, tasks: d.tasks.filter(onBoard), others });
+  return JSON.stringify({ rocco: 'demo', project: { template: false, ...PROJECTS.find(p => p.id === state.project) }, lanes: d.lanes, conductor: conductorView(d), leads: leadsView(d), main: d.main, tasks: d.tasks.filter(onBoard), others });
 }
 
 // ---- The archive, usage, one task, and a changed file's lines (tasks.ps1, sessions.ps1, history.ps1) ----
@@ -412,9 +453,11 @@ export async function release(id) {
 function answerSoon(t) {
   setTimeout(() => {
     if (t.status !== 'queued') return;
-    const reply = 'This is the demo, so here is a stand-in answer. In a real project the conductor answers with rocco reply, and it shows here.';
-    Object.assign(t, { status: 'ready', pending: '', waiting: '', summary: reply });
+    // As rocco.ps1 reply -Answer does: the answer is said in the chat, and no card is kept.
+    const reply = 'This is the demo, so here is a stand-in answer. In a real project Rocco answers a question here in the chat, and keeps no card for it.';
+    Object.assign(t, { status: 'done', doneAt: new Date().toISOString(), pending: '', waiting: '', summary: reply });
     t.log.push({ who: 'conductor', at: new Date().toISOString(), text: reply });
+    addLine(current(), 'said', { text: reply, re: t.title, task: t.id });
   }, 5000);
 }
 
@@ -422,6 +465,16 @@ export async function shot(id, file) {
   const t = find(id);
   t.shots.push(URL.createObjectURL(file));
   return { name: `shot-${t.shots.length}.png` };
+}
+
+// A feature or a card given an agent of its own: its thread starts, and the main chat says where it went.
+function ownAgent(t, opened, hello) {
+  const d = current();
+  Object.assign(t, { lead: true, lane: t.lane || 2 });
+  addLine(d, 'event', { text: opened, task: t.id }, 'rocco', t.id);
+  addLine(d, 'event', { text: `${t.title} has its own thread now: an agent of its own ${t.kind === 'plan' ? 'builds it' : 'works on it'} there`, task: t.id }, 'rocco');
+  setAgentState(d, t.id, { state: 'busy', agent: 'Claude Code', doing: 'Reading LEAD.md' });
+  setTimeout(() => { addLine(d, 'said', { text: hello }, 'conductor', t.id); setAgentState(d, t.id, { state: 'listening', agent: 'Claude Code' }); }, 2500);
 }
 
 const toConductor = (t, pending) => {
@@ -460,7 +513,25 @@ export async function act(id, action, text) {
       if (t.kind === 'plan') current().tasks.filter(k => k.status === 'removed' && k.removedWith === t.id && k.undo).forEach(restore);
       break;
     }
-    case 'approve-plan': Object.assign(t, { status: 'queued', pending: 'approved', waiting: 'Waiting for the conductor' }); say('Approved the plan.'); break;
+    case 'approve-plan':
+      Object.assign(t, { status: 'queued', pending: 'approved', waiting: 'Waiting for the conductor' }); say('Approved the plan.');
+      // As the server does: it gets an agent and a thread of its own, unless that's turned off (Settings).
+      if (leadsOn) ownAgent(t, `Rocco opened Claude Code for this feature, in lane ${t.lane || 2}`, "I've read the plan. Starting on its first step now; you get each one to test as it's done.");
+      break;
+    // A card that keeps coming back gets an agent of its own: a worker still on it lets go first (handoff).
+    case 'promote':
+      if (t.kind === 'plan' || t.kind === 'question') throw new Error(`${id} isn't a card of work.`);
+      if (t.lead) throw new Error(`${id} already has an agent of its own.`);
+      say('Give it an agent of its own.');
+      if (t.status === 'working' || t.status === 'stuck') {
+        Object.assign(t, { lead: true, pending: 'handoff' });
+        setTimeout(() => { if (t.pending === 'handoff') { t.pending = ''; ownAgent(t, 'Its worker has let go. Rocco opened Claude Code for this card', `I have ${t.title} now. Tell me what's still wrong and we'll work it through here.`); } }, 3000);
+      } else ownAgent(t, 'Rocco opened Claude Code for this card', `I have ${t.title} now. Tell me what's still wrong and we'll work it through here.`);
+      break;
+    case 'make-task':
+      if (t.kind !== 'question') throw new Error(`${id} isn't an answered question.`);
+      Object.assign(t, { kind: 'note', type: '' }); toConductor(t, 'plan'); say(text || 'Make this a task.');
+      break;
     // Stepping in on its worker, as the server does: the demo's conductor "handles" each a few seconds later.
     case 'pause':
       t.held = true; say('Paused.');
@@ -572,11 +643,14 @@ let agentId = 'claude';
 const installed = id => id !== 'gemini' || fixed.has('gemini-update');
 // The conductor's model, kept per agent (server/agents.ps1): only Claude Code takes one from Rocco.
 const models = {};
+// Whether a feature the user approves gets an agent of its own (server/leads.ps1).
+let leadsOn = true;
 export async function agent() {
   const a = AGENTS.find(x => x.id === agentId), takes = a.id === 'claude';
   return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] || '', takesModel: takes, models: takes ? ['fable', 'opus', 'sonnet', 'haiku', 'opusplan'] : [],
-    agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+    leads: leadsOn, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
 }
+export async function setLeads(on) { leadsOn = !!on; return agent(); }
 export async function setAgent(id) { agentId = id; return agent(); }
 export async function setAgentModel(model) {
   if (model && !/^[A-Za-z0-9][\w.:[\]-]{0,79}$/.test(model)) throw new Error("That doesn't look like a model's name (like opus, sonnet, or a full name such as claude-opus-5-5).");
@@ -642,10 +716,10 @@ export async function openLanes(project, count) {
   return { job: id, saved: { committed: true, pushed: true, note: '' } };
 }
 export async function openConductor() { const a = await agent(); return { agent: a.name }; }
-export async function restartConductor() {
+export async function restartConductor(thread = '') {
   const a = await agent(), d = current();
-  d.conductor = { state: 'listening', agent: a.name };
-  addLine(d, 'event', { text: 'You restarted the conductor' }, 'rocco');
+  setAgentState(d, thread, { state: 'listening', agent: a.name });
+  addLine(d, 'event', { text: thread ? 'You restarted its agent' : 'You restarted the conductor' }, 'rocco', thread);
   return { agent: a.name };
 }
 export async function cancelJob(id) {

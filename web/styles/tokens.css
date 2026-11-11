@@ -1,31 +1,99 @@
-/* Design tokens. Rocco is dark only. */
+/* Design tokens. Two themes: light (warm neutral), and dark, picked in Settings or the user's menu (src/theme.js
+   sets data-theme on <html>). Everything else is colored from these, so a color is never written anywhere else:
+   - a tint of a named color is rgba(var(--green-rgb), .1)
+   - a shade laid over a surface is rgba(var(--ink), .05): dark on the light theme, light on the dark one
+   - a shadow is rgba(var(--shade), calc(.4 * var(--shade-k))): --shade-k makes shadows soft on the light theme */
 :root {
-  --bg: #08090d;
-  --glass: rgba(255,255,255,.03);
-  --glass-2: rgba(255,255,255,.055);
-  --glass-3: rgba(255,255,255,.08);
-  --stroke: rgba(255,255,255,.07);
-  --stroke-2: rgba(255,255,255,.12);
-  --text: #ecedf1;
-  --text-2: #a3a6b3;
-  --text-3: #6c707d;
-  --accent: #7c6cff;
-  --accent-2: #5b8cff;
-  --accent-text: #b3a9ff;
-  --green: #34d399;
-  --amber: #fbbf24;
-  --blue: #60a5fa;
-  --violet: #a78bfa;
-  --cyan: #22d3ee;
-  --gray: #8b8f9c;
-  --red: #f87171;
-  --update: #9d90ff;
-  --claude: #e08a6c;
-  --r-sm: 8px;
-  --r: 12px;
-  --r-lg: 16px;
-  --blur: blur(18px) saturate(140%);
+  --bg: #f6f4f0;          /* the page, behind everything */
+  --panel: #ffffff;       /* a surface: the chat, a card, a menu */
+  --panel-2: #fbfaf8;     /* a quieter surface: the sidebar, a column */
+  --sunk: #f1eee9;        /* a well: code, a log */
+  --ink: 38,30,22;
+  --shade: 70,52,34;
+  --shade-k: .28;
+  --glass: rgba(255, 255, 255, .66);   /* a panel on the page: lighter than it */
+  --glass-2: rgba(var(--ink), .055);   /* hovered, or pressed in */
+  --glass-3: rgba(var(--ink), .09);
+  --stroke: rgba(var(--ink), .1);
+  --stroke-2: rgba(var(--ink), .17);
+  --text: #211e1a;
+  --text-2: #5e5951;
+  --text-3: #8d877e;
+  --accent: #d2601a;
+  --accent-2: #e2853f;
+  --accent-text: #b4500f;
+  --on-accent: #fff;      /* text on the accent */
+  --on-fill: #fff;        /* text on a filled state color (a lane's number, Approve) */
+  --green: #1f9a5f;
+  --amber: #b97d0e;
+  --blue: #2f72d4;
+  --violet: #7a5bd4;
+  --cyan: #0e8fa6;
+  --gray: #8a857c;
+  --red: #d04444;
+  --update: #7a5bd4;
+  --claude: #c2623e;
+  --green-text: #17784a;
+  --amber-text: #8f6208;
+  --red-text: #b03232;
+  --cyan-text: #0b7386;
+  --accent-rgb: 210,96,26;
+  --green-rgb: 31,154,95;
+  --amber-rgb: 185,125,14;
+  --blue-rgb: 47,114,212;
+  --violet-rgb: 122,91,212;
+  --cyan-rgb: 14,143,166;
+  --red-rgb: 208,68,68;
+  --claude-rgb: 194,98,62;
+  --r-sm: 6px;
+  --r: 8px;
+  --r-lg: 10px;
   --font: Inter, system-ui, "Segoe UI", sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #161412;
+  --panel: #201d1a;
+  --panel-2: #1b1917;
+  --sunk: #131110;
+  --ink: 255,244,230;
+  --shade: 0,0,0;
+  --shade-k: .75;
+  --glass: rgba(var(--ink), .035);
+  --glass-2: rgba(var(--ink), .06);
+  --glass-3: rgba(var(--ink), .09);
+  --stroke: rgba(var(--ink), .09);
+  --stroke-2: rgba(var(--ink), .15);
+  --text: #eeeae4;
+  --text-2: #aea79d;
+  --text-3: #7d766d;
+  --accent: #ea8a42;
+  --accent-2: #f0a15e;
+  --accent-text: #f2a568;
+  --on-accent: #201206;
+  --on-fill: #14110e;
+  --green: #40c98b;
+  --amber: #edb347;
+  --blue: #6ba8f5;
+  --violet: #a68ff2;
+  --cyan: #41cbe0;
+  --gray: #8f8a82;
+  --red: #f07373;
+  --update: #a68ff2;
+  --claude: #e08a6c;
+  --green-text: #8fe3bd;
+  --amber-text: #f6d58e;
+  --red-text: #f9b4b4;
+  --cyan-text: #8be3f1;
+  --accent-rgb: 234,138,66;
+  --green-rgb: 64,201,139;
+  --amber-rgb: 237,179,71;
+  --blue-rgb: 107,168,245;
+  --violet-rgb: 166,143,242;
+  --cyan-rgb: 65,203,224;
+  --red-rgb: 240,115,115;
+  --claude-rgb: 224,138,108;
   color-scheme: dark;
 }

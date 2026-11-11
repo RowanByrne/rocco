@@ -18,11 +18,14 @@ export async function load() {
     const text = await api.state();
     setOnline(true);
     if (text === lastJson) { setProblem(''); return; }
-    const s = JSON.parse(text), { conductor, ...rest } = s;
+    // leads: the threads with an agent of their own, each with its agent's state. Like the conductor's, it changes
+    // with every step an agent takes, so it's kept apart from what redraws the board.
+    const s = JSON.parse(text), { conductor, leads, ...rest } = s;
     lastJson = text;
     const restJson = JSON.stringify(rest);
     if (restJson !== lastRest) { lastRest = restJson; apply(s); }
     state.meta.conductor = conductor || { state: 'none' };
+    state.meta.leads = leads || [];
     emit('conductor');
     setProblem('');
   } catch (e) {
@@ -77,7 +80,7 @@ function apply(s) {
   if (state.rocco && s.rocco && s.rocco !== state.rocco) emit('rocco-updated', s.rocco);
   state.rocco = s.rocco || state.rocco;
   const before = new Map(state.tasks.map(t => [t.id, t.status]));
-  state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, conductor: s.conductor || { state: 'none' }, main: s.main || {} };
+  state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, conductor: s.conductor || { state: 'none' }, leads: s.leads || [], main: s.main || {} };
   others(s.others || []);
   state.tasks = (s.tasks || []).map(taskFrom);
   if (loaded) for (const t of state.tasks) {

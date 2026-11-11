@@ -11,10 +11,14 @@ import { sortable } from './ui/sortable.js';
 import { switchProject } from './projects.js';
 import { openOnboarding, openLanesDialog } from './dialogs/onboarding.js';
 import { go } from './router.js';
+import { shownTheme, toggleTheme } from './theme.js';
 
 // A lane is busy while a worker is in it, or while it holds a branch: stuck, or a feature waiting for the user or the conductor.
 function laneState(n) {
   const t = state.tasks.find(t => t.lane === n && (t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && (t.status === 'ready' || t.status === 'queued'))));
+  // A feature's own agent (or a card's) keeps its lane for as long as it's being built (server/leads.ps1).
+  const lead = state.tasks.find(t => t.lead && t.lane === n && !['done', 'removed'].includes(t.status));
+  if (lead && !(t && t.status === 'stuck')) return ['working', `Lane ${n}: ${lead.title}, with its own agent`];
   if (!t) return ['', `Lane ${n}: free`];
   if (t.status === 'working' || t.status === 'stuck') return [t.status, `Lane ${n}: ${t.title}`];
   return ['held', `Lane ${n}: holding ${t.branch || 'a branch'} for ${t.title}`];
@@ -132,7 +136,7 @@ function meMenu() {
   return html`<div class="me-card"><span class="avatar">${avatar()}</span><span class="ws-text"><span class="ws-name">${m.name || 'You'}</span><span class="ws-sub">${m.login ? '@' + m.login : m.email || ''}</span></span></div><div class="menu-sep"></div>${
     row('Agent', state.agent?.name)}${row('Claude account', m.claude)}${row('Git email', m.email)}${row('This PC', m.pc)}${
     row('Lanes here', state.meta.lanes.count ? `${state.meta.lanes.count} for this project` : '')
-  }<div class="menu-sep"></div><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button><button class="menu-item" data-goto="settings" role="menuitem">${icon.sliders}<span class="mi-text">Settings</span></button>`;
+  }<div class="menu-sep"></div><button class="menu-item" data-dark role="menuitemcheckbox" aria-checked=${shownTheme() === 'dark' ? 'true' : 'false'}>${icon.moon}<span class="mi-text">Dark mode</span><span class="switch sm" aria-checked=${shownTheme() === 'dark' ? 'true' : 'false'}><span></span></span></button><button class="menu-item" data-goto="connections" role="menuitem">${icon.plug}<span class="mi-text">Connections</span></button><button class="menu-item" data-goto="settings" role="menuitem">${icon.sliders}<span class="mi-text">Settings</span></button>`;
 }
 
 // ---- Projects ----
@@ -178,6 +182,8 @@ export function initSidebar() {
   $('#meMenu').addEventListener('click', e => {
     const target = e.target.closest('[data-goto]');
     if (target) { closeMenus(); go(target.dataset.goto); }
+    // The menu stays open, with its switch flipped.
+    else if (e.target.closest('[data-dark]')) { toggleTheme(); render(meMenu(), $('#meMenu')); }
   });
 
   $('#laneStat').addEventListener('click', () => { if (!currentProject().template && !state.meta.lanes.jobs?.length) openLanesDialog(); });

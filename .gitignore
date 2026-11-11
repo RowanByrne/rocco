@@ -1,2 +1,4 @@
 # What the app's checks install (npm install). Rocco itself needs none of it.
 node_modules/
+# Concept art for the app's look: candidates, kept on this PC and out of git.
+concepts/

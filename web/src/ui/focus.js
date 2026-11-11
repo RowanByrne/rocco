@@ -7,7 +7,8 @@ const openers = new Map(); // an open layer -> what had focus before it opened
 let trail = [];            // the last few things that had focus, newest last
 
 const layers = () => LAYERS.map(s => document.querySelector(s)).filter(Boolean);
-const topLayer = () => layers().find(l => l.classList.contains('open'));
+// A card's conversation docked in the chat's place (ui/sheet.js) is part of the page, not over it: Tab leaves it.
+const topLayer = () => layers().find(l => l.classList.contains('open') && !l.classList.contains('docked'));
 const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 
 function keepInside(e) {
