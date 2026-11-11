@@ -17,9 +17,29 @@ $Mime = @{
 	'.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'; '.css' = 'text/css; charset=utf-8'
 	'.json' = 'application/json; charset=utf-8'; '.svg' = 'image/svg+xml'; '.ico' = 'image/x-icon'; '.woff2' = 'font/woff2'
 	'.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.gif' = 'image/gif'; '.webp' = 'image/webp'
-	'.mp3' = 'audio/mpeg'; '.ogg' = 'audio/ogg'; '.wav' = 'audio/wav'; '.m4a' = 'audio/mp4'
+	'.mp3' = 'audio/mpeg'; '.ogg' = 'audio/ogg'; '.wav' = 'audio/wav'; '.m4a' = 'audio/mp4'; '.txt' = 'text/plain; charset=utf-8'
 }
 $ImageExt = @{ 'image/png' = '.png'; 'image/jpeg' = '.jpg'; 'image/gif' = '.gif'; 'image/webp' = '.webp' }
+# The biggest screenshot the app may add to a note. A 4K capture is a few megabytes.
+$ShotMax = 25MB
+
+# A note handed to the conductor: to plan, or (a question) to answer. A note with screenshots is handed over once
+# they're in (the app says so, /release), so the conductor never reads it before its pictures are there.
+function Send-Note($t) {
+	$question = $t.kind -eq 'question'
+	Set-Field $t 'uploading' $null
+	Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
+	Save-Task $t
+	Add-Sent $(if ($question) { 'question' } else { 'note' }) $t "$($t.note)"
+}
+
+# A note whose app went away mid-upload (the tab closed) is handed over with what arrived.
+function Send-StaleNotes {
+	foreach ($t in @(Get-Tasks | Where-Object { $_.uploading -and ((Get-Date) - [datetime]$_.uploading).TotalSeconds -gt 90 })) {
+		$t = Read-Task $t.id
+		if ($t.uploading) { Send-Note $t; Request-Conductor | Out-Null } else { Unlock-Tasks }
+	}
+}
 
 function Read-Json($req) {
 	$body = (New-Object IO.StreamReader($req.InputStream, $Utf8)).ReadToEnd()
@@ -68,8 +88,13 @@ function Invoke-Request($ctx) {
 	if ($get) {
 		if ($path -eq '/api/state') {
 			Invoke-UpdateAuto $false | Out-Null # due game page events get queued even when Updates isn't open (updates.ps1)
+			Send-StaleNotes
 			Send-Json $ctx (Get-State $req.QueryString['p']); return
 		}
+		# What the board no longer shows (tasks.ps1): approved or deleted a while ago, searched by ?q=.
+		if ($path -eq '/api/archive') { Send-Json $ctx (Get-Archive ([string]$req.QueryString['q']) ([int]$req.QueryString['skip'])); return }
+		# What each task took: tokens from its sessions, and its time at work (sessions.ps1).
+		if ($path -eq '/api/usage') { Send-Json $ctx (Get-ProjectUsage); return }
 		# The conductor's history (thread.ps1), only when it changed since the stamp the app has.
 		if ($path -eq '/api/conductor/thread') {
 			if ($req.QueryString['stamp'] -and $req.QueryString['stamp'] -eq (Get-HistoryStamp)) { Send-Json $ctx @{ same = $true }; return }
@@ -93,14 +118,22 @@ function Invoke-Request($ctx) {
 		if ($path -eq '/api/docs') { Send-Json $ctx (Get-Docs $project.template); return }
 		if ($path -eq '/api/docs/file') { Send-Json $ctx (Read-Doc $req.QueryString['path'] $project.template); return }
 		if ($path -eq '/api/onboarding') { Send-Json $ctx ([pscustomobject]@{ survey = (Get-Survey $RepoDir); answers = (Read-Answers) }); return }
-		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Read-Task $Matches[1])); return }
+		# One task by its id, on the board or put away: a link to a task opens it.
+		if ($path -match '^/api/tasks/(T-\d+)$') {
+			try { Send-Json $ctx (Get-Task $Matches[1]) } catch { Send-Text $ctx 404 "There's no task $($Matches[1]) in this project." }
+			return
+		}
+		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Get-Task $Matches[1])); return }
+		# One changed file's lines, as git shows them (history.ps1).
+		if ($path -match '^/api/tasks/(T-\d+)/diff$') { Send-Json $ctx (Get-TaskDiff (Get-Task $Matches[1]) ([string]$req.QueryString['path'])); return }
 		# Its agent's sessions (sessions.ps1), then each one's lines from where the app got to.
-		if ($path -match '^/api/tasks/(T-\d+)/sessions$') { Send-Json $ctx @(Get-TaskSessions (Read-Task $Matches[1])); return }
-		if ($path -match '^/api/tasks/(T-\d+)/session$') { Send-SessionText $ctx (Read-Task $Matches[1]) ([string]$req.QueryString['key']) ([long]$req.QueryString['from']); return }
-		# A task's screenshot or audio option.
-		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a))$' -and $Matches[2] -notmatch '\.\.') {
-			$file = Join-Path (Join-Path $TasksDir $Matches[1]) $Matches[2]
-			if (Test-Path -LiteralPath $file -PathType Leaf) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
+		if ($path -match '^/api/tasks/(T-\d+)/sessions$') { Send-Json $ctx @(Get-TaskSessions (Get-Task $Matches[1])); return }
+		if ($path -match '^/api/tasks/(T-\d+)/session$') { Send-SessionText $ctx (Get-Task $Matches[1]) ([string]$req.QueryString['key']) ([long]$req.QueryString['from']); return }
+		# A task's screenshot or audio option, or the output of a check its worker ran (check-N.txt).
+		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a)|check-\d+\.txt)$' -and $Matches[2] -notmatch '\.\.') {
+			$name = $Matches[2]
+			$file = try { Join-Path (Get-TaskDir $Matches[1]) $name } catch { '' }
+			if ($file -and (Test-Path -LiteralPath $file -PathType Leaf)) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
 		}
 		Send-Text $ctx 404 'Not found'; return
 	}
@@ -118,6 +151,16 @@ function Invoke-Request($ctx) {
 		try { $agent = Set-Agent ([string](Read-Json $req).id) } catch { Send-Text $ctx 400 $_.Exception.Message; return }
 		$script:PcResult = $null
 		Send-Json $ctx $agent; return
+	}
+	# The model the next conductor is opened on (Settings).
+	if ($path -eq '/api/agent/model') {
+		try { Send-Json $ctx (Set-AgentModel ([string](Read-Json $req).model)) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
+	# A background job the user gave up on (a new project, opening lanes): stopped, with whatever it started.
+	if ($path -match '^/api/jobs/(\w+)/cancel$') {
+		try { Send-Json $ctx (Stop-ScriptJob $Matches[1]) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
 	}
 	# Onboarding (onboarding.ps1): the user's answers into docs/game/ONBOARDING.md, then their agent on SETUP.md.
 	if ($path -eq '/api/onboarding/answers') {
@@ -168,9 +211,15 @@ function Invoke-Request($ctx) {
 	# Claude Code's background hooks for a conductor Rocco opened (server\hook-post.ps1).
 	if ($path -eq '/api/conductor/hook') {
 		try { Add-HookEvent ([string]$req.QueryString['e']) (Read-Json $req) } catch { }
-		Send-Json $ctx @{ ok = $true }; return
+		# No body: to Claude Code that's a hook with nothing to say. A JSON answer would be read as the hook's decision.
+		Send $ctx 200 'text/plain; charset=utf-8' (New-Object byte[] 0); return
 	}
 	if ($path -eq '/api/conductor/show-window') { Send-Json $ctx @{ shown = (Show-ConductorWindow) }; return }
+	# The conductor has stopped answering: end its session and open a new one on what's on the board (conductor.ps1).
+	if ($path -eq '/api/conductor/restart') {
+		try { Send-Json $ctx @{ agent = (Restart-Conductor) } } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
 	# The user's agent as this project's conductor, when none is running (conductor.ps1).
 	if ($path -eq '/api/conductor') {
 		if ((Get-Conductor).state -ne 'none') { Send-Json $ctx @{ agent = ''; running = $true }; return }
@@ -193,11 +242,12 @@ function Invoke-Request($ctx) {
 		return
 	}
 	# Thumbnails (thumbnails.ps1): concepts from a direction, the user's pick, new directions from the agent.
-	if ($path -match '^/api/thumbnails/(generate|use|directions)$') {
+	if ($path -match '^/api/thumbnails/(generate|use|directions|cancel)$') {
 		$body = Read-Json $req
 		try {
 			Send-Json $ctx $(switch ($Matches[1]) {
 				'generate' { Start-ThumbConcepts ([string]$body.direction) ([int]$body.count) }
+				'cancel' { Stop-ThumbConcepts }
 				'use' { Use-ThumbConcept ([string]$body.file) }
 				'directions' { Request-ThumbDirections }
 			})
@@ -240,11 +290,22 @@ function Invoke-Request($ctx) {
 		if ($title.Length -gt 120) { $title = $title.Substring(0, 117) + '...' }
 		$question = $type -eq 'question'
 		$t = New-Task $title $text 'queued' $(if ($question) { 'question' } else { 'note' }) $type
-		Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
-		Save-Task $t
-		Add-Sent $(if ($question) { 'question' } else { 'note' }) $t $text
+		# hold: screenshots follow. It's handed to the conductor once they're in (/release below).
+		if ($body.hold) {
+			Set-Field $t 'uploading' (Now)
+			Set-Field $t 'waiting' 'Adding its screenshots'
+			Save-Task $t
+			Send-Json $ctx @{ id = $t.id; opened = '' }; return
+		}
+		Send-Note $t
 		# opened: the agent Rocco opened as the conductor, because none was running.
 		Send-Json $ctx @{ id = $t.id; opened = (Request-Conductor) }; return
+	}
+	# A held note's screenshots are in (or as many as would upload): over to the conductor.
+	if ($path -match '^/api/tasks/(T-\d+)/release$') {
+		$t = Read-Task $Matches[1]
+		if ($t.uploading) { Send-Note $t; Send-Json $ctx @{ ok = $true; opened = (Request-Conductor) } } else { Send-Json $ctx @{ ok = $true; opened = '' } }
+		return
 	}
 	# The user's own edit to a doc: committed on main and pushed. { conflict } if it changed since the user opened it.
 	if ($path -eq '/api/docs/save') {
@@ -265,26 +326,41 @@ function Invoke-Request($ctx) {
 		$id = $Matches[1]
 		$ext = $ImageExt[($req.ContentType -split ';')[0].Trim().ToLower()]
 		if (-not $ext) { Send-Text $ctx 415 'Screenshots must be PNG, JPEG, GIF or WebP.'; return }
+		$tooBig = "That picture is over $([int]($ShotMax / 1MB)) MB. Crop it, or save it as a JPEG."
+		if ($req.ContentLength64 -gt $ShotMax) { Send-Text $ctx 413 $tooBig; return }
 		$t = Read-Task $id
 		$name = 'shot-{0}{1}' -f (@(@($t.shots) | Where-Object { $_ }).Count + 1), $ext
-		$out = [IO.File]::Create((Join-Path (Get-TaskDir $id) $name))
-		try { $req.InputStream.CopyTo($out) } finally { $out.Close() }
+		$file = Join-Path (Get-TaskDir $id) $name
+		$out = [IO.File]::Create($file)
+		$total = [long]0
+		try {
+			# Counted as it arrives: a size isn't always given up front.
+			$buffer = New-Object byte[] 81920
+			while (($n = $req.InputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+				$total += $n
+				if ($total -gt $ShotMax) { break }
+				$out.Write($buffer, 0, $n)
+			}
+		} finally { $out.Close() }
+		if ($total -gt $ShotMax) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Send-Text $ctx 413 $tooBig; return }
+		if (-not $total) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Send-Text $ctx 400 'That picture was empty.'; return }
 		Set-Field $t 'shots' (@(@($t.shots) | Where-Object { $_ }) + $name)
 		Save-Task $t
 		Send-Json $ctx @{ name = $name }; return
 	}
-	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise)$') {
+	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise|pause|resume|restart|assign)$') {
 		$id, $action = $Matches[1], $Matches[2]
 		$text = [string](Read-Json $req).text
-		Invoke-TaskAction $id $action $text
-		$t = Read-Task $id
+		try { Invoke-TaskAction $id $action $text } catch { Send-Text $ctx 400 $_.Exception.Message; return }
+		$t = Get-Task $id
 		# On the user's own question, approve is "Got it" and reopen is "Ask more".
 		$said = if ($t.kind -eq 'question' -and $action -eq 'approve') { 'got-it' } elseif ($t.kind -eq 'question' -and $action -eq 'reopen') { 'ask-more' } else { $action }
 		Add-Sent $said $t $text
 		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved). A deleted task's work
 		# waits for the next conductor instead: with none running, nothing is running it either.
+		# Nor does a pause open one: with no conductor there's no worker to stop (it took effect at once).
 		$pending = $t.pending
-		Send-Json $ctx @{ ok = $true; opened = $(if ($pending -and $pending -ne 'cancel') { Request-Conductor } else { '' }) }; return
+		Send-Json $ctx @{ ok = $true; opened = $(if ($pending -and $pending -notin 'cancel', 'stop') { Request-Conductor } else { '' }) }; return
 	}
 	Send-Text $ctx 404 'Not found'
 }
@@ -318,7 +394,20 @@ function Start-Rocco {
 		}
 	}
 	try { $Host.UI.RawUI.WindowTitle = "Rocco - $url" } catch { }
-	try { Start-Transcript -Path (Join-Path (Split-Path $SettingsFile) 'rocco.log') -Force | Out-Null } catch { }
+	# The log of this run, with the last three runs kept beside it (rocco.1.log is the one before): what went wrong
+	# is usually in the run that just ended.
+	$log = Join-Path $RoccoHome 'rocco.log'
+	try {
+		New-Item -ItemType Directory -Force $RoccoHome | Out-Null
+		foreach ($n in 3, 2, 1) {
+			$from = if ($n -eq 1) { $log } else { Join-Path $RoccoHome "rocco.$($n - 1).log" }
+			if (Test-Path -LiteralPath $from) { Move-Item -LiteralPath $from -Destination (Join-Path $RoccoHome "rocco.$n.log") -Force }
+		}
+		Start-Transcript -Path $log -Force | Out-Null
+	} catch { }
+	# Nothing the server runs may wait on a console nobody can see: git asks for a password there when it has no
+	# sign-in window to use.
+	$env:GIT_TERMINAL_PROMPT = '0'
 	Write-Host "Rocco $RoccoVersion at $url"
 	Write-Host "Projects in $RoDev"
 	Write-Host 'Quit it from Settings in the app (or Ctrl+C, when it runs in a window).'
@@ -330,10 +419,11 @@ function Start-Rocco {
 			while (-not $next.AsyncWaitHandle.WaitOne(250)) { }
 			$ctx = $next.GetAwaiter().GetResult()
 			try { Invoke-Request $ctx } catch {
-				Write-Host "$($ctx.Request.HttpMethod) $($ctx.Request.Url.PathAndQuery): $($_.Exception.Message)"
+				Write-Host "$((Get-Date).ToString('HH:mm:ss')) $($ctx.Request.HttpMethod) $($ctx.Request.Url.PathAndQuery): $($_.Exception.Message)"
 				try { Send-Text $ctx 500 $_.Exception.Message } catch { }
-			}
+			} finally { Unlock-Tasks } # a task read for a change that never came is let go (tasks.ps1)
 			Use-Project $HomeProject
+			Stop-OldJobs
 			if ($script:Quitting) { Write-Host 'Quit.'; break }
 			# Updated: the new version starts in the background and waits for this one to let go of the port.
 			if ($script:Restarting) {

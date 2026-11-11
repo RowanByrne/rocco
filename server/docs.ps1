@@ -18,8 +18,24 @@ function Resolve-Doc([string]$path) {
 	$root = [IO.Path]::GetFullPath($RepoDir).TrimEnd('\') + '\'
 	$file = [IO.Path]::GetFullPath((Join-Path $RepoDir $path))
 	if (-not $file.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "There's no doc $path." }
-	[pscustomobject]@{ path = $path; file = $file }
+	# Its path as the file system has it, not as it was typed: docs//workflow/X.md and docs/workflow/X.md are one
+	# file, and what's checked against the template's own files (Test-TemplateOwned) has to be that one name.
+	[pscustomobject]@{ path = $file.Substring($root.Length).Replace('\', '/'); file = $file }
 }
+
+# A doc's text and how it's stored, so a save writes it back the same way. Rocco edits UTF-8 (with or without its
+# mark) and UTF-16 with its mark. Anything else (an old ANSI file) is shown as best it can be but not edited: saving
+# it as UTF-8 would change every accented letter in it.
+function Read-DocText([string]$file) {
+	$bytes = [IO.File]::ReadAllBytes($file)
+	$has = { param([byte[]]$mark) $bytes.Length -ge $mark.Length -and -not @(0..($mark.Length - 1) | Where-Object { $bytes[$_] -ne $mark[$_] }).Count }
+	if (& $has ([byte[]](0xEF, 0xBB, 0xBF))) { return [pscustomobject]@{ text = $Utf8.GetString($bytes, 3, $bytes.Length - 3); encoding = (New-Object Text.UTF8Encoding $true); editable = $true } }
+	if (& $has ([byte[]](0xFF, 0xFE))) { return [pscustomobject]@{ text = [Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2); encoding = [Text.Encoding]::Unicode; editable = $true } }
+	if (& $has ([byte[]](0xFE, 0xFF))) { return [pscustomobject]@{ text = [Text.Encoding]::BigEndianUnicode.GetString($bytes, 2, $bytes.Length - 2); encoding = [Text.Encoding]::BigEndianUnicode; editable = $true } }
+	try { return [pscustomobject]@{ text = (New-Object Text.UTF8Encoding $false, $true).GetString($bytes); encoding = $Utf8; editable = $true } } catch { }
+	[pscustomobject]@{ text = [Text.Encoding]::GetEncoding(1252).GetString($bytes); encoding = $null; editable = $false }
+}
+$NotUtf8 = 'This doc isn''t saved as UTF-8, so Rocco shows it but won''t edit it: saving would change its accented letters. Ask your agent to convert it to UTF-8.'
 
 # What the hover shows: the title, the first paragraph without its Markdown, and the section headings.
 function Get-DocSummary([string]$text) {
@@ -76,7 +92,7 @@ function Get-Docs([bool]$template) {
 		$info = Get-Item -LiteralPath $file
 		$cached = $script:SummaryCache[$info.FullName]
 		if (-not $cached -or $cached.Stamp -ne $info.LastWriteTimeUtc.Ticks) {
-			$text = [IO.File]::ReadAllText($info.FullName, $Utf8)
+			$text = (Read-DocText $info.FullName).text
 			$cached = @{ Stamp = $info.LastWriteTimeUtc.Ticks; Summary = (Get-DocSummary $text); Hash = (Get-TextHash $text) }
 			$script:SummaryCache[$info.FullName] = $cached
 		}
@@ -97,12 +113,14 @@ function Get-Docs([bool]$template) {
 
 function Read-Doc([string]$path, [bool]$template) {
 	$doc = Resolve-Doc $path
-	$text = [IO.File]::ReadAllText($doc.file, $Utf8)
+	$read = Read-DocText $doc.file
+	$text = $read.text
 	# '--' is quoted throughout: a bare one ends a PowerShell function's arguments instead of reaching git.
 	$line = "$(Invoke-Git $RepoDir log -1 '--format=%cI%x09%an%x09%s' '--' $doc.path)"
 	$at, $by, $subject = if ($line) { $line -split "`t", 3 } else { '', '', '' }
 	[pscustomobject]@{
-		path = $doc.path; text = $text; hash = (Get-TextHash $text); locked = (Test-TemplateOwned $doc.path $template)
+		path = $doc.path; text = $text; hash = (Get-TextHash $text); locked = ((Test-TemplateOwned $doc.path $template) -or -not $read.editable)
+		lockedWhy = $(if (-not $read.editable) { $NotUtf8 } else { '' })
 		dirty = [bool](Invoke-Git $RepoDir status --porcelain '--' $doc.path)
 		last = [pscustomobject]@{ at = $at; by = $by; subject = $subject }
 	}
@@ -118,25 +136,21 @@ function Save-Doc([string]$path, [string]$text, [string]$base, [string]$message,
 	if ($branch -ne 'main') { throw "repo\ is on '$branch', not main. Ask your agent to put it back on main first." }
 	if (Test-Path "$(Invoke-Git $RepoDir rev-parse --path-format=absolute --git-path MERGE_HEAD)") { throw 'repo\ is in the middle of a merge. Ask your agent to finish it first.' }
 
-	$bytes = [IO.File]::ReadAllBytes($doc.file)
-	$bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
-	$old = [IO.File]::ReadAllText($doc.file, $Utf8)
+	$before = [IO.File]::ReadAllBytes($doc.file)
+	$read = Read-DocText $doc.file
+	if (-not $read.editable) { throw $NotUtf8 }
+	$old = $read.text
 	if ((Get-TextHash $old) -ne $base) { return [pscustomobject]@{ conflict = $true; hash = (Get-TextHash $old) } }
 	$new = $text -replace "`r`n", "`n"
 	if ($old.Contains("`r`n")) { $new = $new -replace "`n", "`r`n" }
 	if ($new -eq $old) { return [pscustomobject]@{ nothing = $true } }
-	[IO.File]::WriteAllText($doc.file, $new, (New-Object Text.UTF8Encoding $bom))
+	[IO.File]::WriteAllText($doc.file, $new, $read.encoding)
 	$script:DocsCache = @{}
 
-	# The message goes through a file: Windows PowerShell mangles quotes in native arguments.
+	# The message goes through a file: Windows PowerShell mangles quotes in native arguments. A commit git refuses
+	# puts the doc back as it was (actions.ps1): the user's words are still in the app's editor, to save again.
 	if (-not $message.Trim()) { $message = "$(Split-Path $doc.path -Leaf): edited in Rocco" }
-	$messageFile = [IO.Path]::GetTempFileName()
-	try {
-		[IO.File]::WriteAllText($messageFile, $message.Trim(), $Utf8)
-		$add = Invoke-GitText $RepoDir add '--' $doc.path
-		$commit = if ($add.ok) { Invoke-GitText $RepoDir commit -F $messageFile --only '--' $doc.path } else { $add }
-	} finally { Remove-Item -LiteralPath $messageFile -ErrorAction SilentlyContinue }
-	if (-not $commit.ok) { throw "Saved the file, but git couldn't commit it: $($commit.text)" }
+	Invoke-FileCommit $doc.path $message { [IO.File]::WriteAllBytes($doc.file, $before) }
 	$script:HistoryCache = @{}; $script:MainCache = @{}; $script:ProjectCache = $null
 
 	$result = [pscustomobject]@{ saved = $true; commit = "$(Invoke-Git $RepoDir rev-parse --short HEAD)"; pushed = $false; note = '' }

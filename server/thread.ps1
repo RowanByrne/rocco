@@ -30,7 +30,8 @@ function Get-AskFilesDir([string]$id) { Join-Path (Get-ThreadDir) "files\$id" }
 function Add-Line([string]$file, $entry) {
 	New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
 	$bytes = $Utf8.GetBytes((ConvertTo-Json -InputObject $entry -Depth 8 -Compress) + "`n")
-	for ($i = 0; $i -lt 40; $i++) {
+	# Long enough to sit out the weekly trim, which holds the file to itself while it rewrites it (Limit-Thread).
+	for ($i = 0; $i -lt 200; $i++) {
 		try {
 			$fs = New-Object IO.FileStream($file, [IO.FileMode]::Append, [Security.AccessControl.FileSystemRights]::AppendData, [IO.FileShare]::ReadWrite, 4096, [IO.FileOptions]::None)
 			try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Close() }
@@ -64,8 +65,15 @@ function Read-Lines([string]$file) {
 	$hit = $script:LineCache[$file]
 	if ($hit -and $hit.Length -eq $length) { return $hit.Items }
 	if (-not $hit -or $length -lt $hit.Length) { $hit = @{ Length = 0; Items = New-Object Collections.ArrayList } }
-	$fs = New-Object IO.FileStream($file, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+	# Held for a moment by the weekly trim (Edit-Lines): wait it out, and failing that, show what was read last time.
+	$fs = $null
+	for ($i = 0; $i -lt 80 -and -not $fs; $i++) {
+		try { $fs = New-Object IO.FileStream($file, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite) } catch [IO.IOException] { Start-Sleep -Milliseconds 25 }
+	}
+	if (-not $fs) { return $hit.Items }
 	try {
+		$length = $fs.Length
+		if ($length -lt $hit.Length) { $hit = @{ Length = 0; Items = New-Object Collections.ArrayList } }
 		[void]$fs.Seek($hit.Length, [IO.SeekOrigin]::Begin)
 		$bytes = New-Object byte[] ($length - $hit.Length)
 		$read = 0
@@ -164,26 +172,54 @@ function Get-PermissionText([string]$tool, $in) {
 # ---- Trimming: kept to the last few days, once per Rocco run per game ----
 
 $script:Trimmed = @{}
+
+# Rewrites a file of appended lines with only the lines $keep says yes to. The file is held with no sharing from the
+# read to the write, so a line another process appends meanwhile waits (Add-Line tries again) and isn't lost between
+# the two. $keep is quick (no JSON parsing): it runs while everything else that writes here waits.
+function Edit-Lines([string]$file, [scriptblock]$filter) {
+	$fs = $null
+	for ($i = 0; $i -lt 80 -and -not $fs; $i++) {
+		try { $fs = New-Object IO.FileStream($file, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) } catch [IO.IOException] { Start-Sleep -Milliseconds 25 }
+	}
+	if (-not $fs) { return } # busy: the next Rocco run trims it
+	try {
+		$bytes = New-Object byte[] $fs.Length
+		$read = 0
+		while ($read -lt $bytes.Length) { $n = $fs.Read($bytes, $read, $bytes.Length - $read); if ($n -le 0) { break }; $read += $n }
+		$lines = @($Utf8.GetString($bytes, 0, $read) -split "`n" | Where-Object { $_.Trim() })
+		$kept = @(& $filter $lines)
+		$out = $Utf8.GetBytes($(if ($kept.Count) { ($kept -join "`n") + "`n" } else { '' }))
+		$fs.SetLength(0)
+		$fs.Write($out, 0, $out.Length)
+	} finally { $fs.Close() }
+	$script:LineCache.Remove($file)
+}
+
 function Limit-Thread {
 	if ($script:Trimmed[$Root]) { return }
 	$script:Trimmed[$Root] = $true
 	$keepFrom = (Get-Date).AddDays(-7)
 	$activity = Get-ActivityFile
 	if ((Test-Path $activity) -and (Get-Item $activity).Length -gt 1MB) {
-		$lines = @([IO.File]::ReadAllLines($activity, $Utf8))
-		[IO.File]::WriteAllLines($activity, [string[]]@($lines | Select-Object -Last 3000), $Utf8)
+		Edit-Lines $activity { param($lines) $lines | Select-Object -Last 3000 }
 	}
 	$thread = Get-ThreadFile
 	if ((Test-Path $thread) -and (Get-Item $thread).Length -gt 1MB) {
 		# Old lines go, except whatever is still open or pending and the lines that settle it.
 		$s = Get-ThreadState
-		$keep = @{}
-		foreach ($e in @($s.open) + @($s.pending)) { $keep[$e.id] = $true; if ($e.to) { $keep[$e.to] = $true } }
-		$lines = @([IO.File]::ReadAllLines($thread, $Utf8) | Where-Object {
-			try { $e = $_ | ConvertFrom-Json; $keep.ContainsKey($e.id) -or ($e.to -and $keep.ContainsKey($e.to)) -or [datetime]$e.at -gt $keepFrom } catch { $false }
-		})
-		[IO.File]::WriteAllLines($thread, [string[]]$lines, $Utf8)
-		$script:LineCache.Remove($thread)
+		$needed = @{}
+		foreach ($e in @($s.open) + @($s.pending)) { $needed[$e.id] = $true; if ($e.to) { $needed[$e.to] = $true } }
+		$stamp = $keepFrom.ToUniversalTime()
+		Edit-Lines $thread {
+			param($lines)
+			foreach ($line in $lines) {
+				$id = if ($line -match '"id":"(C-[0-9a-f]+)"') { $Matches[1] } else { '' }
+				$to = if ($line -match '"to":"(C-[0-9a-f]+)"') { $Matches[1] } else { '' }
+				$fresh = $false
+				if ($line -match '"at":"([^"]+)"') { try { $fresh = ([datetime]$Matches[1]).ToUniversalTime() -gt $stamp } catch { } }
+				if ($fresh -or ($id -and $needed.ContainsKey($id)) -or ($to -and $needed.ContainsKey($to))) { $line }
+			}
+		}
 	}
 	# Pictures for questions past the history's week, unless the question is still open.
 	$files = Join-Path (Get-ThreadDir) 'files'
@@ -227,6 +263,7 @@ function Get-ConductorThread {
 		step = $step
 		last = $(if ($last) { [pscustomobject]@{ id = $last.id; at = $last.at; text = $last.text; replied = [bool]$replied } } else { $null })
 		heard = $(if ($heard.Count) { $heard[-1] } else { $null })
+		pending = @($s.pending).Count
 		stamp = (Get-HistoryStamp)
 	}
 }

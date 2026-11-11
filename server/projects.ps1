@@ -91,17 +91,42 @@ function Get-Main {
 	$hit.Value
 }
 
+# The other projects that want the user: a card stuck on a question, one ready to test, or their conductor asking
+# something. The app shows them beside the project's name, and says so once, so work in one game isn't left waiting
+# while the user is in another. Looked at every few seconds at most.
+$script:OthersCache = $null
+function Get-OtherProjects([string]$current) {
+	if ($script:OthersCache -and $script:OthersCache.For -eq $current -and ((Get-Date) - $script:OthersCache.Read).TotalSeconds -lt 8) { return $script:OthersCache.Value }
+	$here = $Root
+	$rows = @()
+	try {
+		foreach ($p in @(Get-Projects | Where-Object { $_.id -ne $current -and -not $_.template })) {
+			Use-Project $p.path
+			$tasks = @(Get-Tasks)
+			$stuck = @($tasks | Where-Object { $_.status -eq 'stuck' }).Count
+			$ready = @($tasks | Where-Object { $_.status -eq 'ready' }).Count
+			$asks = 0
+			try { $asks = @((Get-ThreadState).open).Count } catch { }
+			if ($stuck -or $ready -or $asks) { $rows += [pscustomobject]@{ id = $p.id; name = $p.name; stuck = $stuck; ready = $ready; asks = $asks } }
+		}
+	} finally { Use-Project $here }
+	$script:OthersCache = @{ For = $current; Read = Get-Date; Value = $rows }
+	$rows
+}
+
 # Everything the Workboard shows for one project.
 function Get-State([string]$projectId) {
 	$p = Find-Project $projectId
-	$cutoff = (Get-Date).AddDays(-3)
+	$cutoff = (Get-Date).AddDays(-$BoardKeepsDays)
 	[pscustomobject]@{
 		rocco = $RoccoVersion # the app reloads when this changes: Rocco updated itself
 		project = [pscustomobject]@{ id = $p.id; name = $p.name; phase = $p.phase; template = $p.template }
 		lanes = Get-Lanes
 		conductor = Get-Conductor
 		main = Get-Main
+		# Approved more than a few days ago: in the archive (tasks.ps1 Get-Archive), not on the board.
 		tasks = @(Get-Tasks | Where-Object { $_.status -ne 'removed' -and ($_.status -ne 'done' -or -not $_.doneAt -or [datetime]$_.doneAt -gt $cutoff) })
+		others = @(Get-OtherProjects $p.id)
 	}
 }
 
@@ -143,20 +168,63 @@ function Start-NewProject([string]$name, [string]$code, [string]$repo, [string]$
 	}
 	$newProject = Join-Path $RoDev 'template\repo\tools\new-project.ps1'
 	if (-not (Test-Path $newProject)) { throw "There's no template in $RoDev to copy." }
+	# A path ending in \ would swallow the quote PowerShell closes it with.
+	$from = $from.TrimEnd('\')
 	$arguments = @('-Name', $name, '-Code', $code)
 	if ($repo) { $arguments += '-GitHubRepo', $repo }
-	if ($kind -eq 'studio') { $arguments += '-StudioOnly' } elseif ($kind) { $arguments += '-Existing', "`"$from`"" }
+	if ($kind -eq 'studio') { $arguments += '-StudioOnly' } elseif ($kind) { $arguments += '-Existing', $from }
 	Start-ScriptJob 'new' $newProject $arguments $name
 }
 
-# A script run hidden in the background, its output kept for Get-JobStatus. Returns the job's id.
-function Start-ScriptJob([string]$kind, [string]$script, [string[]]$arguments, [string]$name) {
+# ---- Background jobs: a script run hidden, its output kept for the app to show ----
+# The job is a small fixed script that runs the real one and writes down how it ended. What to run reaches it as data
+# (ROCCO_JOB), never as script text, so a folder's name or a path can't be read as PowerShell. Each job is on record in
+# jobs.json with its process, so a Rocco that restarted (an update) still knows a job that's running, and how one ended.
+# A job is stopped if it runs far past what its kind should take, or when the user cancels it.
+
+$JobMinutes = @{ new = 30; lanes = 20 }
+$JobRunner = @'
+$job = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_JOB)) | ConvertFrom-Json
+Remove-Item Env:ROCCO_JOB -ErrorAction SilentlyContinue
+$arguments = @($job.arguments)
+& powershell.exe -NoProfile -ExecutionPolicy $job.policy -File $job.script @arguments
+$code = $LASTEXITCODE
+[IO.File]::WriteAllText($job.exit, "$code")
+exit $code
+'@
+function Get-JobsFile { Join-Path $RoccoHome 'jobs.json' }
+function Read-JobRecords {
+	$file = Get-JobsFile
+	$records = @{}
+	if (Test-Path -LiteralPath $file) {
+		try { foreach ($p in ([IO.File]::ReadAllText($file, $Utf8) | ConvertFrom-Json).PSObject.Properties) { $records[$p.Name] = $p.Value } } catch { }
+	}
+	$records
+}
+function Save-JobRecords($records) {
+	# Two days is long enough to ask how a job went.
+	$keep = @{}
+	foreach ($k in $records.Keys) { if ([datetime]$records[$k].at -gt (Get-Date).AddDays(-2)) { $keep[$k] = $records[$k] } }
+	New-Item -ItemType Directory -Force $RoccoHome | Out-Null
+	[IO.File]::WriteAllText((Get-JobsFile), (ConvertTo-Json -InputObject $keep -Depth 4), $Utf8)
+}
+
+# $own: one of Rocco's own scripts. A project's script (the template's tools) runs as RemoteSigned: one that came
+# from a download Windows marked as from the internet is refused, where Bypass would run anything.
+function Start-ScriptJob([string]$kind, [string]$script, [string[]]$arguments, [string]$name, [bool]$own = $false) {
 	$jobId = [guid]::NewGuid().ToString('N').Substring(0, 8)
 	$log = Join-Path ([IO.Path]::GetTempPath()) "rocco-$kind-$jobId.log"
-	$all = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`"") + $arguments
-	$process = Start-Process powershell -ArgumentList $all -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Hidden -PassThru
+	$data = ConvertTo-Json -Compress -InputObject ([ordered]@{ script = $script; arguments = @($arguments); policy = $(if ($own) { 'Bypass' } else { 'RemoteSigned' }); exit = "$log.exit" })
+	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($JobRunner))
+	$env:ROCCO_JOB = [Convert]::ToBase64String($Utf8.GetBytes($data))
+	try {
+		$process = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Hidden -PassThru
+	} finally { Remove-Item Env:ROCCO_JOB -ErrorAction SilentlyContinue }
 	$null = $process.Handle # without holding the handle, ExitCode reads as empty once it exits
-	$script:Jobs[$jobId] = @{ Process = $process; Log = $log; Name = $name; Kind = $kind }
+	$script:Jobs[$jobId] = @{ Process = $process; Log = $log; Name = $name; Kind = $kind; Started = Get-Date }
+	$records = Read-JobRecords
+	$records[$jobId] = [pscustomobject]@{ pid = $process.Id; started = (Get-ProcessStart $process.Id); log = $log; name = $name; kind = $kind; at = (Now) }
+	try { Save-JobRecords $records } catch { }
 	$jobId
 }
 
@@ -167,14 +235,52 @@ function Read-Log([string]$path) {
 	try { (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Close() }
 }
 
-function Get-JobStatus([string]$jobId) {
+# A job as Rocco knows it now: one it started this run, or one on record from before a restart.
+function Find-Job([string]$jobId) {
 	$job = $script:Jobs[$jobId]
-	if (-not $job) { throw "No job $jobId." }
-	$running = -not $job.Process.HasExited
-	$ok = -not $running -and $job.Process.ExitCode -eq 0
-	if (-not $running) { $script:ProjectCache = $null }
+	if ($job) { return [pscustomobject]@{ id = $jobId; log = $job.Log; name = $job.Name; kind = $job.Kind; pid = $job.Process.Id; running = -not $job.Process.HasExited; started = $job.Started; note = "$($job.Note)" } }
+	$r = (Read-JobRecords)[$jobId]
+	if (-not $r) { throw "No job $jobId." }
+	[pscustomobject]@{ id = $jobId; log = "$($r.log)"; name = "$($r.name)"; kind = "$($r.kind)"; pid = [int]$r.pid; running = (Test-ProcessAlive ([int]$r.pid) "$($r.started)"); started = [datetime]$r.at; note = '' }
+}
+
+function Get-JobStatus([string]$jobId) {
+	$job = Find-Job $jobId
+	# How it ended is what the job itself wrote down; without that (it was stopped), it didn't end well.
+	$code = if (-not $job.running -and (Test-Path -LiteralPath "$($job.log).exit")) { "$(Read-Log "$($job.log).exit")".Trim() } else { '' }
+	$ok = -not $job.running -and $code -eq '0'
+	if (-not $job.running) { $script:ProjectCache = $null }
 	# Its errors (and git's harmless warnings) only matter when it failed.
-	$output = Read-Log $job.Log
-	if (-not $running -and -not $ok) { $output += "`n" + (Read-Log "$($job.Log).err") }
-	[pscustomobject]@{ running = $running; ok = $ok; output = $output.Trim(); project = $job.Name }
+	$output = Read-Log $job.log
+	if (-not $job.running -and -not $ok) { $output += "`n" + (Read-Log "$($job.log).err") }
+	if ($job.note) { $output += "`n$($job.note)" }
+	[pscustomobject]@{ running = $job.running; ok = $ok; output = $output.Trim(); project = $job.name; kind = $job.kind }
+}
+
+# Stops a job and everything it started. $why is shown with its output.
+function Stop-ScriptJob([string]$jobId, [string]$why = 'Stopped: you cancelled it.') {
+	$job = Find-Job $jobId
+	if ($job.running) {
+		try { & taskkill.exe /T /F /PID $job.pid 2>$null | Out-Null } catch { }
+		if ($script:Jobs[$jobId]) { $script:Jobs[$jobId].Note = $why }
+	}
+	[pscustomobject]@{ stopped = [bool]$job.running }
+}
+
+# Once a minute: a script job far past its time is stopped, and so is a background check (PowerShell's own jobs: the
+# tools check, GitHub lookups, Roblox's numbers) that never came back, so neither sits there forever.
+$script:JobsSwept = Get-Date
+function Stop-OldJobs {
+	if (((Get-Date) - $script:JobsSwept).TotalSeconds -lt 60) { return }
+	$script:JobsSwept = Get-Date
+	foreach ($id in @($script:Jobs.Keys)) {
+		$job = $script:Jobs[$id]
+		$most = [int]$JobMinutes[$job.Kind]
+		if ($most -and -not $job.Process.HasExited -and ((Get-Date) - $job.Started).TotalMinutes -gt $most) { Stop-ScriptJob $id "Stopped: it ran for over $most minutes, which is far longer than it should take." | Out-Null }
+	}
+	foreach ($job in @(Get-Job -State Running -ErrorAction SilentlyContinue)) {
+		# Making thumbnail concepts is slow by nature (thumbnails.ps1 stops a single image that hangs).
+		$most = if ($job.Name -eq 'rocco-concepts') { 60 } else { 10 }
+		if ($job.PSBeginTime -and ((Get-Date) - $job.PSBeginTime).TotalMinutes -gt $most) { Stop-Job $job -ErrorAction SilentlyContinue }
+	}
 }

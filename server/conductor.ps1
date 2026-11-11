@@ -18,7 +18,13 @@ function Save-Conductor($c) {
 }
 
 $AgentProcesses = 'claude', 'codex', 'gemini', 'node'
-function Get-ProcessStart([int]$id) { try { (Get-Process -Id $id -ErrorAction Stop).StartTime.ToString('o') } catch { '' } }
+# '' when it isn't running. Asked quietly: a cmdlet's stopping error is written to the log even when it's caught, and
+# this is asked about a process that has gone on every look at the board.
+function Get-ProcessStart([int]$id) {
+	if (-not $id) { return '' }
+	$p = Get-Process -Id $id -ErrorAction SilentlyContinue
+	if ($p) { try { $p.StartTime.ToString('o') } catch { '' } } else { '' }
+}
 function Test-ProcessAlive([int]$id, [string]$started) { $id -and (Get-ProcessStart $id) -and (-not $started -or (Get-ProcessStart $id) -eq $started) }
 
 # The agent a command runs under: the first agent program above this process (agent, shell, PowerShell, this).
@@ -48,6 +54,8 @@ function Find-AgentBelow([int]$window) {
 # 'listening' (waiting on the board now), 'busy' (running, doing something), or 'none'. With what Rocco's status line
 # shows (thread.ps1): what it's doing, its open questions and permission requests, and its latest message.
 $script:ConductorCache = @{}
+$script:HookHeard = @{}   # project -> when a hook of its conductor, or of one of its workers, last reached Rocco
+$StalledMinutes = 5
 function Get-Conductor {
 	$hit = $script:ConductorCache[$Root]
 	if ($hit -and ((Get-Date) - $hit.Read).TotalSeconds -lt 3) { return $hit.Value }
@@ -72,6 +80,23 @@ function Get-Conductor {
 			$since = ((Get-Date) - [datetime]$c.opened).TotalSeconds
 			$value | Add-Member -NotePropertyName inWindow -NotePropertyValue ($since -gt 20 -and (-not $thread.heard -or $thread.heard -lt [datetime]$c.opened))
 		}
+		# Running, not watching the board, not a word from it or its workers for a while, and something waits on it: it
+		# stopped mid-way (its Stop hook lets a turn end after three tries, or it's asking in its own window). The app
+		# says so and offers its window, or a restart. The user decides: a long quiet job looks the same from here.
+		if ($value.state -eq 'busy') {
+			$heard = @(@($thread.heard, $script:HookHeard[$Root], [datetime]$c.at) | Where-Object { $_ } | Sort-Object)[-1]
+			$quiet = ((Get-Date) - $heard).TotalMinutes
+			$waiting = @(Get-PendingTasks).Count + [int]$thread.pending
+			$value | Add-Member -NotePropertyName stalled -NotePropertyValue ($quiet -ge $StalledMinutes -and $waiting -gt 0)
+			$value | Add-Member -NotePropertyName quiet -NotePropertyValue ([int]$quiet)
+			$value | Add-Member -NotePropertyName waiting -NotePropertyValue $waiting
+		}
+		# The model it was opened on, and what its session has used so far (sessions.ps1), when its agent keeps a
+		# session file Rocco can read.
+		if ($value.state -ne 'none') {
+			if ($c.PSObject.Properties['model'] -and $c.model) { $value | Add-Member -NotePropertyName model -NotePropertyValue "$($c.model)" }
+			if ($c.PSObject.Properties['transcript'] -and $c.transcript) { $value | Add-Member -NotePropertyName usage -NotePropertyValue (Get-SessionUsage ([string]$c.transcript)) }
+		}
 	}
 	$script:ConductorCache[$Root] = @{ Read = Get-Date; Value = $value }
 	$value
@@ -83,12 +108,34 @@ function Open-Conductor([string]$prompt) {
 	$agent = Get-Agent
 	if (-not $agent.installed) { throw "$($agent.name) isn't installed on this PC (Connections)." }
 	$extra = @()
-	if ($Agents[$agent.id].hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
+	$hooks = [bool]$Agents[$agent.id].hooks
+	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
+	# The model the user picked for the conductor in Settings, for an agent that takes one on its command line.
+	if ($agent.model -and $Agents[$agent.id].model) { $extra += $Agents[$agent.id].model, $agent.model }
 	$window = Start-AgentWindow $RepoDir $prompt "$($agent.name), conductor on $(Split-Path $Root -Leaf)" $extra
 	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now)
-		hooks = [bool]$extra.Count; opened = (Now) })
-	Add-Event "Rocco opened $($agent.name) as the conductor"
+		hooks = $hooks; opened = (Now); model = "$($agent.model)"; transcript = ''; session = '' })
+	Add-Event "Rocco opened $($agent.name) as the conductor$(if ($agent.model -and $Agents[$agent.id].model) { " ($($agent.model))" })"
 	$agent
+}
+
+# Ends the conductor's session: its window and everything started in it (the agent, its workers, their commands).
+# Returns whether anything was running.
+function Stop-Conductor {
+	$c = Read-Conductor
+	if (-not $c) { return $false }
+	$id = if ($c.window -and (Test-ProcessAlive $c.window $c.windowStarted)) { [int]$c.window } elseif ($c.pid -and (Test-ProcessAlive $c.pid $c.started)) { [int]$c.pid } else { 0 }
+	if ($id) { try { & taskkill.exe /T /F /PID $id 2>$null | Out-Null } catch { } }
+	Remove-Item -LiteralPath (Get-ConductorFile) -Force -ErrorAction SilentlyContinue
+	$script:ConductorCache = @{}
+	[bool]$id
+}
+
+# The user's way out when the conductor has stopped answering: its session is ended and a new one opened, which picks
+# the work up from the board and the lanes (Request-Conductor). Returns the agent opened, or ''.
+function Restart-Conductor {
+	if (Stop-Conductor) { Add-Event 'You restarted the conductor'; Start-Sleep -Milliseconds 700 }
+	Request-Conductor
 }
 
 # Told to a conductor that has Rocco's hooks. Also how Rocco knows its own prompt when the hook passes it on.
@@ -96,24 +143,43 @@ $InRocco = 'Rocco shows the user what you do, your messages, your questions (Ask
 
 # Claude Code's settings for a conductor Rocco opens (--settings), so only that session and its workers load them:
 #   PermissionRequest, and PreToolUse on AskUserQuestion: rocco.ps1 hook waits for the user's answer in Rocco
-#   PreToolUse (every tool), Stop, UserPromptSubmit: server\hook-post.ps1 passes the step, its last message, or what the
-#   user typed in its window to Rocco, in the background
+#   PreToolUse (every tool), Stop, UserPromptSubmit, SubagentStop: the step, its last message, what the user typed in
+#   its window, or a worker's session ending, sent straight to Rocco (an http hook: Claude Code posts the hook's JSON
+#   itself, so nothing is started for it. A hook that ran a program started PowerShell on every tool call of the
+#   conductor and of each worker). Rocco not running, or busy: the hook gives up in a moment and nothing is held up
 #   Stop: rocco.ps1 hook stop keeps it from ending a turn while something waits on it, or with no wait watching the board
 # Written at each launch, so its paths follow the RoDev folder wherever it is.
+
+# Whether this PC's Claude Code can post a hook itself. Checked on 2.1.317; the hooks reference describes http
+# hooks' fields as of 2.1.295, so anything older, or a version that can't be read, gets the script instead.
+function Test-HttpHooks {
+	try {
+		$said = Read-Quick (Start-Quick (Find-AgentExe 'claude') '--version') 6000
+		if ("$($said.out)" -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] -ge [version]'2.1.295' }
+	} catch { }
+	$false
+}
+
 function Write-ConductorHooks {
 	$id = Split-Path $Root -Leaf
 	$exe = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File'
 	$wait = { param($hook) "$exe `"$((Join-Path $AppDir 'rocco.ps1').Replace('\', '/'))`" hook $hook -Project `"$id`"" }
-	$post = { param($event) "$exe `"$((Join-Path $AppDir 'server\hook-post.ps1').Replace('\', '/'))`" -Event $event -Project `"$id`" -Port $Port" }
-	$command = { param($text, [bool]$async) $h = [ordered]@{ type = 'command'; command = $text }; if ($async) { $h.async = $true } else { $h.timeout = $HookWait + 120 }; $h }
+	$command = { param($text) [ordered]@{ type = 'command'; command = $text; timeout = $HookWait + 120 } }
+	$post = if (Test-HttpHooks) {
+		{ param($event) [ordered]@{ type = 'http'; url = "http://localhost:$Port/api/conductor/hook?p=$([uri]::EscapeDataString($id))&e=$event"; headers = [ordered]@{ 'X-Rocco' = '1' }; timeout = 3 } }
+	} else {
+		# A Claude Code from before http hooks: the same posts, made by a small script in the background.
+		{ param($event) [ordered]@{ type = 'command'; command = "$exe `"$((Join-Path $AppDir 'server\hook-post.ps1').Replace('\', '/'))`" -Event $event -Project `"$id`" -Port $Port"; async = $true } }
+	}
 	$settings = [ordered]@{ hooks = [ordered]@{
-		PermissionRequest = @([ordered]@{ hooks = @(& $command (& $wait 'permission') $false) })
+		PermissionRequest = @([ordered]@{ hooks = @(& $command (& $wait 'permission')) })
 		PreToolUse = @(
-			[ordered]@{ matcher = 'AskUserQuestion'; hooks = @(& $command (& $wait 'question') $false) },
-			[ordered]@{ matcher = '*'; hooks = @(& $command (& $post 'tool') $true) }
+			[ordered]@{ matcher = 'AskUserQuestion'; hooks = @(& $command (& $wait 'question')) },
+			[ordered]@{ matcher = '*'; hooks = @(& $post 'tool') }
 		)
-		Stop = @([ordered]@{ hooks = @((& $command (& $post 'stop') $true), (& $command (& $wait 'stop') $false)) })
-		UserPromptSubmit = @([ordered]@{ hooks = @(& $command (& $post 'prompt') $true) })
+		Stop = @([ordered]@{ hooks = @((& $post 'stop'), (& $command (& $wait 'stop'))) })
+		UserPromptSubmit = @([ordered]@{ hooks = @(& $post 'prompt') })
+		SubagentStop = @([ordered]@{ hooks = @(& $post 'worker-stop') })
 	} }
 	$file = Join-Path (Get-ThreadDir) 'claude-settings.json'
 	New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
@@ -121,17 +187,41 @@ function Write-ConductorHooks {
 	$file
 }
 
-# What a hook passed on (server\hook-post.ps1): a step, the conductor's message at the end of a turn, or something the
-# user typed in its window. Its workers' steps are left out: their cards show them.
+# What the agent's own program puts into a session as if it were typed: a notice that background work finished, a
+# worker handing back its report, a reminder. They open with a tag of their own (<task-notification>, <agent-message
+# from="...">, <system-reminder>): none of it is the user's words.
+$NotTyped = '^\s*<[a-z]+(-[a-z]+)+[\s>]'
+
+# What a hook passed on: a step, the conductor's message at the end of a turn, or something the user typed in its
+# window. Its workers' steps are left out (their cards show them), but a worker's hooks still say it's alive, and
+# which task its session is for (sessions.ps1).
 function Add-HookEvent([string]$event, $in) {
-	if ($in.agent_id) { return }
+	$script:HookHeard[$Root] = Get-Date
+	if ($in.agent_id) { Add-WorkerEvent $event $in; return }
+	# The conductor's own session file, from the first hook that names it: its usage is read from there.
+	if ($in.transcript_path) {
+		$c = Read-Conductor
+		if ($c -and "$($c.transcript)" -ne [string]$in.transcript_path) {
+			$c | Add-Member -Force -NotePropertyName transcript -NotePropertyValue ([string]$in.transcript_path)
+			$c | Add-Member -Force -NotePropertyName session -NotePropertyValue ([string]$in.session_id)
+			Save-Conductor $c
+		}
+	}
 	switch ($event) {
 		'tool' { Add-Activity (Get-ToolSummary ([string]$in.tool_name) $in.tool_input) }
-		'stop' { if ("$($in.last_assistant_message)".Trim()) { Add-Thread 'said' @{ text = [string]$in.last_assistant_message; via = 'hook' } | Out-Null } }
+		'stop' {
+			$text = "$($in.last_assistant_message)".Trim()
+			if (-not $text) { break }
+			# The same short line it ended its last turn on ("Watching." after every look at the board) says nothing
+			# new: within the hour it's kept once.
+			$last = Get-Thread | Where-Object { $_.kind -eq 'said' } | Select-Object -Last 1
+			$again = $last -and $text.Length -le 40 -and "$($last.text)".Trim() -eq $text -and ((Get-Date) - [datetime]$last.at).TotalMinutes -lt 60
+			if (-not $again) { Add-Thread 'said' @{ text = $text; via = 'hook' } | Out-Null }
+		}
 		'prompt' {
 			$text = "$($in.prompt)".Trim()
-			# Rocco's own prompts, and its agent's notices about background work, aren't the user's.
-			if ($text -and -not $text.Contains($InRocco) -and $text -notmatch '^<task-notification>') { Add-Thread 'message' @{ text = $text; via = 'terminal' } 'you' | Out-Null }
+			# Rocco's own prompts, and what the agent's program puts in by itself, aren't the user's.
+			if ($text -and -not $text.Contains($InRocco) -and $text -notmatch $NotTyped) { Add-Thread 'message' @{ text = $text; via = 'terminal' } 'you' | Out-Null }
 		}
 	}
 }
@@ -171,6 +261,8 @@ function Get-CutOff { @(Get-Tasks | Where-Object { $_.status -eq 'working' }) }
 # one on it. Work that was cut off is picked up from the board and the lanes: an agent's old session may not have been
 # saved, so a new one starts from what's on disk. Returns the agent's name when one was opened, else ''.
 function Request-Conductor {
+	# ROCCO_NO_CONDUCTOR: a test run, which must never open the user's agent.
+	if ($env:ROCCO_NO_CONDUCTOR) { return '' }
 	if ((Get-Conductor).state -ne 'none') { return '' }
 	$agent = Get-Agent
 	if (-not $agent.installed) { return '' }

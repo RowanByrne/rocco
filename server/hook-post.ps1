@@ -1,6 +1,7 @@
-# Claude Code's background hooks for a conductor Rocco opened (conductor.ps1, Write-ConductorHooks): passes what the
-# hook was given to Rocco, which shows it: a step, the conductor's message at the end of a turn, or what the user typed
-# in its window. Kept apart from rocco.ps1 so it starts quickly, and quiet: Rocco not running is fine.
+# Claude Code's background hooks for a conductor Rocco opened (conductor.ps1, Write-ConductorHooks), for a Claude Code
+# too old to post a hook itself: passes what the hook was given to Rocco, which shows it: a step, the conductor's
+# message at the end of a turn, or what the user typed in its window. A current Claude Code posts these straight to
+# Rocco and never runs this. Kept apart from rocco.ps1 so it starts quickly, and quiet: Rocco not running is fine.
 param([string]$Event, [string]$Project, [int]$Port = 34860)
 try {
 	# The hook's JSON as it came (UTF-8), passed on untouched: decoding it here could garble it.

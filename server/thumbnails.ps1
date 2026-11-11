@@ -90,19 +90,31 @@ $ConceptJob = {
 	$utf8 = New-Object Text.UTF8Encoding $false
 	New-Item -ItemType Directory -Force $outDir | Out-Null
 	$failed = @()
-	$quote = { param($s) "'" + ("$s" -replace "'", "''") + "'" }
+	# What runs is fixed text. The tool's path, the prompt and where the image goes reach it in its environment, as
+	# data: a prompt is the game's own words (a hook, a look), and a quote in it, straight or curly, must never be
+	# read as PowerShell. The project's tool runs as RemoteSigned, not Bypass.
+	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('& $env:ROCCO_IMAGEGEN -Prompt $env:ROCCO_PROMPT -Out $env:ROCCO_OUT'))
+	$pidFile = Join-Path $outDir '.making'
 	for ($i = 0; $i -lt $count; $i++) {
 		$out = Join-Path $outDir ('{0}-{1:D2}.png' -f $slug, ($start + $i))
-		$text = "& $(& $quote $imagegen) -Prompt $(& $quote $prompt) -Out $(& $quote $out)"
-		$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
 		# A plain Process with no window, its output read back: what imagegen says has the hash.
 		$psi = New-Object System.Diagnostics.ProcessStartInfo 'powershell.exe'
-		$psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+		$psi.Arguments = "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded"
 		$psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
 		$psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+		$psi.EnvironmentVariables['ROCCO_IMAGEGEN'] = $imagegen
+		$psi.EnvironmentVariables['ROCCO_PROMPT'] = $prompt
+		$psi.EnvironmentVariables['ROCCO_OUT'] = $out
 		$p = [Diagnostics.Process]::Start($psi)
+		# Its id, so Cancel can stop the image being made (Stop-ThumbConcepts).
+		[IO.File]::WriteAllText($pidFile, "$($p.Id)")
 		$stdout = $p.StandardOutput.ReadToEndAsync(); $stderr = $p.StandardError.ReadToEndAsync()
-		$p.WaitForExit()
+		# One image that never comes back doesn't hold up the rest, or sit there for good.
+		if (-not $p.WaitForExit(10 * 60 * 1000)) {
+			try { & taskkill.exe /T /F /PID $p.Id 2>$null | Out-Null } catch { }
+			$failed += 'An image took over 10 minutes, so it was stopped.'
+			continue
+		}
 		$said = "$($stdout.Result)`n$($stderr.Result)"
 		if (Test-Path $out) {
 			$meta = [ordered]@{ direction = $direction; prompt = $prompt; tool = 'tools\imagegen.ps1 (Codex)'; created = (Get-Date).ToString('o')
@@ -112,7 +124,27 @@ $ConceptJob = {
 			$failed += (@($said -split "`r?`n" | Where-Object { $_.Trim() }) | Select-Object -Last 3) -join ' '
 		}
 	}
+	Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 	$failed -join "`n"
+}
+
+# Cancel: the run stops, with the image it was in the middle of. The ones already made stay.
+function Stop-ThumbConcepts {
+	$run = $script:ConceptRuns[$Root]
+	if ($run -and $run.Job) {
+		Stop-Job $run.Job -ErrorAction SilentlyContinue
+		Remove-Job $run.Job -Force -ErrorAction SilentlyContinue
+		$run.Job = $null
+		$run.Error = 'Stopped.'
+		$run.Finished = Get-Date
+		$pidFile = Join-Path (Split-Path $run.Files[0]) '.making'
+		if (Test-Path -LiteralPath $pidFile) {
+			$id = 0
+			if ([int]::TryParse("$([IO.File]::ReadAllText($pidFile))".Trim(), [ref]$id) -and $id) { try { & taskkill.exe /T /F /PID $id 2>$null | Out-Null } catch { } }
+			Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+		}
+	}
+	Get-ConceptRun
 }
 
 function Get-ConceptRun {
@@ -143,7 +175,7 @@ function Start-ThumbConcepts([string]$id, [int]$count) {
 	$taken = @(Get-ChildItem $outDir -File -Filter "$id-*.png" -ErrorAction SilentlyContinue | ForEach-Object { if ($_.BaseName -match '-(\d+)$') { [int]$Matches[1] } })
 	$start = 1 + [int]($taken | Measure-Object -Maximum).Maximum
 	$files = @(0..($count - 1) | ForEach-Object { Join-Path $outDir ('{0}-{1:D2}.png' -f $id, ($start + $_)) })
-	$job = Start-Job -ScriptBlock $ConceptJob -ArgumentList $imagegen, $outDir, $id, $direction.prompt, $count, $start, $direction.name
+	$job = Start-Job -Name 'rocco-concepts' -ScriptBlock $ConceptJob -ArgumentList $imagegen, $outDir, $id, $direction.prompt, $count, $start, $direction.name
 	$script:ConceptRuns[$Root] = @{ Job = $job; Direction = $direction.name; Files = $files; Started = Get-Date; Error = '' }
 	Get-ConceptRun
 }

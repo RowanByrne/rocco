@@ -4,21 +4,70 @@
 $Utf8 = New-Object System.Text.UTF8Encoding $false
 $Dot = [char]0x00B7
 
+# Git writes UTF-8 (a commit's subject, a file's name, a folder under a user with an accent in their name), and Windows
+# PowerShell reads a program's output in the console's own code page. So the console reads UTF-8 while git runs, and
+# goes back to what it was: a command run in the user's own terminal leaves it as it found it.
+function Use-Utf8Output([scriptblock]$run) {
+	$was = $null
+	try { $was = [Console]::OutputEncoding; if ($was.CodePage -ne 65001) { [Console]::OutputEncoding = $Utf8 } else { $was = $null } } catch { $was = $null }
+	try { & $run } finally { if ($was) { try { [Console]::OutputEncoding = $was } catch { } } }
+}
+
 # Git without stopping on its messages: Windows PowerShell turns redirected stderr into errors.
 function Invoke-Git([string]$dir) {
 	$ErrorActionPreference = 'Continue'
-	git -C $dir @args 2>$null
+	$rest = $args
+	Use-Utf8Output { git -C $dir @rest 2>$null }
 }
 
 # Git, keeping what it says, to show the user when something fails.
 function Invoke-GitText([string]$dir) {
 	$ErrorActionPreference = 'Continue'
-	# A blank line on stderr comes back as just the exception's type name: leave those out.
-	$text = @(git -C $dir @args 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -ne 'System.Management.Automation.RemoteException' }) -join "`n"
-	[pscustomobject]@{ ok = ($LASTEXITCODE -eq 0); text = $text.Trim() }
+	$rest = $args
+	Use-Utf8Output {
+		# A blank line on stderr comes back as just the exception's type name: leave those out.
+		$text = @(git -C $dir @rest 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -ne 'System.Management.Automation.RemoteException' }) -join "`n"
+		[pscustomobject]@{ ok = ($LASTEXITCODE -eq 0); text = $text.Trim() }
+	}
+}
+
+# One argument as a program's command line takes it (the C runtime's rules): quoted when it has a space or a quote,
+# with the backslashes before a quote doubled.
+function ConvertTo-Argument([string]$s) {
+	if ($s -ne '' -and $s -notmatch '[\s"]') { return $s }
+	'"' + ($s -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+}
+
+# Git over the network (fetch, push), which can stall: the server handles one request at a time, so a call that never
+# came back would freeze the app. Git gives up on a transfer that stops moving, never asks for a password in a console
+# nobody can see, and is stopped after $seconds whatever it's doing. $signIn: the user started this (a button), so
+# Git's own sign-in window may open; without it (Rocco's own pushes in the background) nothing may ask.
+function Invoke-GitNet([string]$dir, [string[]]$arguments, [int]$seconds = 60, [bool]$signIn = $true) {
+	$all = @('-C', $dir, '-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=20') + $arguments
+	$psi = New-Object Diagnostics.ProcessStartInfo 'git'
+	$psi.Arguments = ($all | ForEach-Object { ConvertTo-Argument $_ }) -join ' '
+	$psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+	$psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.RedirectStandardInput = $true
+	$psi.StandardOutputEncoding = $Utf8; $psi.StandardErrorEncoding = $Utf8
+	$psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
+	if (-not $signIn) { $psi.EnvironmentVariables['GCM_INTERACTIVE'] = 'never' }
+	try { $p = [Diagnostics.Process]::Start($psi) } catch { return [pscustomobject]@{ ok = $false; text = "Git couldn't be started: $($_.Exception.Message)"; timedOut = $false } }
+	$p.StandardInput.Close()
+	$out = $p.StandardOutput.ReadToEndAsync(); $err = $p.StandardError.ReadToEndAsync()
+	if (-not $p.WaitForExit($seconds * 1000)) {
+		# Git and whatever it started (its https helper, a sign-in window).
+		try { & taskkill.exe /T /F /PID $p.Id 2>$null | Out-Null } catch { }
+		try { if (-not $p.HasExited) { $p.Kill() } } catch { }
+		return [pscustomobject]@{ ok = $false; text = "no answer after $seconds seconds, so Rocco stopped waiting"; timedOut = $true }
+	}
+	[pscustomobject]@{ ok = ($p.ExitCode -eq 0); text = ("$($out.Result)`n$($err.Result)").Trim(); timedOut = $false }
 }
 
 function Now { (Get-Date).ToString('o') }
+
+# Where this PC's Rocco keeps its own things (settings, the log): with the user, not in a project or the RoDev folder.
+# ROCCO_HOME moves it, so a test run leaves the user's settings and log alone.
+$RoccoHome = if ($env:ROCCO_HOME) { $env:ROCCO_HOME } else { Join-Path $env:APPDATA 'Rocco' }
 
 # Rocco is installed once per RoDev folder, in <RoDev>\_tools\rocco (README.md "Install").
 $WebRoot = Join-Path $AppDir 'web'
@@ -58,12 +107,15 @@ function Get-RoccoVersion {
 	$commit = "$(Invoke-Git $AppDir rev-parse --short HEAD)"
 	if ($tag) { $tag } elseif ($onBranch) { "$onBranch @ $commit" } else { $commit }
 }
-$RoccoVersion = Get-RoccoVersion
+# Only the server shows it: an agent's command doesn't pay for three git calls it has no use for.
+$RoccoVersion = if ($Command -eq 'serve') { Get-RoccoVersion } else { '' }
 
 # The project a command or request is about. Its Rocco data (tasks, screenshots) lives outside git, in <Game>\rocco\.
+# archive\ holds tasks finished long ago (tasks.ps1), out of the way of the board's every look.
 function Use-Project([string]$dir) {
 	$script:Root = $dir
 	$script:RepoDir = Join-Path $dir 'repo'
 	$script:TasksDir = Join-Path $dir 'rocco\tasks'
+	$script:ArchiveDir = Join-Path $dir 'rocco\archive'
 }
 Use-Project $HomeProject

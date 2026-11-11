@@ -31,6 +31,8 @@
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 set T-012 -ForLane       every lane is busy: it waits in Up next, and wait hands it back ([lane]) the
 #                                      moment one is free. new takes -ForLane too. Starting it ends the wait
+#   rocco.ps1 result T-012 -Pass|-Fail -Text "12 of 12 tests pass" [-File console.txt]   what the worker ran and how it
+#                                      went, on the card: the line, and the output (the tests' report, Studio's console)
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
 #   rocco.ps1 clear T-012              what the user asked of it (plan, answer, reopen, merge, cancel, follow-ups) is handled
 #   rocco.ps1 show C-1a2b3c / clear C-1a2b3c   a message or answer the user sent the conductor; clear: it's read
@@ -48,11 +50,36 @@ param(
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
 	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [switch]$ForLane, [int]$Port = 34860,
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
+	[switch]$Pass, [switch]$Fail, [string]$File,
 	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
 $ErrorActionPreference = 'Stop'
 $AppDir = $PSScriptRoot
-foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $AppDir "server\$part.ps1") }
+# An agent's command loads only what the board needs: it runs many of these, and each starts PowerShell afresh.
+$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
+	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'lanes' }
+foreach ($part in $parts) { . (Join-Path $AppDir "server\$part.ps1") }
+
+# A list given as "a","b" arrives as one string, a,b, when the command is run through powershell -File (an agent in a
+# bash shell): -File hands every argument over as plain text. So a single item with a comma in it is taken as the list
+# it was meant to be. From PowerShell itself lists arrive whole, and this changes nothing.
+$ViaFile = $false
+$started = [Environment]::GetCommandLineArgs()
+for ($i = 0; $i -lt $started.Count - 1; $i++) { if ($started[$i] -match '^-(f|fi|fil|file)$' -and $started[$i + 1] -match 'rocco\.ps1$') { $ViaFile = $true } }
+$script:SplitNote = @()
+function Split-FileList([string]$name, [string[]]$value) {
+	if (-not $ViaFile -or @($value).Count -ne 1 -or "$($value[0])" -notmatch ',') { return $value }
+	$items = @("$($value[0])" -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+	$script:SplitNote += "-$name was read as $($items.Count) items, split at its commas (powershell -File passes a list as one string). For an item with a comma in it, run the command from PowerShell."
+	$items
+}
+foreach ($name in 'Test', 'Options', 'Steps', 'Audio', 'Images', 'Show') {
+	if ($PSBoundParameters.ContainsKey($name)) {
+		$split = @(Split-FileList $name (Get-Variable $name -ValueOnly))
+		Set-Variable $name $split
+		$PSBoundParameters[$name] = $split
+	}
+}
 
 function Format-Time($iso) { if ($iso) { ([datetime]$iso).ToString('HH:mm') } else { '' } }
 
@@ -63,6 +90,8 @@ function Format-Tasks($rows) {
 		$wants = if ($t.pending) { "[$($t.pending)]" } else { '' }
 		$extra = @()
 		if ($t.kind -eq 'plan') { $extra += 'PLAN' }
+		if ($t.held) { $extra += $(if ($t.pending -eq 'stop') { 'the user paused it: stop its worker' } else { 'paused by the user: leave it until they resume it' }) }
+		if ($t.wantLane -or $t.wantTier) { $extra += "the user wants $(Format-Wanted $t)" }
 		if ($t.pending -eq 'lane') { $extra += "lane $($t.freeLane) is free: set $($t.id) -Status working -Lane $($t.freeLane)" }
 		elseif (Test-WaitsForLane $t) { $extra += 'waiting for a free lane' }
 		if ($t.kind -eq 'question') { $extra += 'QUESTION: answer with reply' }
@@ -72,12 +101,22 @@ function Format-Tasks($rows) {
 	}
 }
 
-# What waits on the conductor: what the user asked of a task, until it's handled. A deleted task waits only to be stopped
-# (cancel), once the app's Undo has had its chance.
+# The lane and worker the user picked for a task, in words.
+function Format-Wanted($t) { (@($(if ($t.wantLane) { "lane $($t.wantLane)" }), $(if ($t.wantTier) { "the $($t.wantTier) worker" })) | Where-Object { $_ }) -join ', ' }
+
+# What waits on the conductor: what the user asked of a task, until it's handled. Nothing the user can still take back
+# is handed over: an approval (which merges a branch), an answer, a queued suggestion and a delete each wait out the
+# app's Undo first. A deleted task waits only to be stopped (cancel). A task the user paused waits on nobody, apart
+# from having its worker stopped.
 function Get-PendingTasks {
 	$undoGone = (Get-Date).AddSeconds(-$UndoSeconds)
 	$tasks = @(Get-Tasks)
-	@($tasks | Where-Object { $_.pending -and ($_.status -ne 'removed' -or ($_.pending -eq 'cancel' -and (-not $_.undo -or [datetime]$_.undo.at -lt $undoGone))) })
+	@($tasks | Where-Object {
+		$_.pending -and
+		(-not $_.undo -or -not $_.undo.at -or [datetime]$_.undo.at -lt $undoGone) -and
+		($_.status -ne 'removed' -or $_.pending -eq 'cancel') -and
+		(-not $_.held -or $_.pending -eq 'stop')
+	})
 	# A task parked for a lane (set -ForLane), once one is free.
 	Get-LaneReady $tasks
 }
@@ -153,7 +192,7 @@ function Set-Common($t) {
 		if ($Type -notin $Types) { throw "Type must be one of: $($Types -join ', ')." }
 		Set-Field $t 'type' $Type
 	}
-	if ($Plan) { Read-Task $Plan | Out-Null; Set-Field $t 'plan' $Plan }
+	if ($Plan) { Get-Task $Plan | Out-Null; Set-Field $t 'plan' $Plan }
 	if ($PSBoundParameters.ContainsKey('After') -or $After) { Set-Field $t 'after' @($After | ForEach-Object { $_ -split ',' } | Where-Object { $_ -match '^T-\d+$' }) }
 	if ($Feature) { Set-Field $t 'feature' $true }
 	# A feature's spec, which its plan card links: a doc in the repo.
@@ -237,6 +276,9 @@ switch ($Command) {
 		foreach ($q in Get-List $t.questions) { "Question:   $($q.text)  [$((@($q.options) | ForEach-Object { $_.label + $(if ($_.audio) { " ($($_.audio))" }) + $(if ($_.image) { " (picture $($_.image))" }) }) -join ' | ')]$(if (@($q.images).Count) { "  pictures: $(@($q.images) -join ', ')" })" }
 		if ($t.waiting) { "Waiting:    $($t.waiting)" }
 		if ([int]$t.followups) { "Follow-ups: $($t.followups) from the user since the last clear (latest 'you' lines below)" }
+		if ($t.wantLane -or $t.wantTier) { "User wants: $(Format-Wanted $t)" }
+		if ($t.held) { 'Paused:     by the user. Leave it until they resume it.' }
+		foreach ($c in Get-List $t.checks) { "Check:      $(if ($c.ok) { 'passed' } else { 'FAILED' })  $($c.text)$(if ($c.file) { "  ($(Join-Path $dir $c.file))" })" }
 		$notes = Join-Path $dir 'notes.md'
 		"Notes:      $notes$(if (-not (Test-Path $notes)) { ' (none yet)' })"
 		if (@(Get-List $t.log).Count) {
@@ -249,6 +291,14 @@ switch ($Command) {
 			''
 			"Taking it on? First: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}
+		# The user stepped in on its worker (the card's Pause, Resume, Start again, or its lane and worker): what to do.
+		$stepIn = switch ($t.pending) {
+			'stop' { "The user paused it. Stop its worker now, commit what it has on its branch so nothing is lost, then set $($t.id) -Status queued and clear $($t.id). Don't start it again until they resume it (wait hands it back as [resume])." }
+			'resume' { "The user resumed it. $(if ($t.branch) { "Carry it on from $($t.branch) and its notes.md" } else { 'Start it when its turn comes' }): set $($t.id) -Status working -Lane <n> -Step `"...`" as you do." }
+			'restart' { "The user wants a fresh worker on it. Stop the one it has, then start a new one on $($t.id) $(if ($t.branch) { "from $($t.branch) and its notes.md" } else { 'from the start' }) (attempt $($t.attempt)), and clear $($t.id). Their reason, if they gave one, is the latest 'you' line." }
+			'assign' { "The user wants it on $(Format-Wanted $t). Stop its worker, commit what it has, start it there (set $($t.id) -Status working -Lane <n>), and clear $($t.id)." }
+		}
+		if ($stepIn) { ''; $stepIn }
 		# Waiting for a lane: whether one is free now.
 		if (Test-WaitsForLane $t) {
 			$free = @(Get-LaneReady @(Get-Tasks) | Where-Object { $_.id -eq $t.id })
@@ -345,6 +395,8 @@ switch ($Command) {
 			Set-Status $t $Status
 		}
 		if ($Where -and $Where -notin 'main', 'lane') { throw "Where must be 'main' (merged, test in Main) or 'lane' (on its branch, test in the lane's place)." }
+		# A branch's name goes to git as it is: only what a branch can be called.
+		if ($Branch -and ($Branch -notmatch '^[A-Za-z0-9][\w./-]{0,120}$' -or $Branch -match '\.\.|//|\.lock$|/$')) { throw "'$Branch' isn't a branch name (letters, numbers, / - _ . , like agent/trade-window)." }
 		foreach ($name in 'Title', 'Branch', 'Where', 'Step', 'Summary', 'Waiting') {
 			if ($PSBoundParameters.ContainsKey($name)) { Set-Field $t $name.ToLower() $PSBoundParameters[$name] }
 		}
@@ -375,6 +427,23 @@ switch ($Command) {
 			}
 		}
 		"$($t.id) $($t.status)"
+		# Ready, with nothing on the card about what was run: say how to put it there.
+		if ($Status -eq 'ready' -and $t.status -eq 'ready' -and $t.kind -eq 'task' -and -not @(Get-List $t.checks | Where-Object { [int]$_.attempt -eq [int]$t.attempt }).Count) {
+			"No check on the card for this attempt. Whatever you ran (tests, a playtest) shows there with: result $($t.id) -Pass -Text `"12 of 12 tests pass`" [-File <the tests' output or Studio's console, as a text file>]"
+		}
+	}
+
+	# What the worker ran and how it went, on the card: the user sees the tests' result and Studio's console there.
+	'result' {
+		if ($Pass -eq $Fail) { throw 'result needs -Pass or -Fail (one of them), and -Text saying what was run.' }
+		if (-not $Text) { throw 'result needs -Text: what was run and what came of it, in a line ("12 of 12 tests pass", "Playtest: lap completes, no errors in the console").' }
+		if ((Get-WordCount $Text) -gt $WordsMax) { throw "That's $(Get-WordCount $Text) words; a check is a line ($WordsMax words at most). The output itself goes in -File." }
+		$t = Read-Task $Id
+		if ($t.status -eq 'removed') { throw ($DeletedText -f $t.id) }
+		Add-Check $t ([bool]$Pass) $Text $File
+		Add-Log $t $(if ($PSBoundParameters.ContainsKey('Who')) { $Who } else { 'worker' }) "$(if ($Pass) { 'Check passed' } else { 'Check failed' }): $Text"
+		Save-Task $t
+		"$($t.id) check recorded: $(if ($Pass) { 'passed' } else { 'failed' })"
 	}
 
 	'log' {
@@ -409,6 +478,7 @@ switch ($Command) {
 		switch ($t.pending) {
 			'merge' { Add-Event "Merged into Main: $($t.title)" $t.id }
 			'cancel' { Add-Event "Stopped deleted work: $($t.title)" $t.id }
+			'stop' { Add-Event "Paused: $($t.title)" $t.id }
 		}
 		Set-Field $t 'pending' ''
 		Set-Field $t 'followups' 0
@@ -450,5 +520,6 @@ switch ($Command) {
 		}
 	}
 
-	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, doing, say, reply, set, log, clear, wait or lanes." }
+	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, doing, say, reply, set, result, log, clear, wait or lanes." }
 }
+foreach ($line in $script:SplitNote) { $line }

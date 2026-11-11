@@ -67,10 +67,18 @@ function Get-ProjectConnections([bool]$refresh) {
 	if (-not $origin) {
 		Add-Action (Conn 'Project' 'GitHub' 'warn' '' '' 'No GitHub repo yet, so nothing is backed up.' 'Create an empty private repo on GitHub (no README), then connect it: Rocco adds it and pushes main (NEW-PROJECT.md).' 'git remote add origin <url>') 'input' 'Connect' @{ id = 'github-connect'; placeholder = 'https://github.com/you/game.git' }
 	} else {
-		$ahead = [int](Invoke-Git $RepoDir rev-list --count origin/main..main)
 		$name = "$origin" -replace '^(https://github\.com/|git@github\.com:)', '' -replace '\.git$', ''
-		if ($ahead) { Add-Action (Conn 'Project' 'GitHub' 'warn' '' '' "$name $Dot $ahead commits on main not pushed." 'Push main (anything newer on GitHub is merged in first), or say "refresh" to the conductor.' '') 'run' 'Push main' @{ id = 'push' } }
-		else { Conn 'Project' 'GitHub' 'ok' '' '' $name '' '' }
+		if (-not (Invoke-Git $RepoDir rev-parse --verify --quiet refs/remotes/origin/main)) {
+			# Connected, but main has never reached it (the first push failed): nothing is backed up yet. Pushing again
+			# is the fix; a wrong address is changed by connecting again (actions.ps1 github-connect).
+			$item = Conn 'Project' 'GitHub' 'warn' '' '' "$name $Dot nothing pushed yet, so nothing is backed up." 'Push main. If the address is wrong, or the repo wasn''t empty, connect a different one in its details.' ''
+			$item | Add-Member reconnect ([pscustomobject]@{ id = 'github-connect'; label = 'Connect a different repo'; placeholder = 'https://github.com/you/game.git' })
+			Add-Action $item 'run' 'Push main' @{ id = 'push' }
+		} else {
+			$ahead = [int](Invoke-Git $RepoDir rev-list --count origin/main..main)
+			if ($ahead) { Add-Action (Conn 'Project' 'GitHub' 'warn' '' '' "$name $Dot $ahead commits on main not pushed." 'Push main (anything newer on GitHub is merged in first), or say "refresh" to the conductor.' '') 'run' 'Push main' @{ id = 'push' } }
+			else { Conn 'Project' 'GitHub' 'ok' '' '' $name '' '' }
+		}
 	}
 
 	if ("$(Invoke-Git $RepoDir config core.hooksPath)" -eq 'tools/hooks') { Conn 'Project' 'Commit check' 'ok' '' '' 'Refuses files over 5 MB.' '' '' }
@@ -259,7 +267,9 @@ $CheckPc = {
 	$version = if (Get-Command gemini) { Ver (Run 'cmd.exe' '/d /c gemini --version') } else { '' }
 	$latest = (Latest 'https://registry.npmjs.org/@google/gemini-cli/latest').version
 	$status = Status $version $latest
-	$item = Agent (Item 'AI' 'Gemini CLI' $status $version $latest $(if ($version) { 'gemini' } else { 'Not installed' }) $(if ($version) { 'Update it:' } else { 'Install it (WORKSTATION.md):' }) $(if ($version) { 'npm install -g @google/gemini-cli@latest' } else { 'npm install -g @google/gemini-cli' })) 'gemini'
+	# Signed in or not, as the other agents' rows say (the same signs accounts.ps1 reads).
+	$geminiIn = (Test-Path (Join-Path $env:USERPROFILE '.gemini\oauth_creds.json')) -or [bool][Environment]::GetEnvironmentVariable('GEMINI_API_KEY', 'User') -or [bool]$env:GEMINI_API_KEY
+	$item = Agent (Item 'AI' 'Gemini CLI' $status $version $latest $(if (-not $version) { 'Not installed' } elseif ($geminiIn) { 'Signed in' } else { 'Not signed in' }) $(if ($version) { 'Update it:' } else { 'Install it (WORKSTATION.md):' }) $(if ($version) { 'npm install -g @google/gemini-cli@latest' } else { 'npm install -g @google/gemini-cli' })) 'gemini'
 	$items += if ($status -in 'update', 'missing') { Act $item 'window' $(if ($version) { 'Update' } else { 'Install' }) @{ id = 'gemini-update' } } else { $item }
 
 	# Codex: makes the images (tools\imagegen.ps1).
@@ -344,7 +354,9 @@ $CheckPc = {
 	$version = if ($installed) { $installed } else { $onBranch + ' @ ' + (RoccoGit 'rev-parse --short HEAD') }
 	$hasOrigin = [bool](RoccoGit 'remote get-url origin')
 	$fetched = $hasOrigin -and (RoccoTest 'fetch --tags --force --quiet origin')
-	$newest = @((RoccoGit 'tag -l v* --sort=-v:refname') -split '\r?\n')[0]
+	# Only a tag named like a release goes any further: a tag's name comes from whoever can push to the repo, and it's
+	# put on a command line below.
+	$newest = "$(@((RoccoGit 'tag -l v* --sort=-v:refname') -split '\r?\n' | Where-Object { $_ -match '^v\d+(\.\d+){0,3}$' })[0])"
 	$newer = $newest -and $newest -ne $installed -and (RoccoGit 'rev-parse HEAD') -ne (RoccoGit "rev-list -n 1 $newest") -and (RoccoTest "merge-base --is-ancestor HEAD $newest")
 	$detail = if ($installed) { 'In the RoDev folder''s _tools\rocco' } else { "Development copy on $(if ($onBranch) { $onBranch } else { 'no branch' })" }
 	if ($hasOrigin -and -not $fetched) { $detail += " $([char]0x00B7) couldn't check for updates" }
@@ -360,7 +372,23 @@ $CheckPc = {
 	$tag = GitHubTag 'git-for-windows/git'
 	$status = Status $version $tag
 	$item = Item 'Tools' 'Git' $status $version (Ver $tag) 'Git for Windows' 'Update it:' 'git update-git-for-windows'
-	$items += if ($status -eq 'update') { Act $item 'window' 'Update' @{ id = 'git-update' } } else { $item }
+	# Lanes are worktrees with relative paths (so the RoDev folder can move between PCs), which Git reads from 2.48.
+	$tooOld = $false
+	try { $tooOld = $version -and [version](Ver $version) -lt [version]'2.48' } catch { }
+	# Every commit Rocco makes for the user (a doc edit, the calendar) needs a name and an email set.
+	$who = (Run 'cmd.exe' '/d /c git config --global user.name').Trim()
+	$mail = (Run 'cmd.exe' '/d /c git config --global user.email').Trim()
+	if ($tooOld) {
+		$item.status = 'warn'; $item.detail = "Git $version is too old for lanes: they need 2.48 or newer."; $item.update = 'Update it:'
+		$items += Act $item 'window' 'Update' @{ id = 'git-update' }
+	} elseif (-not $who -or -not $mail) {
+		$item.status = 'warn'; $item.detail = 'Git doesn''t know your name and email yet, so nothing can be committed for you.'
+		$item.update = 'Set them once for this PC:'; $item.command = 'git config --global user.name "Your Name"; git config --global user.email you@example.com'
+		$items += Act $item 'input' 'Set them' @{ id = 'git-identity'; placeholder = 'Your Name | you@example.com' }
+	} else {
+		$item.detail = "Git for Windows $([char]0x00B7) commits as $who"
+		$items += if ($status -eq 'update') { Act $item 'window' 'Update' @{ id = 'git-update' } } else { $item }
+	}
 	if (Get-Command gh) {
 		$version = Ver (Run 'cmd.exe' '/d /c gh --version')
 		$tag = GitHubTag 'cli/cli'
@@ -456,7 +484,10 @@ function Update-Rocco([string]$tag) {
 	$target = "$(Invoke-Git $AppDir rev-list -n 1 $tag)"
 	$newer = $here -ne $target -and (Invoke-GitText $AppDir merge-base --is-ancestor HEAD $tag).ok
 	if (-not $newer) { throw "$tag isn't newer than this Rocco ($RoccoVersion)." }
-	$checkout = Invoke-GitText $AppDir checkout --quiet $tag
+	# A release copy sits on its tag and moves to the new one. A development copy on a branch keeps its branch, which
+	# is moved up to the release: checking the tag out would leave the branch behind and the copy on no branch at all.
+	$branch = "$(Invoke-Git $AppDir symbolic-ref --short -q HEAD)"
+	$checkout = if ($branch) { Invoke-GitText $AppDir merge --ff-only --quiet "refs/tags/$tag" } else { Invoke-GitText $AppDir checkout --quiet $tag }
 	if (-not $checkout.ok) { throw "Couldn't switch to ${tag}: $($checkout.text)" }
 	$script:PcResult = $null # the next check reads the new version
 }

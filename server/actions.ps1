@@ -5,29 +5,56 @@
 
 # Main to GitHub, with GitHub's main merged in first, never rebased (CLAUDE.md "Git"). Returns why it didn't push, or ''.
 # It won't merge into uncommitted work: a merge that went wrong couldn't be backed out without losing it.
-function Push-Main {
-	$fetch = Invoke-GitText $RepoDir fetch origin main
-	if (-not $fetch.ok) { return "GitHub couldn't be reached, so it isn't pushed: $($fetch.text)" }
-	if (-not (Invoke-GitText $RepoDir merge-base --is-ancestor origin/main HEAD).ok) {
-		if (@(Invoke-Git $RepoDir status --porcelain --untracked-files=no | Where-Object { $_ }).Count) {
-			return 'not pushed: main on GitHub has newer commits, and repo\ has uncommitted changes. Say "refresh" to your agent.'
-		}
-		$merge = Invoke-GitText $RepoDir merge --no-edit origin/main
-		if (-not $merge.ok) {
-			Invoke-GitText $RepoDir merge --abort | Out-Null
-			return 'not pushed: main on GitHub has changes that clash with it. Say "refresh" to your agent to merge them.'
+# $signIn: the user clicked something, so Git's sign-in window may open; Rocco's own pushes in the background ask
+# nothing. Every call to GitHub is given up on if it stalls (core.ps1 Invoke-GitNet): the server would freeze with it.
+function Push-Main([bool]$signIn = $true) {
+	# A repo GitHub has nothing in yet (a first push that failed, a repo just made) has no main to fetch or merge.
+	$heads = Invoke-GitNet $RepoDir @('ls-remote', '--heads', 'origin', 'main') 30 $signIn
+	if (-not $heads.ok) { return "GitHub couldn't be reached, so it isn't pushed: $($heads.text)" }
+	if ($heads.text.Trim()) {
+		$fetch = Invoke-GitNet $RepoDir @('fetch', 'origin', 'main') 60 $signIn
+		if (-not $fetch.ok) { return "GitHub couldn't be reached, so it isn't pushed: $($fetch.text)" }
+		if (-not (Invoke-GitText $RepoDir merge-base --is-ancestor origin/main HEAD).ok) {
+			if (@(Invoke-Git $RepoDir status --porcelain --untracked-files=no | Where-Object { $_ }).Count) {
+				return 'not pushed: main on GitHub has newer commits, and repo\ has uncommitted changes. Say "refresh" to your agent.'
+			}
+			$merge = Invoke-GitText $RepoDir merge --no-edit origin/main
+			if (-not $merge.ok) {
+				Invoke-GitText $RepoDir merge --abort | Out-Null
+				return 'not pushed: main on GitHub has changes that clash with it. Say "refresh" to your agent to merge them.'
+			}
 		}
 	}
-	$push = Invoke-GitText $RepoDir push origin main
+	$push = Invoke-GitNet $RepoDir @('push', '-u', 'origin', 'main') 120 $signIn
 	$script:HistoryCache = @{}; $script:MainCache = @{}
 	if ($push.ok) { '' } else { "the push failed: $($push.text)" }
 }
 
+# A file's change committed on main as the user: only that file. If git won't commit it (no name and email set, a
+# commit hook that refuses it), the file goes back to how it was and nothing is left staged, so the repo is never
+# left holding a change nobody committed. $restore puts the file back; it's given the reason.
+function Invoke-FileCommit([string]$relative, [string]$message, [scriptblock]$restore) {
+	$messageFile = [IO.Path]::GetTempFileName()
+	try {
+		[IO.File]::WriteAllText($messageFile, $message.Trim(), $Utf8)
+		$add = Invoke-GitText $RepoDir add '--' $relative
+		$commit = if ($add.ok) { Invoke-GitText $RepoDir commit -F $messageFile --only '--' $relative } else { $add }
+	} finally { Remove-Item -LiteralPath $messageFile -ErrorAction SilentlyContinue }
+	if ($commit.ok) { return }
+	try { & $restore } catch { }
+	Invoke-GitText $RepoDir reset -q '--' $relative | Out-Null
+	$script:DocsCache = @{}
+	$why = $commit.text
+	if ($why -match 'Please tell me who you are|user\.email|user\.name') { $why = 'Git doesn''t know your name and email yet. Set them once (Connections, the Git row), then save again.' }
+	throw "Not saved: git couldn't commit $relative, so it's back as it was. $why"
+}
+
 # One file the app wrote (Updates, Thumbnails), committed as the user, only that file, and pushed when it can be.
 # Line endings follow the file already there. Returns { committed, pushed, note }.
-function Save-RepoFile([string]$relative, [string]$text, [string]$message) {
+function Save-RepoFile([string]$relative, [string]$text, [string]$message, [bool]$signIn = $true) {
 	$path = Join-Path $RepoDir $relative
-	$old = if (Test-Path $path) { [IO.File]::ReadAllText($path, $Utf8) } else { '' }
+	$existed = Test-Path $path
+	$old = if ($existed) { [IO.File]::ReadAllText($path, $Utf8) } else { '' }
 	$new = $text -replace "`r`n", "`n"
 	if ($old.Contains("`r`n")) { $new = $new -replace "`n", "`r`n" }
 	$result = [pscustomobject]@{ committed = $false; pushed = $false; note = '' }
@@ -35,17 +62,11 @@ function Save-RepoFile([string]$relative, [string]$text, [string]$message) {
 	New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
 	[IO.File]::WriteAllText($path, $new, $Utf8)
 	$script:DocsCache = @{}
-	$messageFile = [IO.Path]::GetTempFileName()
-	try {
-		[IO.File]::WriteAllText($messageFile, $message.Trim(), $Utf8)
-		$add = Invoke-GitText $RepoDir add '--' $relative
-		$commit = if ($add.ok) { Invoke-GitText $RepoDir commit -F $messageFile --only '--' $relative } else { $add }
-	} finally { Remove-Item -LiteralPath $messageFile -ErrorAction SilentlyContinue }
-	if (-not $commit.ok) { throw "Saved $relative, but git couldn't commit it: $($commit.text)" }
+	Invoke-FileCommit $relative $message { if ($existed) { [IO.File]::WriteAllText($path, $old, $Utf8) } else { Remove-Item -LiteralPath $path -Force } }
 	$result.committed = $true
 	$script:HistoryCache = @{}; $script:MainCache = @{}
 	if (-not (Invoke-Git $RepoDir remote get-url origin)) { $result.note = 'Committed. No GitHub repo yet, so not pushed.'; return $result }
-	$problem = Push-Main
+	$problem = Push-Main $signIn
 	if ($problem) { $result.note = "Committed, but $problem" } else { $result.pushed = $true }
 	$result
 }
@@ -105,6 +126,17 @@ $WindowActions = @{
 	'gh-login'       = @('Signing in to GitHub', 'gh auth login --hostname github.com --git-protocol https --web; $code = $LASTEXITCODE')
 }
 
+# What an update's window needs on this PC before it can do anything: said here, in words, where the window would only
+# show "the term is not recognized" and close.
+function Assert-ActionTools([string]$steps) {
+	$has = { param($name) [bool](Get-Command $name -ErrorAction SilentlyContinue) }
+	if ($steps -match '(?m)^\s*npm\s' -and -not (& $has 'npm')) { throw 'That needs Node.js, which isn''t on this PC (it brings npm, which installs it). Get it from nodejs.org, then try again.' }
+	if ($steps -match '(?m)^\s*winget\s' -and -not (& $has 'winget')) { throw 'That needs winget (Windows'' App Installer), which isn''t on this PC. Get "App Installer" from the Microsoft Store, then try again.' }
+	if ($steps -match '(?m)^\s*gh\s' -and -not (& $has 'gh')) { throw 'The GitHub CLI isn''t on this PC yet. Install it first (Connections).' }
+	if ($steps -match '(?m)^\s*claude\s' -and -not (& $has 'claude')) { throw 'Claude Code isn''t on this PC''s PATH. Install it first (Connections).' }
+	if ($steps -match '(?m)^\s*(Write-Host[^;]*;\s*)*gemini\b' -and -not (& $has 'gemini')) { throw 'Gemini CLI isn''t on this PC yet. Install it first (Connections).' }
+}
+
 $script:ActionRuns = @{}   # run id -> @{ Process; Action; Label }
 function Start-ActionWindow([string]$action) {
 	# One window per action at a time: a second click finds the one already running.
@@ -113,6 +145,7 @@ function Start-ActionWindow([string]$action) {
 		if ($r.Action -eq $action -and -not $r.Process.HasExited) { return [pscustomobject]@{ run = $key } }
 	}
 	$label, $steps = $WindowActions[$action]
+	Assert-ActionTools $steps
 	$steps = $steps.Replace('__LYNC__', (Join-Path $RoDev '_tools\lync').Replace("'", "''"))
 	if ($steps.Contains('__CODEX__')) {
 		$codex = Find-AgentExe 'codex'
@@ -175,12 +208,32 @@ function Invoke-ConnectionAction([string]$action, [string]$value) {
 			$url = $value.Trim()
 			if ($url -notmatch '^(https://github\.com/[\w.-]+/[\w.-]+?(\.git)?|git@github\.com:[\w.-]+/[\w.-]+?(\.git)?)$') { throw 'That isn''t a GitHub repo address, like https://github.com/you/game.git' }
 			Assert-OnMain
-			if (Invoke-Git $RepoDir remote get-url origin) { throw 'This project already has a GitHub repo.' }
-			$add = Invoke-GitText $RepoDir remote add origin $url
-			if (-not $add.ok) { throw $add.text }
-			$push = Invoke-GitText $RepoDir push -u origin main
-			if (-not $push.ok) { throw "Connected, but the push failed (is the repo empty, and can you reach it?): $($push.text)" }
+			# A repo that was connected but never took a push (a wrong address, a repo that wasn't empty) can be
+			# pointed somewhere else. One that has main's commits is the game's backup, and stays.
+			if (Invoke-Git $RepoDir remote get-url origin) {
+				if (Invoke-Git $RepoDir rev-parse --verify --quiet refs/remotes/origin/main) { throw 'This project already has a GitHub repo, with main pushed to it.' }
+				$set = Invoke-GitText $RepoDir remote set-url origin $url
+				if (-not $set.ok) { throw $set.text }
+			} else {
+				$add = Invoke-GitText $RepoDir remote add origin $url
+				if (-not $add.ok) { throw $add.text }
+			}
+			$push = Invoke-GitNet $RepoDir @('push', '-u', 'origin', 'main') 120 $true
+			if (-not $push.ok) { throw "Connected, but the push failed (is the repo empty, and can you reach it?): $($push.text). Push again, or connect a different repo, from its row here." }
+			$script:HistoryCache = @{}; $script:MainCache = @{}
 			return [pscustomobject]@{ message = 'Connected to GitHub, and main is pushed.' }
+		}
+		# Git's name and email for this user (Connections' Git row): every commit Rocco makes for them needs both.
+		'git-identity' {
+			$name, $email = ("$value" -split '\|', 2 | ForEach-Object { "$_".Trim() })
+			if (-not $name -or $name.Length -gt 100 -or $name -match '[<>"\r\n]') { throw 'Give your name as it should show on commits, then | and your email: Sam Lee | sam@example.com' }
+			if ($email -notmatch '^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$') { throw 'Give your name, then | and your email: Sam Lee | sam@example.com' }
+			foreach ($pair in @(@('user.name', $name), @('user.email', $email))) {
+				$r = Invoke-GitText $AppDir config --global $pair[0] $pair[1]
+				if (-not $r.ok) { throw $r.text }
+			}
+			$script:Me = $null; $script:PcResult = $null
+			return [pscustomobject]@{ message = "Git will sign your commits as $name." }
 		}
 		default { throw "Unknown action '$action'." }
 	}

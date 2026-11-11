@@ -44,6 +44,8 @@ function Set-WorkstationLanes([int]$count) {
 	$relative = 'docs/game/PROJECT.md'
 	$path = Join-Path $RepoDir $relative
 	if (-not (Test-Path $path)) { throw 'This project has no docs/game/PROJECT.md yet.' }
+	# It's committed where repo\ is: on main, or the count would land on whatever branch an agent left checked out.
+	Assert-OnMain
 	if ((Invoke-GitText $RepoDir status --porcelain '--' $relative).text) { throw 'PROJECT.md has changes that aren''t committed yet. Ask your agent to commit them first.' }
 	$pc = Get-PcSpecs
 	$row = "| ``$($pc.pc)`` | $($pc.memory) GB, $($pc.threads) threads ($($pc.cpu)) | $count |"
@@ -177,16 +179,28 @@ function Start-ProjectLync {
 	}
 }
 
-# Every Lync this RoDev folder's copy runs, or just this project's (listening on its port base and the 19 above it).
+# The Lync servers this RoDev folder's copy runs: this project's (listening on its port base and the 19 above it), or
+# the ones Rocco started with no window, in any project. Those are told by what started them: a hidden cmd.exe that
+# sends Lync's output to <Game>\rocco\lync\ (Start-Lync). A Lync the user started in a window of its own (the
+# template's serve.bat) isn't Rocco's to stop when it quits.
 function Get-LyncProcesses([switch]$Project) {
 	$lync = Find-Lync
 	$all = @(Get-Process lync -ErrorAction SilentlyContinue | Where-Object { -not $lync -or $_.Path -eq $lync })
-	if (-not $Project) { return $all }
-	$base = [int](Get-Content (Join-Path $RepoDir 'default.project.json') -Raw | ConvertFrom-Json).port
-	$ids = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -ge $base -and $_.LocalPort -lt $base + 20 } | ForEach-Object { [int]$_.OwningProcess })
-	@($all | Where-Object { $ids -contains $_.Id })
+	if (-not $all.Count) { return @() }
+	if ($Project) {
+		$base = [int](Get-Content (Join-Path $RepoDir 'default.project.json') -Raw | ConvertFrom-Json).port
+		$ids = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -ge $base -and $_.LocalPort -lt $base + 20 } | ForEach-Object { [int]$_.OwningProcess })
+		return @($all | Where-Object { $ids -contains $_.Id })
+	}
+	$started = @{}
+	foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue)) { if ("$($p.CommandLine)" -match '\\rocco\\lync\\[^\\"]+\.log') { $started[[int]$p.ProcessId] = $true } }
+	$parent = @{}
+	foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='lync.exe'" -ErrorAction SilentlyContinue)) { $parent[[int]$p.ProcessId] = [int]$p.ParentProcessId }
+	@($all | Where-Object { $started.ContainsKey([int]$parent[[int]$_.Id]) })
 }
 
+# -Project: this project's servers, however they were started (Connections' Stop Lync). Without it: the ones Rocco
+# started, in every project (Quit).
 function Stop-Lync([switch]$Project) {
 	$stopped = @(Get-LyncProcesses -Project:$Project)
 	$stopped | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -194,9 +208,20 @@ function Stop-Lync([switch]$Project) {
 	$stopped.Count
 }
 
+# Whether Studio has a place open. Studio's window title is the best sign once it has loaded, but a place still
+# loading has no title yet, so two more are checked: the place's path on a Studio's command line (how Rocco opens
+# them), and its lock file, which a running Studio keeps hold of.
 function Test-PlaceOpen([string]$path) {
 	$file = Split-Path $path -Leaf
-	[bool](Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*$file*" })
+	if (Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*$file*" }) { return $true }
+	foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='RobloxStudioBeta.exe'" -ErrorAction SilentlyContinue)) {
+		if ("$($p.CommandLine)".IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+	}
+	$lock = "$path.lock"
+	if (Test-Path -LiteralPath $lock) {
+		try { $fs = [IO.File]::Open($lock, 'Open', 'ReadWrite', 'None'); $fs.Close() } catch [IO.IOException] { return $true } catch { }
+	}
+	$false
 }
 
 # Main and lane1 to laneK (this PC's row), each made if it's missing, served by Lync, and open in Studio. What's there
@@ -219,14 +244,21 @@ function Open-Lanes {
 		if ($c.number -and -not (Test-Path $c.dir)) {
 			Write-Output "$($c.name): making its checkout"
 			$add = Join-Path $RepoDir 'tools\add-lane.ps1'
-			# Git reports progress on stderr, which Windows PowerShell would otherwise turn into a stopping error.
-			$out = & { $ErrorActionPreference = 'Continue'; & powershell -NoProfile -ExecutionPolicy Bypass -File $add $c.number 2>&1 | ForEach-Object { "$_" } }
+			# Git reports progress on stderr, which Windows PowerShell would otherwise turn into a stopping error. The
+			# project's own script runs as RemoteSigned, not Bypass (projects.ps1 Start-ScriptJob).
+			$out = & { $ErrorActionPreference = 'Continue'; & powershell -NoProfile -ExecutionPolicy RemoteSigned -File $add $c.number 2>&1 | ForEach-Object { "$_" } }
 			if (-not (Test-Path $c.dir)) { throw "tools\add-lane.ps1 $($c.number) didn't make the lane: $($out -join ' ')" }
 		}
 		# Without its port, a lane's Lync would serve on Main's.
 		if ($c.number -and -not (Test-Path (Join-Path $c.dir '.lane-port'))) { [IO.File]::WriteAllText((Join-Path $c.dir '.lane-port'), "$($c.port)") }
 		if (-not (Test-Path $c.place)) {
-			Write-Output "$($c.name): making $(Split-Path $c.place -Leaf)"
+			# Main's place holds what isn't in the repo (terrain, models placed by hand). A game that has shipped has
+			# one somewhere: a blank baseplate standing in for it here would look like the game until it was published
+			# over the real one. So it's only made for a game that has never been released.
+			if (-not $c.number -and @(Invoke-Git $RepoDir tag -l 'release/*').Count) {
+				throw "This game has been released, but its Main place isn't on this PC ($($c.place)). Copy it there from the PC that has it, or from a backup, then open the lanes again. Rocco won't make a blank one in its place."
+			}
+			Write-Output "$($c.name): making $(Split-Path $c.place -Leaf)$(if (-not $c.number) { ' (a blank baseplate: this PC had no Main place yet)' })"
 			New-PlaceFile $c.place $c.port
 		}
 	}
@@ -241,7 +273,8 @@ function Open-Lanes {
 	foreach ($c in $checkouts) {
 		if (Test-PlaceOpen $c.place) { continue }
 		Write-Output "$($c.name): opening $(Split-Path $c.place -Leaf) in Studio"
-		# A Studio that closed without warning leaves its lock behind, and the place would open read-only.
+		# A Studio that closed without warning leaves its lock behind, and the place would open read-only. Nothing has
+		# the place open (Test-PlaceOpen looked three ways), so the lock is a leftover.
 		Remove-Item -LiteralPath "$($c.place).lock" -Force -ErrorAction SilentlyContinue
 		Start-Hidden "cmd.exe /d /c start `"`" `"$($c.place)`"" $Root | Out-Null
 		Start-Sleep -Seconds 2
@@ -254,7 +287,7 @@ function Open-Lanes {
 function Start-OpenLanes($count) {
 	$saved = if ($null -ne $count) { Set-WorkstationLanes ([int]$count) } else { $null }
 	$job = @(Get-LaneJobs)[0]
-	if (-not $job) { $job = Start-ScriptJob 'lanes' (Join-Path $AppDir 'rocco.ps1') @('lanes', '-Project', "`"$(Split-Path $Root -Leaf)`"") (Split-Path $Root -Leaf) }
+	if (-not $job) { $job = Start-ScriptJob 'lanes' (Join-Path $AppDir 'rocco.ps1') @('lanes', '-Project', (Split-Path $Root -Leaf)) (Split-Path $Root -Leaf) $true }
 	[pscustomobject]@{ job = $job; saved = $saved }
 }
 

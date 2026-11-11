@@ -50,24 +50,45 @@ function Switch-Bookmark([string]$hash) {
 	$on
 }
 
-# What a task changed: its merge into main if it's merged, else its branch against main.
-function Get-TaskChanges($t) {
+# Where a task's changes are in git: its merge into main if it's merged, else its branch against main. $null when
+# it has no branch, or the branch is gone and was never merged.
+function Get-TaskRange($t) {
 	$branch = "$($t.branch)"
 	$repo = Get-RepoUrl
-	$none = [pscustomobject]@{ source = ''; url = ''; files = @() }
-	if (-not $branch) { return $none }
+	if (-not $branch) { return $null }
 	$merge = "$(Invoke-Git $RepoDir log main --merges -1 --format=%H --fixed-strings "--grep=Merge branch '$branch'")"
-	if ($merge) { $range = @("$merge^1", $merge); $source = 'merged'; $url = $(if ($repo) { "$repo/commit/$merge" } else { '' }) }
-	else {
-		$ref = if (Invoke-Git $RepoDir rev-parse --verify --quiet "refs/heads/$branch") { $branch } elseif (Invoke-Git $RepoDir rev-parse --verify --quiet "refs/remotes/origin/$branch") { "origin/$branch" } else { '' }
-		if (-not $ref) { return $none }
-		$range = @("main...$ref"); $source = 'branch'; $url = $(if ($repo) { "$repo/compare/main...$branch" } else { '' })
-	}
-	$files = foreach ($line in @(Invoke-Git $RepoDir diff --numstat @range)) {
+	if ($merge) { return [pscustomobject]@{ range = @("$merge^1", $merge); source = 'merged'; url = $(if ($repo) { "$repo/commit/$merge" } else { '' }) } }
+	$ref = if (Invoke-Git $RepoDir rev-parse --verify --quiet "refs/heads/$branch") { "refs/heads/$branch" } elseif (Invoke-Git $RepoDir rev-parse --verify --quiet "refs/remotes/origin/$branch") { "refs/remotes/origin/$branch" } else { '' }
+	if (-not $ref) { return $null }
+	[pscustomobject]@{ range = @("main...$ref"); source = 'branch'; url = $(if ($repo) { "$repo/compare/main...$branch" } else { '' }) }
+}
+
+# What a task changed: each file, with its lines added and removed. A file that was renamed shows as one removed and
+# one added, so every path here is a file's own name (Get-TaskDiff takes one).
+function Get-TaskChanges($t) {
+	$r = Get-TaskRange $t
+	if (-not $r) { return [pscustomobject]@{ source = ''; url = ''; files = @() } }
+	$range = @($r.range)
+	$files = foreach ($line in @(Invoke-Git $RepoDir -c core.quotepath=false diff --numstat --no-renames @range)) {
 		$f = "$line" -split "`t"
-		if ($f.Count -ge 3) { [pscustomobject]@{ path = $f[2]; added = $(if ($f[0] -eq '-') { 0 } else { [int]$f[0] }); removed = $(if ($f[1] -eq '-') { 0 } else { [int]$f[1] }) } }
+		if ($f.Count -ge 3) { [pscustomobject]@{ path = $f[2]; added = $(if ($f[0] -eq '-') { 0 } else { [int]$f[0] }); removed = $(if ($f[1] -eq '-') { 0 } else { [int]$f[1] }); binary = ($f[0] -eq '-') } }
 	}
-	[pscustomobject]@{ source = $source; url = $url; files = @($files) }
+	[pscustomobject]@{ source = $r.source; url = $r.url; files = @($files) }
+}
+
+# One changed file's lines as git shows them (a unified diff), for the card to show. Only a file the task changed is
+# looked up: the path is checked against Get-TaskChanges, never passed on as it came. A very long diff is cut.
+$DiffMax = 300KB
+function Get-TaskDiff($t, [string]$path) {
+	$r = Get-TaskRange $t
+	$file = if ($r) { @((Get-TaskChanges $t).files | Where-Object { $_.path -ceq $path })[0] } else { $null }
+	if (-not $file) { throw "That file isn't one this task changed." }
+	if ($file.binary) { return [pscustomobject]@{ path = $path; binary = $true; text = ''; cut = $false } }
+	$range = @($r.range)
+	$text = (@(Invoke-Git $RepoDir -c core.quotepath=false diff --no-color --no-renames --unified=3 @range '--' $path) -join "`n")
+	$cut = $text.Length -gt $DiffMax
+	if ($cut) { $text = $text.Substring(0, $DiffMax); $text = $text.Substring(0, [Math]::Max(0, $text.LastIndexOf("`n"))) }
+	[pscustomobject]@{ path = $path; binary = $false; text = $text; cut = $cut }
 }
 
 function Get-MainHistory {

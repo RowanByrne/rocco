@@ -43,6 +43,17 @@ function Set-Status($t, [string]$status) {
 		if ($fresh -and [int]$t.attempt -gt 1) { Set-Field $t 'summary' ''; Set-Field $t 'test' '' }
 		if ($fresh) { Set-Field $t 'startedAt' (Now) }
 		if ($status -eq 'done') { Set-Field $t 'doneAt' (Now) }
+		# Time at work, across every attempt: counted from each time it turns Working to when it stops being so
+		# (stuck on a question, ready, back in Up next). The card shows the total.
+		if ($t.status -eq 'working' -and $t.workSince) {
+			$spent = [int][Math]::Max(0, ((Get-Date) - [datetime]$t.workSince).TotalSeconds)
+			Set-Field $t 'worked' ([int]$t.worked + $spent)
+			Set-Field $t 'workSince' $null
+		}
+		if ($status -eq 'working') { Set-Field $t 'workSince' (Now) }
+		# Picked up again: the user's pause is over, and what they asked of its worker is under way.
+		if ($status -eq 'working') { Set-Field $t 'held' $false }
+		if ($status -eq 'working' -and $t.pending -in 'resume', 'restart', 'assign') { Set-Field $t 'pending' '' }
 		# Picking a task back up handles what the user asked of it; a follow-up stays until it's read (clear).
 		if ($status -in 'working', 'stuck', 'ready' -and $t.pending -in 'plan', 'answer', 'reopen', 'approved', 'question') { Set-Field $t 'pending' '' }
 	}
@@ -98,7 +109,7 @@ function Get-FreeLanes($tasks) {
 # Parked tasks whose lane is free: one per free lane, in Up next order, each given its lane (not saved).
 function Get-LaneReady($tasks) {
 	$byId = @{}; foreach ($x in $tasks) { $byId[$x.id] = $x }
-	$parked = @($tasks | Where-Object { (Test-WaitsForLane $_) -and -not $_.pending -and
+	$parked = @($tasks | Where-Object { (Test-WaitsForLane $_) -and -not $_.pending -and -not $_.held -and
 		-not @(Get-List $_.after | Where-Object { $byId[$_] -and $byId[$_].status -notin 'done', 'removed' }).Count } |
 		Sort-Object { if ($_.order) { [int]$_.order } else { 9999 } }, id)
 	if (-not $parked.Count) { return @() }
@@ -132,25 +143,85 @@ function Send-ToConductor($t, [string]$pending) {
 	Set-Field $t 'waiting' $ToConductor
 }
 
+# A task's folder: on the board (tasks\), or put away once it was long finished (archive\).
 function Get-TaskDir([string]$id) {
 	if ($id -notmatch '^T-\d+$') { throw "Not a task id: '$id' (expected T-012)." }
-	$dir = Join-Path $TasksDir $id
-	if (-not (Test-Path (Join-Path $dir 'task.json'))) { throw "No task $id in $TasksDir." }
-	$dir
+	foreach ($base in $TasksDir, $ArchiveDir) {
+		$dir = Join-Path $base $id
+		if (Test-Path (Join-Path $dir 'task.json')) { return $dir }
+	}
+	throw "No task $id in $TasksDir."
 }
 
+# ---- One writer at a time ----
+# The server and every agent's commands change tasks at the same moment. A task read to be changed (Read-Task) is held
+# until it's saved or the command ends: a lock file in its folder, open with no sharing. So a worker's log and the
+# user's follow-up can't each write the whole file over the other's change. A holder that dies lets go by itself:
+# Windows closes its files. Something that only looks reads with Get-Task, which holds nothing.
+
+$script:TaskLocks = @{}   # task folder -> the open lock file
+function Lock-Task([string]$dir) {
+	if ($script:TaskLocks[$dir]) { return }
+	$file = Join-Path $dir 'task.lock'
+	for ($i = 0; $i -lt 400; $i++) {
+		try {
+			$script:TaskLocks[$dir] = New-Object IO.FileStream($file, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+			return
+		} catch [IO.IOException] { Start-Sleep -Milliseconds 25 } catch [UnauthorizedAccessException] { Start-Sleep -Milliseconds 25 }
+	}
+	throw "$(Split-Path $dir -Leaf) is being changed by something else right now. Try again in a moment."
+}
+function Unlock-Task([string]$dir) {
+	$held = $script:TaskLocks[$dir]
+	if ($held) { try { $held.Close() } catch { }; $script:TaskLocks.Remove($dir) }
+}
+# Everything still held: the end of a request, so a read that was never saved doesn't keep its task.
+function Unlock-Tasks { foreach ($dir in @($script:TaskLocks.Keys)) { Unlock-Task $dir } }
+
+# A task file's text. Its writer swaps the new file in, so a read that lands on that instant tries again.
+function Read-TaskFile([string]$file) {
+	for ($i = 0; ; $i++) {
+		try { return [IO.File]::ReadAllText($file, $Utf8) } catch [IO.IOException] { if ($i -ge 8) { throw }; Start-Sleep -Milliseconds 15 } catch [UnauthorizedAccessException] { if ($i -ge 8) { throw }; Start-Sleep -Milliseconds 15 }
+	}
+}
+
+# A task as it is now, to look at.
+function Get-Task([string]$id) {
+	Read-TaskFile (Join-Path (Get-TaskDir $id) 'task.json') | ConvertFrom-Json
+}
+
+# A task to change: held from here until Save-Task (or the end of the command).
 function Read-Task([string]$id) {
-	[IO.File]::ReadAllText((Join-Path (Get-TaskDir $id) 'task.json'), $Utf8) | ConvertFrom-Json
+	$dir = Get-TaskDir $id
+	Lock-Task $dir
+	Read-TaskFile (Join-Path $dir 'task.json') | ConvertFrom-Json
 }
 
+# Written beside the file and swapped in, so nothing ever reads half a task, then let go of.
 function Save-Task($t) {
-	Set-Field $t 'updated' (Now)
-	[IO.File]::WriteAllText((Join-Path (Join-Path $TasksDir $t.id) 'task.json'), (ConvertTo-Json -InputObject $t -Depth 10), $Utf8)
+	$dir = Join-Path $TasksDir $t.id
+	if (-not (Test-Path -LiteralPath $dir)) { $dir = Join-Path $ArchiveDir $t.id }
+	Lock-Task $dir
+	try {
+		Set-Field $t 'updated' (Now)
+		$file = Join-Path $dir 'task.json'
+		$new = "$file.new"
+		[IO.File]::WriteAllText($new, (ConvertTo-Json -InputObject $t -Depth 10), $Utf8)
+		if (-not (Test-Path -LiteralPath $file)) { [IO.File]::Move($new, $file); return }
+		for ($i = 0; ; $i++) {
+			try { [IO.File]::Replace($new, $file, [NullString]::Value); break } catch {
+				# A reader has it open for a moment. After a second of that, write it in place as before.
+				if ($i -ge 40) { [IO.File]::WriteAllText($file, [IO.File]::ReadAllText($new, $Utf8), $Utf8); Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue; break }
+				Start-Sleep -Milliseconds 25
+			}
+		}
+	} finally { Unlock-Task $dir }
 }
 
 function New-Task([string]$title, [string]$note, [string]$status, [string]$kind, [string]$type = '') {
 	New-Item -ItemType Directory -Force $TasksDir | Out-Null
-	$numbers = @(Get-ChildItem $TasksDir -Directory | Where-Object { $_.Name -match '^T-(\d+)$' } | ForEach-Object { [int]$Matches[1] })
+	# Numbers carry on from the highest ever used, the archive's included.
+	$numbers = @(Get-ChildItem $TasksDir, $ArchiveDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^T-(\d+)$' } | ForEach-Object { [int]$Matches[1] })
 	$next = 1 + [int]($numbers | Measure-Object -Maximum).Maximum
 	$id = $null
 	for ($i = 0; $i -lt 50 -and -not $id; $i++) {
@@ -164,25 +235,112 @@ function New-Task([string]$title, [string]$note, [string]$status, [string]$kind,
 		attempt = 1; lane = $null; branch = ''; where = 'main'; step = ''; progress = $null; startedAt = $null
 		summary = ''; test = ''; questions = @(); waiting = ''; shots = @(); after = @(); order = $null; plan = ''; steps = @()
 		followups = 0; created = $now; updated = $now; doneAt = $null; log = @()
+		held = $false; wantLane = $null; wantTier = ''; worked = 0; workSince = $null; checks = @()
 	}
 	if ($status -eq 'queued') { $t.order = Get-NextOrder }
 	Save-Task $t
 	$t
 }
 
+# A task made a moment ago that has to be taken back whole (what it was made for fell through): its folder goes.
+function Remove-TaskFolder([string]$id) {
+	if ($id -notmatch '^T-\d+$') { return }
+	$dir = Join-Path $TasksDir $id
+	Unlock-Task $dir
+	Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+	$script:TaskCache.Remove((Join-Path $dir 'task.json'))
+}
+
 # Every task, re-reading only the files that changed since the last call.
 $script:TaskCache = @{}
 function Get-Tasks {
 	if (-not (Test-Path $TasksDir)) { return @() }
-	$tasks = foreach ($f in Get-ChildItem $TasksDir -Filter 'task.json' -Recurse -Depth 1 -File) {
+	Move-OldTasks
+	@(Read-TaskFolder $TasksDir)
+}
+
+# Every task in a folder of tasks. One that can't be read this instant (its writer is swapping it in) is shown as it
+# was a moment ago, not dropped from the board.
+function Read-TaskFolder([string]$base) {
+	foreach ($f in Get-ChildItem $base -Filter 'task.json' -Recurse -Depth 1 -File) {
 		$hit = $script:TaskCache[$f.FullName]
 		if (-not $hit -or $hit.Stamp -ne $f.LastWriteTimeUtc.Ticks) {
-			try { $hit = @{ Stamp = $f.LastWriteTimeUtc.Ticks; Task = ([IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json) } } catch { continue }
-			$script:TaskCache[$f.FullName] = $hit
+			try {
+				$hit = @{ Stamp = $f.LastWriteTimeUtc.Ticks; Task = ([IO.File]::ReadAllText($f.FullName, $Utf8) | ConvertFrom-Json) }
+				$script:TaskCache[$f.FullName] = $hit
+			} catch { if (-not $hit) { continue } }
 		}
 		$hit.Task
 	}
-	@($tasks)
+}
+
+# ---- The archive: tasks finished long ago ----
+# The board looks at every task each time it's asked. A task approved or deleted two weeks ago, with nothing waiting on
+# it, moves to <Game>\rocco\archive\ so the board's look stays quick however long the game has run. It's still found by
+# its id (show, a link to it), listed and searched in the app's archive, and comes back to the board if it's reopened.
+# A feature's tasks stay until the feature itself is done, so its plan can still count them.
+
+$ArchiveAfterDays = 14
+$script:ArchivedAt = @{}   # tasks folder -> when it was last tidied (hourly at most; the first look of a run does it)
+function Move-OldTasks {
+	# The server's job: an agent's command only reads the board.
+	if ($Command -ne 'serve') { return }
+	$last = $script:ArchivedAt[$TasksDir]
+	if ($last -and ((Get-Date) - $last).TotalMinutes -lt 60) { return }
+	$script:ArchivedAt[$TasksDir] = Get-Date
+	$old = (Get-Date).AddDays(-$ArchiveAfterDays)
+	$all = @(Read-TaskFolder $TasksDir)
+	$byId = @{}; foreach ($t in $all) { $byId[$t.id] = $t }
+	$settled = { param($t) $t.status -in 'done', 'removed' -and -not $t.pending -and $t.updated -and [datetime]$t.updated -lt $old }
+	foreach ($t in $all) {
+		if (-not (& $settled $t)) { continue }
+		if ($t.plan -and $byId[$t.plan] -and -not (& $settled $byId[$t.plan])) { continue }
+		if ($t.kind -eq 'plan' -and @($all | Where-Object { $_.plan -eq $t.id -and -not (& $settled $_) }).Count) { continue }
+		$from = Join-Path $TasksDir $t.id
+		if ($script:TaskLocks[$from]) { continue }
+		try {
+			New-Item -ItemType Directory -Force $ArchiveDir | Out-Null
+			Lock-Task $from
+			try { Remove-Item -LiteralPath (Join-Path $from 'task.json.new') -Force -ErrorAction SilentlyContinue } finally { Unlock-Task $from }
+			Remove-Item -LiteralPath (Join-Path $from 'task.lock') -Force -ErrorAction SilentlyContinue
+			Move-Item -LiteralPath $from -Destination (Join-Path $ArchiveDir $t.id) -ErrorAction Stop
+			$script:TaskCache.Remove((Join-Path $from 'task.json'))
+		} catch { } # in use this instant: the next tidy takes it
+	}
+}
+
+# An archived task back on the board: the user reopened it.
+function Restore-Archived([string]$id) {
+	$from = Join-Path $ArchiveDir $id
+	if (-not (Test-Path -LiteralPath (Join-Path $from 'task.json'))) { return }
+	New-Item -ItemType Directory -Force $TasksDir | Out-Null
+	Move-Item -LiteralPath $from -Destination (Join-Path $TasksDir $id)
+	$script:ArchiveCache = $null
+}
+
+# What the board no longer shows: approved or deleted more than a few days ago, on the board's folder or in the
+# archive. Newest first, $take at a time from $skip, narrowed to tasks that have every word of $query (in the title,
+# note, summary, id, branch or history).
+$BoardKeepsDays = 3
+$script:ArchiveCache = $null
+function Get-Archive([string]$query, [int]$skip = 0, [int]$take = 50) {
+	$key = "$TasksDir"
+	if (-not $script:ArchiveCache -or $script:ArchiveCache.Key -ne $key -or ((Get-Date) - $script:ArchiveCache.Read).TotalSeconds -gt 20) {
+		$cutoff = (Get-Date).AddDays(-$BoardKeepsDays)
+		$gone = @(Get-Tasks | Where-Object { $_.status -eq 'removed' -or ($_.status -eq 'done' -and $_.doneAt -and [datetime]$_.doneAt -le $cutoff) })
+		$kept = @(if (Test-Path -LiteralPath $ArchiveDir) { Read-TaskFolder $ArchiveDir })
+		$rows = @(@($gone) + @($kept) | Sort-Object { if ($_.doneAt) { [datetime]$_.doneAt } elseif ($_.updated) { [datetime]$_.updated } else { [datetime]::MinValue } } -Descending)
+		$script:ArchiveCache = @{ Key = $key; Read = Get-Date; Rows = $rows }
+	}
+	$rows = $script:ArchiveCache.Rows
+	$words = @("$query".ToLower() -split '\s+' | Where-Object { $_ })
+	if ($words.Count) {
+		$rows = @($rows | Where-Object {
+			$hay = ("$($_.id) $($_.title) $($_.note) $($_.summary) $($_.branch) $($_.type) " + ((@(Get-List $_.log) | ForEach-Object { $_.text }) -join ' ')).ToLower()
+			-not @($words | Where-Object { -not $hay.Contains($_) }).Count
+		})
+	}
+	[pscustomobject]@{ total = $rows.Count; skip = $skip; tasks = @($rows | Select-Object -Skip $skip -First $take) }
 }
 
 # ---- Questions for the user, with options that can carry an audio file to play or a picture to see ----
@@ -322,6 +480,9 @@ function Save-Undo($t) {
 function Restore-Undo($t) {
 	$u = $t.undo
 	if (-not $u) { throw 'Nothing to undo.' }
+	# Past the Undo window the conductor may already be acting on it (merging, stopping its worker): taking it back
+	# here would leave the card saying one thing and the work another.
+	if ($u.at -and ((Get-Date) - [datetime]$u.at).TotalSeconds -gt $UndoSeconds) { throw 'Too late to undo: it has gone to the conductor. Send it back, or write a note, to change it.' }
 	foreach ($name in 'status', 'pending', 'waiting', 'doneAt', 'order') { Set-Field $t $name $u.$name }
 	Set-Field $t 'log' @(Get-List $t.log | Select-Object -First $u.logCount)
 	Set-Field $t 'undo' $null
@@ -399,9 +560,67 @@ function Sync-Plan([string]$id) {
 
 # ---- What the user does to a task in the app ----
 
+$WorkerTiers = 'heavy', 'standard', 'light'
+
+# The lane and worker the user asked for, from "lane=3 tier=heavy" (either, or both; lane=0 or tier=any: no preference).
+function Set-Wanted($t, [string]$text) {
+	$changed = @()
+	if ($text -match '(?i)\blane\s*=\s*(\d+)') {
+		$n = [int]$Matches[1]
+		if ($n -gt $MostLanes) { throw "Lanes go up to $MostLanes." }
+		Set-Field $t 'wantLane' $(if ($n) { $n } else { $null })
+		$changed += $(if ($n) { "lane $n" } else { 'any lane' })
+	}
+	if ($text -match '(?i)\btier\s*=\s*([a-z]+)') {
+		$tier = $Matches[1].ToLower()
+		if ($tier -ne 'any' -and $tier -notin $WorkerTiers) { throw "A worker is one of: $($WorkerTiers -join ', ')." }
+		Set-Field $t 'wantTier' $(if ($tier -eq 'any') { '' } else { $tier })
+		$changed += $(if ($tier -eq 'any') { 'any worker' } else { "the $tier worker" })
+	}
+	if (-not $changed.Count) { throw 'Say which lane or worker: lane=3, tier=heavy.' }
+	$changed -join ', '
+}
+
 function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
+	# Something done to a task that was put away brings it back to the board first.
+	if ($action -in 'reopen', 'followup') { Restore-Archived $id }
 	$t = Read-Task $id
 	switch ($action) {
+		# ---- Stepping in on running work. The conductor runs the workers, so each of these waits on it, and
+		# rocco.ps1 show tells it what to do. With no conductor running no worker is either: it takes effect here. ----
+		# Pause: its worker stops, its branch stays, and it waits in Up next until the user resumes it.
+		'pause' {
+			if ($t.status -notin 'working', 'stuck', 'queued') { throw "$($t.id) isn't in Up next or being worked on." }
+			Set-Field $t 'held' $true
+			Add-Log $t 'you' 'Paused.'
+			if ($t.status -in 'working', 'stuck') {
+				if ((Get-Conductor).state -eq 'none') { Set-Status $t 'queued'; Set-Field $t 'pending' ''; Set-Field $t 'waiting' '' }
+				else { Set-Field $t 'pending' 'stop' }
+			}
+		}
+		'resume' {
+			if (-not $t.held) { throw "$($t.id) isn't paused." }
+			Set-Field $t 'held' $false
+			Add-Log $t 'you' 'Resumed.'
+			# Still stopping: the conductor hasn't got to it, so it just carries on. Otherwise it's picked up again.
+			if ($t.pending -eq 'stop') { Set-Field $t 'pending' '' }
+			elseif ($t.status -eq 'queued' -and -not $t.pending) { Send-ToConductor $t 'resume' }
+		}
+		# A fresh worker on it, from what the last one left.
+		'restart' {
+			if ($t.status -notin 'working', 'stuck') { throw "$($t.id) isn't being worked on." }
+			Set-Field $t 'attempt' ([int]$t.attempt + 1)
+			Set-Field $t 'held' $false
+			Set-Field $t 'pending' 'restart'
+			Add-Log $t 'you' $(if ($text) { "Start again with a fresh worker: $text" } else { 'Start again with a fresh worker.' })
+		}
+		# The lane it runs in, or the worker it gets. On running work it's moved; before it starts it's remembered.
+		'assign' {
+			if ($t.status -in 'done', 'removed') { throw "$($t.id) is finished." }
+			$what = Set-Wanted $t $text
+			Add-Log $t 'you' "Use $what."
+			if ($t.status -in 'working', 'stuck') { Set-Field $t 'pending' 'assign' }
+		}
 		'approve' {
 			Save-Undo $t
 			Set-Status $t 'done'
@@ -465,6 +684,40 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 	Save-Task $t
 	# Approving a plan's last step finishes the feature; Undo opens it again.
 	Sync-Plan $t.plan
+}
+
+# ---- Checks: what the worker ran, and what came of it ----
+# A worker records each test run or playtest on its card (rocco.ps1 result): whether it passed, a line saying what,
+# and the output itself (the tests' report, Studio's console) kept beside the task as check-N.txt. The card shows
+# them, so the user sees what was tried before they try it themselves.
+
+$CheckKeep = 12
+$CheckBytes = 200KB
+function Add-Check($t, [bool]$ok, [string]$text, [string]$file) {
+	$dir = Get-TaskDir $t.id
+	$checks = @(Get-List $t.checks)
+	$name = ''
+	if ($file) {
+		$source = Resolve-NamedPath $file
+		if (-not $source -or -not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "-File: there's no file at '$file'." }
+		$n = 1 + [int](@(Get-ChildItem -LiteralPath $dir -Filter 'check-*.txt' -File | ForEach-Object { if ($_.BaseName -match '-(\d+)$') { [int]$Matches[1] } }) | Measure-Object -Maximum).Maximum
+		$name = "check-$n.txt"
+		# The end of a long output is the part that says how it went.
+		$bytes = [IO.File]::ReadAllBytes($source)
+		if ($bytes.Length -gt $CheckBytes) {
+			$tail = New-Object byte[] $CheckBytes
+			[Array]::Copy($bytes, $bytes.Length - $CheckBytes, $tail, 0, $CheckBytes)
+			$bytes = [byte[]]($Utf8.GetBytes("(the last $([int]($CheckBytes / 1KB)) KB of a longer output)`n") + $tail)
+		}
+		[IO.File]::WriteAllBytes((Join-Path $dir $name), $bytes)
+	}
+	$entry = [pscustomobject]@{ at = (Now); ok = $ok; text = $text; file = $name; attempt = [int]$t.attempt }
+	$all = @($checks) + $entry
+	# Old outputs go with the entries that named them.
+	foreach ($gone in @($all | Select-Object -First ([Math]::Max(0, $all.Count - $CheckKeep)))) {
+		if ($gone.file) { Remove-Item -LiteralPath (Join-Path $dir $gone.file) -Force -ErrorAction SilentlyContinue }
+	}
+	Set-Field $t 'checks' @($all | Select-Object -Last $CheckKeep)
 }
 
 # Everything in the inbox goes to the conductor to plan.

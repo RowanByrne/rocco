@@ -101,9 +101,10 @@ function Set-CardInText([string]$text, $card) {
 	$before + "`n`n" + $block + $(if ($after) { "`n" + $after } else { '' })
 }
 
-function Save-Calendar([string]$text, [string]$message) {
+# $signIn: false when Rocco saves by itself (queueing a due event), so nothing asks the user to sign in to GitHub.
+function Save-Calendar([string]$text, [string]$message, [bool]$signIn = $true) {
 	Assert-OnMain
-	Save-RepoFile $CalendarFile $text $message
+	Save-RepoFile $CalendarFile $text $message $signIn
 }
 
 function New-CardId([string]$title, $cards) {
@@ -154,6 +155,9 @@ function Remove-UpdateCard([string]$id) {
 function Add-EventTasks([string[]]$ids, [bool]$auto) {
 	$calendar = Read-Calendar
 	$text = $calendar.text
+	# Checked before any task is made: with repo\ off main or mid-merge the calendar can't be saved, and the tasks
+	# would be left queued for events their cards know nothing about (and be queued again the next time).
+	Assert-OnMain
 	$queued = @()
 	foreach ($id in $ids) {
 		$card = @($calendar.cards | Where-Object { $_.id -eq $id })[0]
@@ -173,7 +177,12 @@ function Add-EventTasks([string[]]$ids, [bool]$auto) {
 	}
 	if (-not $queued) { return [pscustomobject]@{ queued = @(); saved = $null } }
 	$names = ($queued | ForEach-Object { $_.title }) -join ', '
-	[pscustomobject]@{ queued = $queued; saved = (Save-Calendar $text "Calendar: game page event queued for $names") }
+	try { $saved = Save-Calendar $text "Calendar: game page event queued for $names" (-not $auto) } catch {
+		# The cards couldn't be marked as queued: the tasks just made are taken back, so nothing is queued twice.
+		foreach ($q in $queued) { Remove-TaskFolder $q.task }
+		throw
+	}
+	[pscustomobject]@{ queued = $queued; saved = $saved }
 }
 
 # Cards close enough to need their event, and still without one.
