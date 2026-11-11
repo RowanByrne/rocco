@@ -370,11 +370,17 @@ const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revis
 const yours = (body, foot) => html`<div class="h-you"><div class="h-bubble">${body}</div>${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
 
 // A card, small, where the chat mentions it: its name and where it is now. It opens the card's own conversation.
-function taskChip(id, title = '') {
+// typed: the words the card came from. Until Rocco names the card, its title is just those words again, so only
+// where it is shows ("Up next"), not the same text twice.
+function taskChip(id, title = '', typed = '') {
   const t = byId(id), s = t && STATUS[t.status];
   const where = !t ? '' : t.kind === 'plan' ? (t.status === 'inbox' ? 'Plan to approve' : t.status === 'done' ? 'Built' : 'Feature')
     : t.kind === 'question' ? (t.status === 'queued' ? 'Asked' : 'Answered') : t.kind === 'errand' ? 'Done' : s?.[0] || '';
-  return html`<button class="tchip" data-open-task=${id} style="--c:${s ? s[1] : 'var(--gray)'}" title="Open ${id}"><i class="sdot"></i><span class="tchip-name">${t?.title || title || id}</span>${where ? html`<span class="tchip-state">${where}</span>` : nothing}</button>`;
+  const name = t?.title || title || id;
+  const flat = v => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const echo = !!typed && flat(typed).startsWith(flat(name).replace(/\.\.\.$/, ''));
+  return html`<button class="tchip" data-open-task=${id} style="--c:${s ? s[1] : 'var(--gray)'}" title="Open ${id}"><i class="sdot"></i>${
+    echo ? nothing : html`<span class="tchip-name">${name}</span>`}${where ? html`<span class="tchip-state">${where}</span>` : nothing}</button>`;
 }
 
 // "Reply" on a line about a card: what's typed next goes to that card (sent back if it's waiting to be tested).
@@ -394,7 +400,7 @@ function row(e, all) {
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
       const typed = e.act === 'note' || e.act === 'question';
-      if (typed || (SAID[e.act] && e.text)) return yours(e.text || e.title || '', html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title) : nothing}${at}`);
+      if (typed || (SAID[e.act] && e.text)) return yours(e.text || e.title || '', html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title, e.text || e.title) : nothing}${at}`);
       // Something you did to a card, with no words: a small line on your side.
       return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span>${e.title || ''}</span>`}${at}</div></div>`;
     }
