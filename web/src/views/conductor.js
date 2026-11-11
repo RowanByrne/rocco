@@ -381,6 +381,7 @@ function taskChip(id, title = '', typed = '') {
   const name = t?.title || title || id;
   const flat = v => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const echo = !!typed && flat(typed).startsWith(flat(name).replace(/\.\.\.$/, ''));
+  if (echo && !where) return nothing; // a card that's gone: nothing left to say about it
   return html`<button class="tchip" data-open-task=${id} style="--c:${s ? s[1] : 'var(--gray)'}" title="Open ${id}"><i class="sdot"></i>${
     echo ? nothing : html`<span class="tchip-name">${name}</span>`}${where ? html`<span class="tchip-state">${where}</span>` : nothing}</button>`;
 }

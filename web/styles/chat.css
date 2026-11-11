@@ -131,7 +131,8 @@
 .h-you.mine { margin: 2px 0; }
 /* Rocco's messages: just the text. Its time and Reply show on hover, at the top right, unless the line has more to say. */
 .h-msg { position: relative; }
-.h-msg.them .h-head:not(:has(.h-re, .h-act)) { position: absolute; top: 2px; right: 0; margin: 0; }
+/* Floated, so the first line of text wraps short of it instead of running under it. */
+.h-msg.them .h-head:not(:has(.h-re, .h-act)) { float: right; margin: 0 0 0 16px; position: relative; z-index: 1; }
 .h-msg.them .h-at { opacity: 0; transition: opacity .15s; }
 .h-msg.them:hover .h-at { opacity: 1; }
 
