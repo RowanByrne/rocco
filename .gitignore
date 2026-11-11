@@ -1,0 +1,2 @@
+# What the app's checks install (npm install). Rocco itself needs none of it.
+node_modules/

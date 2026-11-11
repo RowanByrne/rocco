@@ -1,0 +1,75 @@
+{
+  "state": {
+    "path": "/api/state",
+    "demo": "snapshot",
+    "fields": {
+      ".": ["rocco", "project", "lanes", "conductor", "main", "tasks", "others"],
+      "project": ["id", "name", "phase", "template"],
+      "lanes": ["count", "open", "main"],
+      "conductor": ["state", "agent", "doing", "open"],
+      "tasks": ["id", "title", "note", "kind", "type", "status", "pending", "attempt", "lane", "branch", "where", "step", "summary", "test", "questions", "waiting", "shots", "after", "order", "plan", "steps", "created", "log"]
+    },
+    "demoFields": {
+      "tasks": ["id", "title", "status", "pending", "attempt", "where", "shots", "log"]
+    }
+  },
+  "projects": {
+    "path": "/api/projects",
+    "demo": "projects",
+    "fields": { ".": ["home", "projects"], "projects": ["id", "name", "phase", "template"] }
+  },
+  "agent": {
+    "path": "/api/agent",
+    "demo": "agent",
+    "fields": { ".": ["id", "name", "short", "installed", "agents", "model", "takesModel", "models"], "agents": ["id", "name", "short", "installed"] }
+  },
+  "thread": {
+    "path": "/api/conductor/thread",
+    "demo": "conductorThread",
+    "fields": { ".": ["stamp", "items", "steps"] }
+  },
+  "history": {
+    "path": "/api/history",
+    "demo": "history",
+    "fields": { ".": ["repo", "main", "branches", "lanes"], "main": ["remote", "unpushed", "total", "commits"], "main.commits": ["full", "hash", "author", "at", "subject", "merge", "pushed"] }
+  },
+  "docs": {
+    "path": "/api/docs",
+    "demo": "docs",
+    "fields": { ".": ["repo", "template", "docs"], "docs": ["path", "title", "preview", "sections", "hash", "dirty", "locked", "at"] }
+  },
+  "connections": {
+    "path": "/api/connections",
+    "demo": "connections",
+    "fields": { ".": ["checking", "online", "items"], "items": ["group", "name", "status", "detail"] }
+  },
+  "archive": {
+    "path": "/api/archive",
+    "demo": "archive",
+    "demoArgs": ["", 0],
+    "fields": { ".": ["total", "skip", "tasks"], "tasks": ["id", "title", "status"] }
+  },
+  "usage": {
+    "path": "/api/usage",
+    "demo": "usage",
+    "fields": { ".": ["tasks", "plans", "conductor", "sessions"], "tasks": ["id", "title", "status", "worked", "in", "out", "cacheRead", "cacheWrite", "sessions"] }
+  },
+  "task": {
+    "path": "/api/tasks/{task}",
+    "demo": "task",
+    "demoArgs": ["{task}"],
+    "fields": { ".": ["id", "title", "status", "log"] }
+  },
+  "changes": {
+    "path": "/api/tasks/{task}/changes",
+    "demo": "changes",
+    "demoArgs": ["{task}"],
+    "fields": { ".": ["source", "url", "files"] }
+  },
+  "sessions": {
+    "path": "/api/tasks/{task}/sessions",
+    "demo": "sessions",
+    "demoArgs": ["{task}"],
+    "fields": {}
+  }
+}

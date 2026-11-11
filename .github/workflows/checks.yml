@@ -1,0 +1,28 @@
+# Every push and pull request: the server's tests on Windows (where Rocco runs), and the app's checks (types, lint,
+# tests) on Node. Neither is a build: Rocco still ships as the files in this repo. README.md "Checks".
+name: Checks
+on:
+  push:
+  pull_request:
+
+jobs:
+  server:
+    name: Server tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests\run.ps1
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\run.ps1
+
+  app:
+    name: App checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The versions package-lock.json names, exactly.
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check

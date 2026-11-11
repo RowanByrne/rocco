@@ -1,0 +1,18 @@
+{
+  "name": "rocco",
+  "private": true,
+  "type": "module",
+  "description": "Checks for Rocco's app (README.md, Checks). Rocco itself has no build step and nothing to install: these run only in development and in CI.",
+  "scripts": {
+    "types": "tsc -p jsconfig.json",
+    "lint": "eslint .",
+    "test": "node --test \"tests/web/**/*.test.js\"",
+    "check": "npm run types && npm run lint && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.14.0",
+    "globals": "17.14.0",
+    "typescript": "5.9.3"
+  }
+}

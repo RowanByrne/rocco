@@ -1,2 +1,4 @@
 # Windows runs .bat files with CRLF line endings.
 *.bat text eol=crlf
+# The app's font: never to be read, or changed, as text.
+*.woff2 binary
