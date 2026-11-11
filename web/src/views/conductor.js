@@ -365,8 +365,9 @@ const DID = {
 // What the user typed about a card, above their words.
 const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revise: 'Asked for changes', 'ask-more': 'Asked more', restart: 'Started again', 'make-task': 'Made a task' };
 
-const ROCCO = html`<span class="h-av rocco" aria-hidden="true">R</span>`;
-const meAvatar = () => html`<span class="h-av">${state.me?.avatar ? html`<img src=${state.me.avatar} alt="" referrerpolicy="no-referrer">` : (state.me?.name || 'You').trim().charAt(0).toUpperCase()}</span>`;
+// What you write sits on the right in a bubble, as in any chat app; what Rocco says and does runs down the left, so
+// its work never reads as yours.
+const yours = (body, foot) => html`<div class="h-you"><div class="h-bubble">${body}</div>${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
 
 // A card, small, where the chat mentions it: its name and where it is now. It opens the card's own conversation.
 function taskChip(id, title = '') {
@@ -385,21 +386,21 @@ function row(e, all) {
   switch (e.kind) {
     case 'said': {
       const long = (String(e.text || '').length > 900 || String(e.text || '').split('\n').length > 18) && !expanded.has(e.id);
-      return html`<div class="h-msg them">${ROCCO}<div class="h-body"><div class="h-head"><span class="h-who">Rocco</span>${at}${e.re ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
+      return html`<div class="h-msg them"><div class="h-body"><div class="h-head">${e.re ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
         long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div></div>`;
     }
     case 'message':
-      return html`<div class="h-msg you">${meAvatar()}<div class="h-body"><div class="h-head"><span class="h-who">You</span>${at}${e.via === 'terminal' ? html`<span class="h-re">in its window</span>` : nothing}</div><div class="h-text plain">${e.text}</div></div></div>`;
+      return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${at}`);
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
       const typed = e.act === 'note' || e.act === 'question';
-      if (typed || (SAID[e.act] && e.text)) return html`<div class="h-msg you">${meAvatar()}<div class="h-body"><div class="h-head"><span class="h-who">You</span>${at}${typed ? nothing : html`<span class="h-act">${SAID[e.act]}</span>`}</div><div class="h-text plain">${e.text || e.title || ''}</div>${
-        task ? html`<div class="h-chips">${taskChip(task, e.title)}</div>` : nothing}</div></div>`;
-      return html`<div class="h-event mine"><span class="h-dot"></span><span class="h-line">You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span class="h-line">${e.title || ''}</span>`}${at}</div>`;
+      if (typed || (SAID[e.act] && e.text)) return yours(e.text || e.title || '', html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title) : nothing}${at}`);
+      // Something you did to a card, with no words: a small line on your side.
+      return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span>${e.title || ''}</span>`}${at}</div></div>`;
     }
     case 'asked': {
       const reply = all.find(x => x.kind === 'answered' && x.to === e.id);
-      return html`<div class="h-msg them">${ROCCO}<div class="h-body"><div class="h-head"><span class="h-who">Rocco</span>${at}<span class="h-act ask">Asked</span></div>${e.questions.map((q, i) => {
+      return html`<div class="h-msg them"><div class="h-body"><div class="h-head"><span class="h-act ask">Asked</span>${at}</div>${e.questions.map((q, i) => {
         // The picture of the option picked, when it had one.
         const pic = reply && (q.options || []).find(o => o.image && o.label === reply.answers?.[i])?.image;
         return html`<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${pic ? html`<img class="h-pic" src=${fileOf(pic)} alt="" loading="lazy">` : nothing}${reply ? reply.answers?.[i] ?? '' : 'Waiting for your answer, below'}</div>`;

@@ -19,7 +19,7 @@ const open = () => menu().classList.contains('open');
 
 // The running conductor, when it's on something other than what's picked now.
 function behind() {
-  const a = state.agent, c = state.meta.conductor || {};
+  const a = state.agent, c = /** @type {any} */ (state.meta.conductor || {});
   if (!a || c.state === 'none' || !c.state) return false;
   return (a.takesModel && (c.model || '') !== (a.model || '')) || (a.takesEffort && (c.effort || '') !== (a.effort || ''));
 }
