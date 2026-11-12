@@ -2,7 +2,7 @@
 // plan to approve, what the agent spotted), Working, and Up next, the queue in order, which the user can reorder
 // (never ahead of what a task waits on). On a feature's tab the rail lists that feature's cards. On a narrow window
 // the rail is a row of counts above the chat, which opens to the lists.
-// A card opens as its own conversation in the chat's place (ui/sheet.js, docked): what it is, what to try, what it
+// A card opens over the page (ui/sheet.js; a feature plan in the chat's place, docked): what it is, what to try, what it
 // changed, its agent's session word for word, and a box that sends it back or adds to it.
 // Everything is drawn from the tasks each time they change, an open card included, and only what differs is
 // touched, so a list stays where it was scrolled and a box keeps what's typed in it.
@@ -143,7 +143,8 @@ function card(t) {
       t.followups > 0 ? html`<span class="fchip" title="The worker hasn't read your follow-up yet">Follow-up sent</span>` : nothing}${stepChips(t)}`;
     right = t.lane ? html`<span class="lc" title="Lane ${t.lane}">L${t.lane}</span>` : nothing;
     extra = workingSteps(t);
-    bar = typeof t.progress === 'number' ? html`<div class="bar"><i style="width:${Math.max(3, t.progress)}%"></i></div>` : html`<div class="progress"></div>`;
+    // The sweep runs the whole time it's being worked on; a solid bar fills under it once its worker says how far it is.
+    bar = html`${typeof t.progress === 'number' ? html`<div class="bar"><i style="width:${Math.max(3, t.progress)}%"></i></div>` : nothing}<div class="progress"></div>`;
   }
   return html`<div class="card s-${t.status}${t.fresh ? ' fresh' : ''}${fold ? ' collapse' : ''}" data-id=${t.id} tabindex="0" role="button" aria-label=${t.title}><div class="c-row"><div class="c-main"><div class="c-title">${
     t.feature && !t.plan ? icon.branch : nothing}<span>${t.title}</span></div><div class="c-meta">${typeTag(t)}${featureTag(t)}${info}</div></div>${right}</div>${extra}${bar}</div>`;
@@ -472,14 +473,16 @@ function drawTask(id) {
     chip: isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status],
     // A deleted task (opened from the archive) has nothing left to delete.
     id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${stepButtons(t)}${t.status === 'removed' ? nothing : deleteButton(t)}`, wide: true,
-    dock: true, // in the chat's place, with the rail still beside it
+    // A feature plan takes the chat's place, with the rail beside it; a smaller card opens over the page, and a click
+    // off it closes it.
+    dock: isPlan(t),
   });
   if (atEnd) body.scrollTop = body.scrollHeight;
   // It moved on (sent back, built again): what it changed is loaded again, and the lines that were open are let go.
   if (t.branch && changes?.id === id && !changes.loading && changes.stamp !== changeStamp(t)) { forgetDiffs(); loadChanges(id); }
 }
 
-// Opens a card as its own conversation, in the chat's place. A feature or a card with an agent of its own is talked
+// Opens a card as its own conversation, over the page (a plan in the chat's place). A feature or a card with an agent of its own is talked
 // to on its tab instead, unless it's the card itself that's wanted (asCard: its plan, its details).
 export function openTask(id, asCard = false) {
   const t = byId(id);
