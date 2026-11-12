@@ -42,7 +42,7 @@ When the user approves the last step, the feature is done and Rocco closes your 
 | | The user | You |
 |---|---|---|
 | `[approved]` | Approved the plan | Start the first step, then `clear <the feature's id>` |
-| `C-… [message]` | Wrote to you in the thread | Act on it, then `clear C-…` |
+| `C-… [message]` | Wrote to you in the thread | Act on it, then `clear C-…`. One from Rocco itself (`show` says so) means the user clicked Fix lanes: your lane went down and is being opened again, so check its place is open and syncing, redo what failed while it was down, then `clear C-…` |
 | `C-… [answer]` | Answered a question of yours | Carry on with it, then `clear C-…` |
 | `[reopen]` | Tested a step: not right yet | Their words are the last `you` line in `show`. Fix it, on the same task (`set -Status working`) |
 | `[followup]` | Added something to a step while you worked | Fold it in, then `clear` |
