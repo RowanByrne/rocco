@@ -421,6 +421,8 @@ function row(e, all, prev = '') {
         long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div></div>`;
     }
     case 'message':
+      // Rocco's own word to the agent (Fix lanes): a line, in the words meant for the user.
+      if (e.who === 'rocco') return html`<div class="h-event"><span class="h-dot"></span><span class="h-line">${e.line || e.text}</span>${at}</div>`;
       return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${at}`);
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.

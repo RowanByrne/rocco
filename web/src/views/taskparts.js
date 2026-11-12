@@ -45,18 +45,27 @@ export function effort(t) {
 // Work that a worker does or will do: not a feature plan (its steps are the tasks) or a question to the conductor.
 const stepsIn = t => t.kind !== 'plan' && t.kind !== 'question' && ['working', 'stuck', 'queued'].includes(t.status);
 
-// The row under a task's title: Pause or Resume, Start again, and the lane and worker to use. The conductor runs the
-// workers, so each of these is handed to it (and says so until it's done).
-export function stepIn(t) {
+// Pause or Resume, and Start again: icons in the sheet's header, by Delete, each saying what it does when hovered.
+// The conductor runs the workers, so each of these is handed to it (stepIn's note says so until it's done).
+export function stepButtons(t) {
   if (!stepsIn(t)) return nothing;
   const running = t.status === 'working' || t.status === 'stuck';
-  const count = state.meta.lanes?.count || 0;
   const pausing = t.held && t.pending === 'stop';
+  const tip = t.held ? 'Resume: Rocco picks it up next' : running ? 'Pause: stop its worker and keep its branch, until you resume it' : 'Pause: keep it from starting until you resume it';
+  return html`${t.held
+    ? html`<button class="icon-btn go" data-step="resume" title=${tip} aria-label=${tip}>${icon.play}</button>`
+    : html`<button class="icon-btn" data-step="pause" title=${tip} aria-label=${tip}>${icon.pause}</button>`}${
+    running && !pausing ? (part.confirm === 'restart'
+      ? html`<button class="btn-sm danger confirm" data-step="restart" title="Stop its worker and start a fresh one on it, from what it has so far">Start again?</button>`
+      : html`<button class="icon-btn" data-step="restart" title="Start again: stop its worker and start a fresh one on it, from what it has so far" aria-label="Start again">${icon.retry}</button>`) : nothing}`;
+}
+
+// The row under a task's title: the lane and worker to use, and what Rocco is doing about a step in (stepButtons).
+export function stepIn(t) {
+  if (!stepsIn(t)) return nothing;
+  const count = state.meta.lanes?.count || 0;
   const waits = { stop: 'Pausing: Rocco is stopping its worker', restart: 'Rocco is starting a fresh worker on it', assign: 'Rocco is moving it', resume: 'Resumed: Rocco picks it up next' }[t.pending] || (t.held ? 'Paused. Its branch is kept, and it waits here until you resume it.' : '');
-  return html`<div class="s-step">${
-    t.held ? html`<button class="btn-sm go" data-step="resume">Resume</button>` : html`<button class="btn-sm" data-step="pause" title=${running ? 'Stop its worker and keep its branch, until you resume it' : 'Keep it from starting until you resume it'}>Pause</button>`}${
-    running && !pausing ? html`<button class="btn-sm${part.confirm === 'restart' ? ' danger confirm' : ''}" data-step="restart" title="Stop its worker and start a fresh one on it, from what it has so far">${part.confirm === 'restart' ? 'Stop it and start again?' : 'Start again'}</button>` : nothing
-  }<label class="s-pick">Lane<select class="input" data-want="lane" .value=${String(t.wantLane || 0)}><option value="0" ?selected=${!t.wantLane}>Any</option>${
+  return html`<div class="s-step"><label class="s-pick">Lane<select class="input" data-want="lane" .value=${String(t.wantLane || 0)}><option value="0" ?selected=${!t.wantLane}>Any</option>${
     Array.from({ length: count }, (_, i) => i + 1).map(n => html`<option value=${n} ?selected=${t.wantLane === n}>${n}</option>`)}</select></label><label class="s-pick">Worker<select class="input" data-want="tier" .value=${t.wantTier || 'any'}><option value="any" ?selected=${!t.wantTier}>Any</option>${
     TIERS.map(x => html`<option value=${x} ?selected=${t.wantTier === x}>${TIER_NAME[x]}</option>`)}</select></label>${
     waits ? html`<span class="s-step-note">${waits}</span>` : nothing}</div>`;

@@ -23,7 +23,7 @@ import { pics, picOption, openPicsFrom } from '../ui/pics.js';
 import { showDoc } from './docs.js';
 import { prose, proseLine } from '../prose.js';
 import { startSession, scrollSessionToEnd } from './session.js';
-import { stepIn, stepChips, effort, checks, changedFile, linkButton, partsClick, partsChange, resetParts, forgetDiffs } from './taskparts.js';
+import { stepIn, stepButtons, stepChips, effort, checks, changedFile, linkButton, partsClick, partsChange, resetParts, forgetDiffs } from './taskparts.js';
 import { showArchive } from './archive.js';
 import { showUsage } from './usage.js';
 import { activeThread, openThread } from './conductor.js';
@@ -422,8 +422,13 @@ function stayOpen(id) {
 // Work a worker is on, or that's done on a branch but not merged: the conductor stops it and drops it.
 const running = t => t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && !!t.branch && (t.status !== 'done' || t.pending === 'merge'));
 
-const deleteButton = t => html`<button class="btn-sm danger${ui.confirm ? ' confirm' : ''}" data-delete>${
-  ui.confirm ? (running(t) || (isPlan(t) && childrenOf(t).some(running)) ? 'Stop and delete?' : 'Delete it?') : isPlan(t) && childrenOf(t).length ? 'Delete plan' : 'Delete'}</button>`;
+// A trash icon, saying what it deletes when hovered; once clicked, it asks in words.
+function deleteButton(t) {
+  const what = isPlan(t) && childrenOf(t).length ? 'Delete the plan and its tasks' : running(t) ? 'Delete it: its work is stopped' : 'Delete it';
+  return ui.confirm
+    ? html`<button class="btn-sm danger confirm" data-delete>${running(t) || (isPlan(t) && childrenOf(t).some(running)) ? 'Stop and delete?' : 'Delete it?'}</button>`
+    : html`<button class="icon-btn danger" data-delete title=${what} aria-label=${what}>${icon.trash}</button>`;
+}
 
 function deletedText(t) {
   if (isPlan(t)) return childrenOf(t).length ? 'Deleted the plan and its tasks' : 'Plan deleted';
@@ -466,7 +471,7 @@ function drawTask(id) {
     color: isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status],
     chip: isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status],
     // A deleted task (opened from the archive) has nothing left to delete.
-    id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${t.status === 'removed' ? nothing : deleteButton(t)}`, wide: true,
+    id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${stepButtons(t)}${t.status === 'removed' ? nothing : deleteButton(t)}`, wide: true,
     dock: true, // in the chat's place, with the rail still beside it
   });
   if (atEnd) body.scrollTop = body.scrollHeight;

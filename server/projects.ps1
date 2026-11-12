@@ -75,8 +75,10 @@ function Get-Lanes {
 	$mine = Get-WorkstationLanes
 	$folders = @(Get-ChildItem (Join-Path $Root 'lanes') -Directory -Filter 'lane*' -ErrorAction SilentlyContinue).Count
 	$count = if ($null -ne $mine) { [Math]::Max($mine, $highest) } elseif ($highest) { $highest } else { $folders }
-	# mine: this PC's row, $null when it has none yet (lanes.ps1 asks how many).
-	[pscustomobject]@{ count = $count; open = $served; main = [bool]($base -and $listening.Contains($base)); mine = $mine; jobs = @(Get-LaneJobs) }
+	# mine: this PC's row, $null when it has none yet (lanes.ps1 asks how many). studio: the lanes open in Studio, $null
+	# when that can't be told (lanes.ps1 Get-OpenPlaces).
+	$places = Get-OpenPlaces $count
+	[pscustomobject]@{ count = $count; open = $served; studio = $(if ($places.known) { @($places.open) } else { $null }); main = [bool]($base -and $listening.Contains($base)); mine = $mine; jobs = @(Get-LaneJobs) }
 }
 
 $script:MainCache = @{}

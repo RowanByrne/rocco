@@ -38,7 +38,8 @@ function seed(id) {
   if (id !== 'sample-game') return { id, tasks: [], lanes: { count: 0, open: [], main: false, mine: null }, conductor: { state: 'none' }, main: { at: ago(600), subject: 'Start from the template' } };
   return {
     id,
-    lanes: { count: 8, open: [1, 2, 3, 4, 5, 6, 7], main: true, mine: 8 },
+    // Lane 3's Studio closed under its worker: the sidebar says it's down, with Fix lanes.
+    lanes: { count: 8, open: [1, 2, 3, 4, 5, 6, 7], studio: [1, 2, 4, 5, 6, 7], main: true, mine: 8 },
     main: { at: ago(4), subject: 'Merge agent/daily-reward' },
     tasks: [
       { ...base, id: 'T-038', status: 'ready', type: 'bug', lane: 2, attempt: 2, title: 'Daily reward claimable twice after rejoin', shots: [picture(200)],
@@ -233,7 +234,7 @@ function conductorView(d, id = '') {
 // The threads with an agent of their own (server/leads.ps1, Get-LeadsState).
 const leadsView = d => d.tasks.filter(t => t.lead && onBoard(t)).map(t => ({
   id: t.id, title: t.title, kind: t.kind === 'plan' ? 'feature' : 'card', lane: t.lane || null, done: t.status === 'done', handoff: t.pending === 'handoff',
-  waiting: t.pending === 'handoff' ? '' : t.leadWaiting || '', conductor: conductorView(d, t.id),
+  waiting: t.pending === 'handoff' ? '' : t.leadWaiting || '', opened: true, conductor: conductorView(d, t.id),
 }));
 
 export async function conductorThread(stamp, thread = '') {
@@ -735,6 +736,22 @@ export async function newProject({ name }) {
   return { job: id };
 }
 export async function laneAdvice() { return { pc: 'THIS-PC', memory: 32, threads: 16, cpu: 'Sample 8-Core Processor', perLane: 3, suggested: 7, most: 7, mine: null }; }
+// Fix lanes (server/lanes.ps1 Repair-Lanes): what went down is open again a moment later, and the agent is told.
+export async function fixLanes(down) {
+  const d = current();
+  for (const x of down) {
+    const lead = d.tasks.find(t => t.lead && t.lane === x.lane && !['done', 'removed'].includes(t.status));
+    const gone = [x.what.includes('studio') ? 'its Studio place had closed' : '', x.what.includes('lync') ? 'its Lync had stopped' : ''].filter(Boolean);
+    if (gone.length) addLine(d, 'message', { via: 'lanes', line: `Lane ${x.lane}: ${gone.join(' and ')}. Rocco is opening it again.`, text: `From Rocco, not the user: lane ${x.lane} went down.` }, 'rocco', lead ? lead.id : '');
+  }
+  const lanes = new Set(down.map(x => x.lane));
+  setTimeout(() => {
+    const open = [...new Set([...d.lanes.open, ...lanes])].sort((a, b) => a - b);
+    d.lanes = { ...d.lanes, open, studio: [...new Set([...(d.lanes.studio || []), ...lanes])].sort((a, b) => a - b) };
+  }, 2500);
+  return { job: null, agents: [] };
+}
+
 export async function openLanes(project, count) {
   const d = (data[project || state.project] ??= seed(project || state.project));
   const id = `lanes${Object.keys(jobs).length}`;

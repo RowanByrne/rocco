@@ -306,7 +306,7 @@ function Show-ThreadItem([string]$id) {
 	$time = ([datetime]$e.at).ToString('HH:mm')
 	switch ($e.kind) {
 		'message' {
-			"$($e.id)  message from the user, $time$(if ($e.to) { ", replying to $($e.to)" })"
+			"$($e.id)  message from $(if ($e.who -eq 'rocco') { 'Rocco itself (Fix lanes)' } else { 'the user' }), $time$(if ($e.to) { ", replying to $($e.to)" })"
 			$e.text
 		}
 		'answered' {

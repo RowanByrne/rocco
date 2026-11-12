@@ -20,7 +20,6 @@
 <link rel="stylesheet" href="styles/dialogs.css">
 <link rel="stylesheet" href="styles/onboarding.css">
 <link rel="stylesheet" href="styles/liveops.css">
-<link rel="stylesheet" href="styles/mascot.css">
 <script>
   // The theme, before anything is drawn (src/theme.js keeps it): light unless this browser was set to dark, or to
   // follow the system and the system is dark.
@@ -105,12 +104,14 @@
       <div class="stat"><span>Main</span><b id="mainStat"><span class="live" id="liveDot"></span><span id="mainAgo"></span></b></div>
       <div class="stat" id="laneStat"><span>Lanes</span><b id="laneCount"></b></div>
       <div class="lane-grid" id="lanes"></div>
+      <div class="lane-down" id="laneDown" hidden></div>
       <div class="lane-key" id="laneKey" hidden>
         <span title="Open, with no task in it"><i class="ln"></i>Free</span>
         <span title="A worker is on a task in it"><i class="ln working"></i>Working</span>
         <span title="Its worker is stuck and needs help"><i class="ln stuck"></i>Stuck</span>
         <span title="Keeps a finished task's branch until it's tested and merged"><i class="ln held"></i>Holding</span>
         <span title="Lync isn't serving it on this PC. A colored outline is a lane with work in it."><i class="ln closed"></i>Not open</span>
+        <span title="It has work in it, but its Lync, its Studio place or its agent stopped. Fix lanes opens it again."><i class="ln down"></i>Down</span>
       </div>
     </div>
     <button class="me" id="meBtn" aria-haspopup="menu" aria-expanded="false" title="You">
@@ -146,7 +147,6 @@
             <div class="wb-foot">
               <div class="cond-asks" id="condAsks"></div>
               <div class="composer-wrap">
-                <div class="mascot" id="mascot" aria-hidden="true" hidden></div>
                 <form class="composer" id="composer" autocomplete="off">
                   <div class="note-mode" id="noteMode" hidden></div>
                   <div class="drafts" id="drafts"></div>

@@ -12,6 +12,10 @@ import { switchProject } from './projects.js';
 import { openOnboarding, openLanesDialog } from './dialogs/onboarding.js';
 import { go } from './router.js';
 import { shownTheme, toggleTheme } from './theme.js';
+import { once } from './lib/busy.js';
+import { toast } from './ui/toast.js';
+import { notify } from './notify.js';
+import { refresh } from './sync.js';
 
 // A lane is busy while a worker is in it, or while it holds a branch: stuck, or a feature waiting for the user or the conductor.
 function laneState(n) {
@@ -22,6 +26,68 @@ function laneState(n) {
   if (!t) return ['', `Lane ${n}: free`];
   if (t.status === 'working' || t.status === 'stuck') return [t.status, `Lane ${n}: ${t.title}`];
   return ['held', `Lane ${n}: holding ${t.branch || 'a branch'} for ${t.title}`];
+}
+
+// ---- A lane that went down ----
+
+const DOWN_WHAT = { lync: 'Lync stopped', studio: 'Studio closed', agent: 'its agent stopped' };
+const downText = d => d.what.map(w => DOWN_WHAT[w]).join(', ');
+
+// The lanes with work in them that went down: [{ lane, what }], what holding 'lync' (its Lync stopped), 'studio' (its
+// place isn't open in Studio) and 'agent' (the feature's own agent in it stopped). Only lanes with work in them: a lane
+// with none is just shown as not open, since Rocco can't tell a crash from the user closing it. Nothing while the lanes
+// are being opened.
+export function downLanes() {
+  const lanes = /** @type {any} */ (state.meta.lanes) || {};
+  if (!lanes.count || lanes.jobs?.length) return [];
+  const open = new Set(lanes.open || []), studio = Array.isArray(lanes.studio) ? new Set(lanes.studio) : null;
+  const out = [];
+  for (let n = 1; n <= lanes.count; n++) {
+    const work = state.tasks.some(t => t.lane === n && t.status === 'working');
+    const leadTask = state.tasks.find(t => t.lead && t.lane === n && !['done', 'removed'].includes(t.status));
+    const lead = leadTask && (state.meta.leads || []).find(l => l.id === leadTask.id);
+    const building = !!lead && lead.opened && !lead.done && !lead.handoff && !lead.waiting;
+    if (!work && !building) continue;
+    const what = [];
+    if (!open.has(n)) what.push('lync');
+    if (studio && !studio.has(n)) what.push('studio');
+    if (building && lead.conductor?.state === 'none') what.push('agent');
+    if (what.length) out.push({ lane: n, what });
+  }
+  return out;
+}
+
+// Fix lanes: Rocco opens again what went down (server/lanes.ps1 Repair-Lanes), and tells the agent with work there.
+async function fixLanes(button) {
+  const down = downLanes();
+  if (!down.length) return;
+  await once('fix-lanes', async () => {
+    try {
+      const r = await api.fixLanes(down);
+      const names = down.map(d => d.lane);
+      toast(`Rocco is opening ${names.length === 1 ? `lane ${names[0]}` : `lanes ${names.join(', ')}`} again${r.agents?.length ? ', with its agent' : ''}`, 'var(--green)');
+      await refresh();
+    } catch (e) { toast(`Couldn't fix the lanes: ${e.message}`, 'var(--red)'); }
+  }, button);
+}
+
+// A busy lane going down gets a toast and a desktop notification, once; one already down when Rocco loaded doesn't.
+const downSeen = new Set();
+let downFirst = true;
+function announceDown(down) {
+  if (!state.online || !('stamp' in (state.meta.conductor || {}))) return; // not loaded yet
+  const now = new Set(down.map(d => `${state.project}:${d.lane}:${d.what.join(',')}`));
+  for (const key of [...downSeen]) if (!now.has(key)) downSeen.delete(key);
+  for (const d of down) {
+    const key = `${state.project}:${d.lane}:${d.what.join(',')}`;
+    if (downSeen.has(key)) continue;
+    downSeen.add(key);
+    if (downFirst) continue;
+    const message = `Lane ${d.lane} is down: ${downText(d)}. Fix lanes opens it again.`;
+    toast(message, 'var(--red)', { label: 'Fix lanes', run: () => fixLanes(null) });
+    notify('Rocco', message, () => fixLanes(null));
+  }
+  downFirst = false;
 }
 
 export function renderSidebar() {
@@ -41,11 +107,18 @@ export function renderSidebar() {
     : `${lanes.main ? 'Lync is serving Main.' : 'Lync isn\'t serving Main.'}${state.meta.main.subject ? ` Last change: ${state.meta.main.subject}` : ''}`;
 
   // Lanes: one labeled chip per lane this PC opens, up to 8 a row, outlined while its Lync isn't serving. The key below says what each color means.
+  // A lane with work in it that went down is red, and the line under them says so, with Fix lanes.
   const open = new Set(lanes.open || []);
+  const down = downLanes(), downOf = new Map(down.map(d => [d.lane, d]));
   const bars = Array.from({ length: lanes.count }, (_, i) => {
-    const n = i + 1, [cls, tip] = laneState(n), isOpen = open.has(n);
+    const n = i + 1, [cls, tip] = laneState(n), isOpen = open.has(n), d = downOf.get(n);
+    if (d) return { n, cls: `${cls} down`, tip: `${tip} · down: ${downText(d)}`, busy: true };
     return { n, cls: cls + (isOpen ? '' : ' closed'), tip: tip + (isOpen ? '' : ' · not open'), busy: !!cls };
   });
+  render(down.length ? html`<span class="ld-text" title=${down.map(d => `Lane ${d.lane}: ${downText(d)}`).join('\n')}>${
+    down.length === 1 ? `Lane ${down[0].lane}: ${downText(down[0])}` : `Lanes ${down.map(d => d.lane).join(', ')} are down`}</span><button class="btn-sm ld-fix" data-fix-lanes title="Open again what went down, and tell the agent working there">Fix lanes</button>` : nothing, $('#laneDown'));
+  $('#laneDown').hidden = !down.length;
+  announceDown(down);
   // Lanes opens the lanes screen (onboarding.js): how many this PC runs, and opening them. A PC with none yet is asked.
   const game = !currentProject().template && state.online;
   $('#laneStat').hidden = !lanes.count && !game;
@@ -186,5 +259,6 @@ export function initSidebar() {
     else if (e.target.closest('[data-dark]')) { toggleTheme(); render(meMenu(), $('#meMenu')); }
   });
 
+  $('#laneDown').addEventListener('click', e => { const b = /** @type {Element} */ (e.target).closest('[data-fix-lanes]'); if (b) fixLanes(b); });
   $('#laneStat').addEventListener('click', () => { if (!currentProject().template && !state.meta.lanes.jobs?.length) openLanesDialog(); });
 }

@@ -2,12 +2,16 @@
 
 /* Under a task's title: what it took, and stepping in on its worker. */
 .s-effort { margin-top: 4px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.s-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.s-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 12px; }
 .s-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
 .s-pick select { height: 26px; padding: 0 6px; border-radius: 8px; font-size: 12px; color: var(--text-2); }
 .s-step-note { flex-basis: 100%; font-size: 12px; color: var(--text-3); }
 .fchip.paused { color: var(--amber); background: rgba(var(--amber-rgb), .1); }
-.s-tools .icon-btn { margin-right: 4px; }
+/* The sheet's header icons: link, Pause or Resume, Start again, and Delete (a trash can, red when hovered). */
+.s-tools { align-items: center; gap: 2px; }
+.s-tools .btn-sm.confirm { margin-left: 4px; }
+.s-tools .icon-btn.go { color: var(--accent-text); }
+.s-tools .icon-btn.danger:hover { color: var(--red-text); background: rgba(var(--red-rgb), .12); }
 .s-older { margin-top: 14px; }
 
 /* Checks: what its worker ran. */

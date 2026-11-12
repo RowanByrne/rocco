@@ -217,11 +217,38 @@ function Test-PlaceOpen([string]$path) {
 	foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='RobloxStudioBeta.exe'" -ErrorAction SilentlyContinue)) {
 		if ("$($p.CommandLine)".IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
 	}
+	Test-PlaceLocked $path
+}
+
+# Whether a running Studio holds the place's lock. One that closed without warning leaves it behind, unheld.
+function Test-PlaceLocked([string]$path) {
 	$lock = "$path.lock"
 	if (Test-Path -LiteralPath $lock) {
 		try { $fs = [IO.File]::Open($lock, 'Open', 'ReadWrite', 'None'); $fs.Close() } catch [IO.IOException] { return $true } catch { }
 	}
 	$false
+}
+
+# Which lanes this PC has open in Studio, by Test-PlaceOpen's three signs, looked at once for them all. { known, open }:
+# known is false when it can't be told (no game code yet). Kept ten seconds, since the app asks every few.
+$script:PlacesCache = @{}
+function Get-OpenPlaces([int]$count) {
+	$hit = $script:PlacesCache[$Root]
+	if ($hit -and $hit.Count -eq $count -and ((Get-Date) - $hit.Read).TotalSeconds -lt 10) { return $hit.Value }
+	$code = (Get-ProjectField 'Code').Trim('`', ' ')
+	$value = [pscustomobject]@{ known = [bool]($code -and $code -notmatch '\{\{'); open = @() }
+	$studios = @(Get-Process RobloxStudioBeta -ErrorAction SilentlyContinue)
+	if ($value.known -and $studios.Count -and $count -gt 0) {
+		$titles = @($studios | ForEach-Object { "$($_.MainWindowTitle)" })
+		$lines = @(Get-CimInstance Win32_Process -Filter "Name='RobloxStudioBeta.exe'" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.CommandLine)" })
+		$value.open = @(1..$count | Where-Object {
+			$path = Find-PlaceFile "$code-Lane$_"
+			$file = Split-Path $path -Leaf
+			@($titles | Where-Object { $_ -like "*$file*" }).Count -or @($lines | Where-Object { $_.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -or (Test-PlaceLocked $path)
+		})
+	}
+	$script:PlacesCache[$Root] = @{ Read = Get-Date; Count = $count; Value = $value }
+	$value
 }
 
 # Main and lane1 to laneK (this PC's row), each made if it's missing, served by Lync, and open in Studio. What's there
@@ -294,4 +321,35 @@ function Start-OpenLanes($count) {
 function Get-LaneJobs {
 	$id = Split-Path $Root -Leaf
 	@($script:Jobs.Keys | Where-Object { $j = $script:Jobs[$_]; $j.Kind -eq 'lanes' -and $j.Name -eq $id -and -not $j.Process.HasExited })
+}
+
+# Fix lanes (the sidebar): lanes with work in them that went down, as the app saw them: [{ lane, what }], what holding
+# 'lync', 'studio' and 'agent'. What isn't open is opened again (Open-Lanes: Lync, then the place, with a crash's leftover
+# lock cleared), and a feature's agent that stopped is opened again, picking its work up. The agent with work in a lane
+# whose place or Lync went down is told, so it checks the place is syncing and redoes what failed: the feature's own
+# agent, or the conductor. Returns { job, agents }: the lanes job, and the lanes whose agent was opened.
+function Repair-Lanes($down) {
+	$tasks = @(Get-Tasks)
+	$open = @($down | Where-Object { @($_.what) -contains 'lync' -or @($_.what) -contains 'studio' })
+	$job = if ($open.Count) { (Start-OpenLanes $null).job } else { $null }
+	$agents = @()
+	$was = $script:ThreadId
+	try {
+		foreach ($d in $down) {
+			$n = [int]$d.lane
+			$what = @($d.what)
+			$lead = $tasks | Where-Object { $_.lead -and [int]$_.lane -eq $n -and $_.status -notin 'done', 'removed' } | Select-Object -First 1
+			Use-Thread $(if ($lead) { "$($lead.id)" } else { '' })
+			$gone = @($(if ($what -contains 'studio') { 'its Studio place had closed' }), $(if ($what -contains 'lync') { 'its Lync had stopped' }) | Where-Object { $_ })
+			if ($gone.Count) {
+				Add-Thread 'message' @{
+					via = 'lanes'
+					line ="Lane ${n}: $($gone -join ' and '). Rocco is opening it again."
+					text = "From Rocco, not the user: lane $n went down ($($gone -join ' and ')), and Rocco is opening it again. Before you carry on with work in that lane, check its place is open in Studio and syncing ($(Get-ToolsPath)\rocco.ps1 lanes opens whatever isn't), and redo anything that failed while it was down."
+				} 'rocco' | Out-Null
+			}
+			if ($lead -and $what -contains 'agent' -and (Start-Lead "$($lead.id)")) { $agents += $n }
+		}
+	} finally { $script:ThreadId = $was }
+	[pscustomobject]@{ job = $job; agents = $agents }
 }

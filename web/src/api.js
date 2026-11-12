@@ -93,6 +93,7 @@ export const api = {
   // This PC's lanes (server/lanes.ps1): its memory and threads with a suggested number, and opening them in the
   // background ({ job }). A count records this PC's number first; without one, the lanes it has are opened.
   laneAdvice: project => DEMO ? demo.laneAdvice() : getJson(project ? `/api/lanes?p=${encodeURIComponent(project)}` : '/api/lanes'),
+  fixLanes: down => DEMO ? demo.fixLanes(down) : post(withProject('/api/lanes/fix'), { down }),
   openLanes: (project, count = null) => DEMO ? demo.openLanes(project, count) : post(`/api/lanes?p=${encodeURIComponent(project || state.project)}`, { count }),
   // The user's agent as this project's conductor, when none is running (server/conductor.ps1): { agent }.
   openConductor: () => DEMO ? demo.openConductor() : post(withProject('/api/conductor')),

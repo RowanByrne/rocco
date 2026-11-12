@@ -446,6 +446,32 @@ try {
 	Stop-Server
 	Write-Host 'Pieces'
 
+	Test 'a lane that went down: its places are looked at, and Fix lanes tells the agent' {
+		Use-Project $Game
+		$places = Get-OpenPlaces 3
+		Assert $places.known 'the game has a code, so its places can be looked for'
+		Assert-Equal @($places.open).Count 0 'none of the test game''s places is open in Studio'
+		# Opening the lanes for real would start Lync and Studio: a stand-in records that it was asked.
+		$script:asked = 0
+		function Start-OpenLanes { $script:asked++; [pscustomobject]@{ job = 'stub' } }
+		Use-Thread ''
+		$r = Repair-Lanes @([pscustomobject]@{ lane = 2; what = @('studio') })
+		Assert-Equal $r.job 'stub' 'what went down is opened again'
+		Assert-Equal $script:asked 1 'by opening the lanes'
+		# Told in the thread whose agent has work in that lane: the feature's, when one is built there, else the conductor's.
+		$lead = Get-Tasks | Where-Object { $_.lead -and [int]$_.lane -eq 2 -and $_.status -notin 'done', 'removed' } | Select-Object -First 1
+		Use-Thread $(if ($lead) { "$($lead.id)" } else { '' })
+		$told = @(Get-Thread | Where-Object { $_.kind -eq 'message' -and $_.who -eq 'rocco' -and $_.via -eq 'lanes' }) | Select-Object -Last 1
+		Assert-Match $told.line '^Lane 2: its Studio place had closed' 'the chat says which lane, and what'
+		Assert-Match $told.text 'lane 2 went down' 'and the conductor is told'
+		Assert (@((Get-ThreadState).pending | Where-Object { $_.id -eq $told.id }).Count -eq 1) 'as something waiting on it'
+		Assert-Match ((Show-ThreadItem $told.id) -join "`n") 'message from Rocco itself' 'not as the user''s words'
+		Use-Thread ''
+		$r = Repair-Lanes @([pscustomobject]@{ lane = 3; what = @('agent') })
+		Assert-Equal "$($r.job)" '' 'an agent that stopped needs no lanes opened'
+		Assert-Equal $script:asked 1 'so they aren''t'
+	}
+
 	Test 'trimming the conductor''s thread keeps what is new and what is open' {
 		Use-Project $Game
 		$file = Join-Path $Temp 'trim.jsonl'

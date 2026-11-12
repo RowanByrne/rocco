@@ -151,7 +151,6 @@
 .wb-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
 .composer-wrap { position: relative; }
 /* Rocco stands on the note box. Not while a question is open above it. */
-.wb-foot:has(.cond-asks:not(:empty)) .mascot { display: none; }
 .composer { padding: 10px 10px 8px 12px; border-radius: var(--r-lg); background: var(--panel); border: 1px solid var(--stroke-2); transition: border-color .15s, box-shadow .2s; }
 .composer:focus-within { border-color: rgba(var(--accent-rgb), .6); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .12); }
 .composer.drag { border-style: dashed; border-color: var(--accent); }

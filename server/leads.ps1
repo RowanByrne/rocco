@@ -117,7 +117,7 @@ function Get-LeadsState($tasks) {
 			Use-Thread $_.id
 			[pscustomobject]@{
 				id = $_.id; title = $_.title; kind = $(if ($_.kind -eq 'plan') { 'feature' } else { 'card' }); lane = $_.lane
-				done = ($_.status -eq 'done'); handoff = ($_.pending -eq 'handoff'); waiting = "$($_.waiting)"
+				done = ($_.status -eq 'done'); handoff = ($_.pending -eq 'handoff'); waiting = "$($_.waiting)"; opened = [bool]$_.leadOpened
 				conductor = (Get-Conductor)
 			}
 		})

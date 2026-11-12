@@ -190,6 +190,13 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Start-OpenLanes $(if ($null -ne $count) { [int]$count } else { $null })) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	# Fix lanes (the sidebar): lanes with work in them that went down, opened again (lanes.ps1 Repair-Lanes).
+	if ($path -eq '/api/lanes/fix') {
+		$down = @((Read-Json $req).down | Where-Object { $_ -and [int]$_.lane -gt 0 })
+		if (-not $down.Count) { Send-Text $ctx 400 'Say which lanes went down.'; return }
+		try { Send-Json $ctx (Repair-Lanes $down) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
 	# The conductor's thread (thread.ps1): the user answers its questions and permission requests, and writes to it. What
 	# it waits on wakes it through wait, or opens one when none is running.
 	if ($path -eq '/api/conductor/answer') {

@@ -71,6 +71,12 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; }
 .ln.closed.working { color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
 .ln.closed.stuck { color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
 .ln.closed.held { color: var(--cyan); box-shadow: inset 0 0 0 1px var(--cyan); }
+/* Work in it, but it went down (sidebar.js downLanes): red, whether or not it's open. */
+.ln.down { color: #fff; background: var(--red); box-shadow: none; }
+.lane-down { display: flex; align-items: center; gap: 8px; margin-top: -4px; font-size: 12px; color: var(--red-text); }
+.lane-down[hidden] { display: none; }
+.ld-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ld-fix { flex: none; }
 .lane-key { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: -4px; font-size: 11px; color: var(--text-3); }
 .lane-key span { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
 .lane-key .ln { width: 12px; height: 8px; border-radius: 2px; box-shadow: none; }
