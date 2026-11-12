@@ -30,7 +30,7 @@ function Send-Note($t) {
 	Set-Field $t 'uploading' $null
 	Send-ToConductor $t $(if ($question) { 'question' } else { 'plan' })
 	Save-Task $t
-	Add-Sent $(if ($question) { 'question' } else { 'note' }) $t "$($t.note)"
+	Add-Sent $(if ($question) { 'question' } else { 'note' }) $t "$($t.note)" @($t.shots)
 }
 
 # A note whose app went away mid-upload (the tab closed) is handed over with what arrived.
@@ -79,6 +79,11 @@ function Invoke-Request($ctx) {
 		$named = $req.QueryString['p']
 		if ($named) { Use-Project (Find-Project $named).path }
 		Send-Json $ctx (Get-LaneAdvice ([bool]$named)); return
+	}
+	# The plan's usage limits, from the status line of an agent Rocco opened (sessions.ps1 Save-Limits): it shows
+	# what this answers.
+	if ($path -eq '/api/limits' -and $req.HttpMethod -eq 'POST' -and $req.Headers['X-Rocco'] -eq '1') {
+		Send-Text $ctx 200 (Save-Limits (Read-Json $req)); return
 	}
 	if ($get -and $path -notmatch '^/(api|files)/') { Send-Static $ctx $path; return }
 

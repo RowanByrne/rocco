@@ -391,7 +391,21 @@ const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revis
 
 // What you write sits on the right in a bubble, as in any chat app; what Rocco says and does runs down the left, so
 // its work never reads as yours.
-const yours = (body, foot) => html`<div class="h-you"><div class="h-bubble">${body}</div>${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
+const yours = (body, foot, shots = []) => html`<div class="h-you">${
+  shots.length ? html`<div class="h-shots" data-pic-set>${pics(shots)}</div>` : nothing}${
+  body ? html`<div class="h-bubble">${body}</div>` : nothing}${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
+
+// The screenshots that went with what the user sent: a note's (kept on the message), or a send-back's, which names
+// them in its text ("Screenshots: shot-2.png, shot-3.png"); that line comes out of the words shown. A note sent before
+// they were kept on the message shows its card's.
+const SHOTS_LINE = /^Screenshots: (.+)$/m;
+function sentShots(e) {
+  const text = String(e.text || '');
+  const named = [...(e.shots || []), ...(text.match(SHOTS_LINE)?.[1].split(',').map(s => s.trim()) || [])].filter(Boolean);
+  const urls = named.map(n => /^(data|blob|https?):/.test(n) ? n : api.file(e.task, n));
+  if (!urls.length && (e.act === 'note' || e.act === 'question') && e.task) urls.push(...(byId(e.task)?.shots || []));
+  return { text: text.replace(SHOTS_LINE, '').trim(), shots: urls };
+}
 
 // A card, small, where the chat mentions it: its name and where it is now. It opens the card's own conversation.
 // typed: the words the card came from. Until Rocco names the card, its title is just those words again, so only
@@ -427,7 +441,8 @@ function row(e, all, prev = '') {
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
       const typed = e.act === 'note' || e.act === 'question';
-      if (typed || (SAID[e.act] && e.text)) return yours(e.text || e.title || '', html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title, e.text || e.title) : nothing}${at}`);
+      const { text, shots } = sentShots(e);
+      if (typed || (SAID[e.act] && e.text)) return yours(text || (shots.length ? '' : e.title || ''), html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title, e.text || e.title) : nothing}${at}`, shots);
       // Something you did to a card, with no words: a small line on your side.
       return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span>${e.title || ''}</span>`}${at}</div></div>`;
     }
@@ -645,7 +660,10 @@ function announce() {
       const who = lead ? `${lead.title}: its agent` : 'Rocco';
       const message = e.kind === 'permission' ? `${who} wants your OK: ${e.text}` : `${who} asks: ${e.questions?.[0]?.text || ''}`;
       const show = () => { go('workboard'); openThread(id); $('#condAsks').scrollIntoView({ block: 'center' }); };
-      toast(message, 'var(--amber)', id !== active ? { label: 'Show', run: show } : null);
+      // The corner says only that it asks, and about what: the question itself is on the page.
+      const topic = e.questions?.[0]?.header;
+      const short = e.kind === 'permission' ? message : topic ? `${who} asks about ${topic}` : `${who} has a question for you`;
+      toast(short, 'var(--amber)', id !== active ? { label: 'Show', run: show } : null);
       notify('Rocco', message, show);
     }
     // Something only its own window can answer: say where, and bring that window up from the notification.
@@ -785,7 +803,8 @@ export function initConductor() {
   });
   $('#condList').addEventListener('click', e => {
     const hit = s => e.target.closest(s);
-    if (hit('[data-steps]')) {
+    if (hit('[data-pic-src]')) openPicsFrom(hit('[data-pic-src]'), null);
+    else if (hit('[data-steps]')) {
       const key = hit('[data-steps]').dataset.steps;
       if (unfolded.has(key)) unfolded.delete(key); else unfolded.add(key);
       renderHistory();

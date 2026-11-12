@@ -169,7 +169,7 @@ function sampleThread() {
   const at = ago;
   const items = [
     { id: 'C-000001', at: at(200), who: 'rocco', kind: 'event', text: 'Rocco opened Claude Code as the conductor' },
-    { id: 'C-000002', at: at(181), who: 'you', kind: 'sent', act: 'note', task: 'T-044', title: 'Pets follow the player', text: 'pets should follow the player around' },
+    { id: 'C-000002', at: at(181), who: 'you', kind: 'sent', act: 'note', task: 'T-044', title: 'Pets follow the player', text: 'pets should follow the player around', shots: [picture(150), picture(190), picture(330)] },
     { id: 'C-000003', at: at(176), who: 'conductor', kind: 'said', text: "One task: pets follow on a feature branch, so you can try it in lane 5 before it goes into Main." },
     { id: 'C-000004', at: at(170), who: 'rocco', kind: 'event', text: 'Started in lane 5: Pets follow the player', task: 'T-044' },
     { id: 'C-000005', at: at(130), who: 'rocco', kind: 'event', text: 'Posted a plan for your OK: Trading between players', task: 'T-040' },
@@ -282,7 +282,10 @@ export async function snapshot() {
   const d = current();
   // Another sample project with a card waiting, to show the project picker's mark for it.
   const others = state.project === 'sample-game' ? [{ id: 'sky-farm', name: 'Sky Farm', stuck: 1, ready: 0, asks: 0 }] : [];
-  return JSON.stringify({ rocco: 'demo', project: { template: false, ...PROJECTS.find(p => p.id === state.project) }, lanes: d.lanes, conductor: conductorView(d), leads: leadsView(d), main: d.main, tasks: d.tasks.filter(onBoard), others });
+  // The plan's limits, as a status line last said them: the 5-hour window nearly used, the week two-thirds.
+  const secs = Math.floor(Date.now() / 1000);
+  const limits = { five: { used: 89, resets: secs + 2 * 3600 }, week: { used: 69, resets: secs + 3 * 86400 }, at: new Date().toISOString() };
+  return JSON.stringify({ rocco: 'demo', project: { template: false, ...PROJECTS.find(p => p.id === state.project) }, lanes: d.lanes, conductor: conductorView(d), leads: leadsView(d), main: d.main, tasks: d.tasks.filter(onBoard), others, limits });
 }
 
 // ---- The archive, usage, one task, and a changed file's lines (tasks.ps1, sessions.ps1, history.ps1) ----
@@ -453,7 +456,7 @@ export async function release(id) {
   if (!t.uploading) return { ok: true, opened: '' };
   const question = t.kind === 'question';
   Object.assign(t, { uploading: null, pending: question ? 'question' : 'plan', waiting: 'Waiting for the conductor' });
-  addLine(current(), 'sent', { act: question ? 'question' : 'note', task: t.id, title: t.title, text: t.note }, 'you');
+  addLine(current(), 'sent', { act: question ? 'question' : 'note', task: t.id, title: t.title, text: t.note, shots: [...t.shots] }, 'you');
   if (question) answerSoon(t);
   return { ok: true, opened: '' };
 }

@@ -376,6 +376,10 @@ function Wait-Question($in) {
 
 # What the user did on the Workboard that goes to the conductor (a note, an answer, a send-back, an approval), for its
 # history.
-function Add-Sent([string]$act, $t, [string]$text = '') {
-	Invoke-InTaskThread $t.id { Add-Thread 'sent' @{ act = $act; task = $t.id; title = $t.title; text = $text } 'you' | Out-Null }
+# shots: the screenshots that went with it (a note's), by name in the task's folder, shown with the message.
+function Add-Sent([string]$act, $t, [string]$text = '', [string[]]$shots = @()) {
+	$item = @{ act = $act; task = $t.id; title = $t.title; text = $text }
+	$shots = @($shots | Where-Object { $_ })
+	if ($shots.Count) { $item.shots = $shots }
+	Invoke-InTaskThread $t.id { Add-Thread 'sent' $item 'you' | Out-Null }
 }

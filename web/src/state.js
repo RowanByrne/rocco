@@ -8,7 +8,7 @@ export const state = {
   extra: new Map(),     // tasks opened from the archive or a link, which the board no longer carries: id -> task
   others: [],           // the other projects that want the user: { id, name, stuck, ready, asks } (sync.js)
   // leads: the threads with an agent of their own (a feature's, or a card's): { id, title, kind, lane, conductor, ... }
-  meta: { project: null, lanes: { count: 0, open: [], main: false }, conductor: { state: 'none' }, leads: [], main: {} },
+  meta: { project: null, lanes: { count: 0, open: [], main: false }, conductor: { state: 'none' }, leads: [], main: {}, limits: null },
   me: null,             // the user: git name and email, GitHub avatar, Claude account (if any), this PC
   agent: null,          // this PC's coding agent: { id, name, short, installed, agents } (agent.js)
   conn: null,           // Connections: { checking, checkedAt, online, items }

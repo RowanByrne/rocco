@@ -58,6 +58,7 @@ function Find-AgentBelow([int]$window) {
 # shows (thread.ps1): what it's doing, its open questions and permission requests, and its latest message.
 $script:ConductorCache = @{}
 $script:HookHeard = @{}   # project -> when a hook of its conductor, or of one of its workers, last reached Rocco
+$script:TurnEnded = @{}   # thread -> when its agent last ended a turn (its Stop hook)
 $script:WindowAsk = @{}   # thread -> a dialog waiting in the agent's own window (Add-HookEvent): { id, text, at, agent }
 $StalledMinutes = 5
 function Get-Conductor {
@@ -200,7 +201,11 @@ function Write-ConductorHooks {
 		UserPromptSubmit = @([ordered]@{ hooks = @(& $post 'prompt') })
 		SubagentStop = @([ordered]@{ hooks = @(& $post 'worker-stop') })
 		Notification = @([ordered]@{ hooks = @(& $post 'notify') })
-	} }
+	}
+	# Its status line hands Rocco the plan's 5-hour and weekly limits (sessions.ps1 Save-Limits), and shows what Rocco
+	# answers: those two, as the sidebar does. curl.exe comes with Windows, and is light enough to run after each message.
+	statusLine = [ordered]@{ type = 'command'; command = "curl.exe -s -m 2 -H `"X-Rocco: 1`" -H `"Content-Type: application/json`" --data-binary `"@-`" http://localhost:$Port/api/limits"; padding = 0 }
+	}
 	$file = Join-Path (Get-ThreadDir) 'claude-settings.json'
 	New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
 	[IO.File]::WriteAllText($file, (ConvertTo-Json -InputObject $settings -Depth 10), $Utf8)
@@ -251,9 +256,21 @@ function Add-HookEvent([string]$event, $in) {
 			if (-not $text) { break }
 			# The same short line it ended its last turn on ("Watching." after every look at the board) says nothing
 			# new: within the hour it's kept once.
-			$last = Get-Thread | Where-Object { $_.kind -eq 'said' } | Select-Object -Last 1
+			$items = @(Get-Thread)
+			$last = $items | Where-Object { $_.kind -eq 'said' } | Select-Object -Last 1
 			$again = $last -and $text.Length -le 40 -and "$($last.text)".Trim() -eq $text -and ((Get-Date) - [datetime]$last.at).TotalMinutes -lt 60
-			if (-not $again) { Add-Thread 'said' @{ text = $text; via = 'hook' } | Out-Null }
+			# It already told the user this turn (reply on a note, say): the message it ends on is that again, in other
+			# words, for its own window. The turn began when it last ended one, or (after a restart of Rocco) after the
+			# last message it ended on or the user's last message.
+			$from = -1
+			for ($i = $items.Count - 1; $i -ge 0; $i--) {
+				$e = $items[$i]
+				if (($e.kind -eq 'said' -and $e.via -eq 'hook') -or ($e.kind -eq 'message' -and $e.who -eq 'you')) { $from = $i; break }
+			}
+			$since = $script:TurnEnded[$key]
+			$script:TurnEnded[$key] = Get-Date
+			$told = @($items | Select-Object -Skip ($from + 1) | Where-Object { $_.kind -eq 'said' -and (-not $since -or [datetime]$_.at -gt $since) }).Count
+			if (-not $again -and -not $told) { Add-Thread 'said' @{ text = $text; via = 'hook' } | Out-Null }
 		}
 		'prompt' {
 			$text = "$($in.prompt)".Trim()

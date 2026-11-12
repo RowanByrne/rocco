@@ -140,6 +140,9 @@
 .h-you-foot .h-at { opacity: 0; transition: opacity .15s; }
 .h-you:hover .h-you-foot .h-at { opacity: 1; }
 .h-you.mine { margin: 2px 0; }
+/* The screenshots that went with it: a short row above the bubble, each opens big. */
+.h-shots .pics { justify-content: flex-end; gap: 6px; margin: 0; }
+.h-shots .pics .pic-img { width: auto; height: 64px; aspect-ratio: 16 / 10; border-radius: 8px; }
 /* Rocco's messages: just the text. Its time and Reply show on hover, at the top right, unless the line has more to say. */
 .h-msg { position: relative; }
 /* Floated, so the first line of text wraps short of it instead of running under it. */

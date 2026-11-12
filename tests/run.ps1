@@ -416,6 +416,28 @@ try {
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'message' -and $_.via -eq 'terminal' }).Count 1 'one typed message'
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -eq 'Watching.' }).Count 1 'the idle line once'
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.via -eq 'hook' }).Count 2 'and the real one'
+		# A turn that answered a note: what it ends on says the answer again, and isn't shown twice.
+		$n = Api '/api/note' @{ text = 'can the road change partway through a run?'; type = '' }
+		Rocco reply $n.id -Answer -Text 'Yes: it is only decided 1,600 studs ahead.' | Out-Null
+		& $post 'stop' @{ last_assistant_message = 'Yes, the road can change mid-run. I answered your note.' }
+		& $post 'stop' @{ last_assistant_message = 'Merged the lap timer.' }
+		$items = (Api '/api/conductor/thread').items
+		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -match 'mid-run' }).Count 0 'the answer once, not again at the end of the turn'
+		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -eq 'Merged the lap timer.' }).Count 1 'the next turn''s message is kept'
+	}
+
+	Test 'the plan''s limits from a status line show on the board, until they reset' {
+		$soon = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+		$line = Api '/api/limits' @{ model = @{ id = 'x' }; rate_limits = @{ five_hour = @{ used_percentage = 89.4; resets_at = $soon }; seven_day = @{ used_percentage = 69; resets_at = $soon + 86400 } } }
+		Assert-Equal "$line" "5h 89% $([char]0x00B7) week 69%" 'the status line says them'
+		$l = (Api '/api/state').limits
+		Assert-Equal "$($l.five.used) $($l.week.used)" '89.4 69' 'the board has them'
+		# Without them (an API key), what was last heard stays.
+		Api '/api/limits' @{ model = @{ id = 'x' } } | Out-Null
+		Assert-Equal "$((Api '/api/state').limits.five.used)" '89.4' 'a status line without them changes nothing'
+		Api '/api/limits' @{ rate_limits = @{ five_hour = @{ used_percentage = 10; resets_at = 1 }; seven_day = @{ used_percentage = 70; resets_at = $soon } } } | Out-Null
+		$l = (Api '/api/state').limits
+		Assert-Equal "$($null -eq $l.five) $($l.week.used)" 'True 70' 'a window that has reset is left out'
 	}
 
 	Test 'a dialog only its window can answer is said, until it moves on' {
@@ -512,6 +534,7 @@ try {
 		Assert-Equal @($s.hooks.Notification[0].hooks).Count 1 'a dialog in its own window is passed on'
 		Assert-Equal @($s.hooks.Stop[0].hooks)[1].type 'command' 'the check that can send it back is a command'
 		Assert ($null -ne $s.hooks.SubagentStop) 'a worker ending is passed on'
+		Assert-Match $s.statusLine.command '^curl\.exe .*-H "X-Rocco: 1".*"@-" http://localhost:\d+/api/limits$' 'its status line posts the plan''s limits'
 		# A feature's own agent: its hooks name its thread.
 		Use-Thread 'T-001'
 		try { $own = [IO.File]::ReadAllText((Write-ConductorHooks), $Utf8) } finally { Use-Thread '' }

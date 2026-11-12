@@ -15,7 +15,7 @@ import { openSheetKey } from '../ui/sheet.js';
 const POLL = 2500;
 const RESULT_MAX = 6000;
 
-let view = null; // { id, sessions: Map(key -> { from, desc, items, tools }), timer, open: Set, stamp, loaded, reading, again, error }
+let view = null; // { id, sessions: Map(key -> { from, desc, items, tools }), timer, open: Set, stamp, loaded, progress, reading, again, error }
 
 // ---- Reading a session's lines ----
 
@@ -40,21 +40,29 @@ function addLine(s, e) {
   }
 }
 
-// v: the view this read is for; one that's been closed since stops being filled.
+// v: the view this read is for; one that's been closed since stops being filled. The server sends a long session a few
+// megabytes at a time, so it's read to the end, one piece after another, before it's shown: shown half read, the card's
+// newer lines (your message) would sit under the agent's older steps, as if they were the latest. Until then the
+// loading line says how far it has got.
 async function pull(v) {
   const list = await api.sessions(v.id);
+  const total = list.reduce((n, info) => n + (info.size || 0), 0);
+  const done = () => [...v.sessions.values()].reduce((n, s) => n + s.from, 0);
   let changed = false;
   for (const info of list) {
     let s = v.sessions.get(info.key);
     if (!s) { s = { from: 0, desc: info.desc, started: info.started, items: [], tools: new Map() }; v.sessions.set(info.key, s); changed = true; }
     // What it has used so far, and how many tasks it worked on (its usage is shared between them).
     if (info.usage) { s.usage = info.usage; s.share = info.tasks || 1; }
-    if (info.size <= s.from) continue;
-    const { text, next } = await api.session(v.id, info.key, s.from);
-    if (view !== v) return false;
-    for (const line of text.split('\n')) { if (line.trim()) { try { addLine(s, JSON.parse(line)); } catch { /* a line still being written */ } } }
-    s.from = next;
-    changed = true;
+    while (info.size > s.from) {
+      const { text, next } = await api.session(v.id, info.key, s.from);
+      if (view !== v) return false;
+      for (const line of text.split('\n')) { if (line.trim()) { try { addLine(s, JSON.parse(line)); } catch { /* a line still being written */ } } }
+      if (!(next > s.from)) break;
+      s.from = next;
+      changed = true;
+      if (!v.loaded && total) { v.progress = Math.min(99, Math.round(done() / total * 100)); draw(false); }
+    }
   }
   return changed;
 }
@@ -159,7 +167,7 @@ function row(r) {
 const problem = () => view.error ? html`<div class="load-error">${icon.alert}<span>Couldn't read its session: ${view.error}</span><button class="btn-sm" data-sx-retry>Retry</button></div>` : nothing;
 
 function stream(t) {
-  if (!view.loaded) return view.error ? problem() : html`<div class="sx-empty"><span class="spin"></span>Loading</div>`;
+  if (!view.loaded) return view.error ? problem() : html`<div class="sx-empty"><span class="spin"></span>Loading its session${view.progress ? ` · ${view.progress}%` : ''}</div>`;
   const rows = (t.log || []).map(l => ({ kind: 'log', at: l.at, who: l.who, text: l.text }));
   for (const s of view.sessions.values()) rows.push(...s.items.map(it => it.kind === 'brief' ? { ...it, desc: s.desc } : it));
   if (!rows.length) return html`<div class="sx-empty">Nothing yet. What its agent does shows here as it works.</div>${problem()}`;
@@ -224,7 +232,7 @@ async function tick(id) {
 
 // Called when a task's sheet opens (or opens again, after you send it something): what's been read is kept.
 export function startSession(id) {
-  if (view?.id !== id) { stopSession(); view = { id, sessions: new Map(), open: new Set(), stamp: '', loaded: false, timer: 0, reading: false, again: false, error: '' }; }
+  if (view?.id !== id) { stopSession(); view = { id, sessions: new Map(), open: new Set(), stamp: '', loaded: false, progress: 0, timer: 0, reading: false, again: false, error: '' }; }
   clearTimeout(view.timer);
   draw();
   tick(id);

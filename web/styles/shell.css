@@ -50,6 +50,19 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; }
 
 /* Main and lanes, at the bottom of the sidebar */
 .side-foot { margin-top: auto; display: grid; gap: 12px; padding: 12px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--stroke); }
+/* The plan's usage limits, in a box of their own above Main and the lanes (sidebar.js renderLimits). */
+.limits { margin-top: auto; display: grid; gap: 9px; padding: 12px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--stroke); }
+.limits[hidden] { display: none; }
+.limits:not([hidden]) + .side-foot { margin-top: 8px; }
+.lim { display: grid; gap: 5px; }
+.lim-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--text-3); }
+.lim-name { color: var(--text-2); font-weight: 500; }
+.lim-reset { flex: 1; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.lim-head b { font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.lim-bar { height: 4px; border-radius: 2px; overflow: hidden; background: rgba(var(--ink), .1); }
+.lim-bar i { display: block; height: 100%; border-radius: 2px; background: var(--blue); transition: width .4s; }
+.lim-bar i.t-amber { background: var(--amber); }
+.lim-bar i.t-red { background: var(--red); }
 .stat { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-3); }
 .stat b { font-weight: 500; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
 #laneStat[title]:not([title=""]) { cursor: pointer; }
@@ -91,7 +104,7 @@ body.sorting, body.sorting * { cursor: grabbing !important; user-select: none; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
 
 /* Collapsed to icons */
-.app.collapsed .ws-text, .app.collapsed .nav-head, .app.collapsed .nav .label, .app.collapsed .side-foot, .app.collapsed .chev { display: none; }
+.app.collapsed .ws-text, .app.collapsed .nav-head, .app.collapsed .nav .label, .app.collapsed .side-foot, .app.collapsed .limits, .app.collapsed .chev { display: none; }
 .app.collapsed .nav-group.closed .nav-wrap { grid-template-rows: 1fr; }
 .app.collapsed .nav-group.closed .nav { visibility: visible; transition: none; }
 .app.collapsed .top-row { flex-direction: column; gap: 8px; }

@@ -215,9 +215,9 @@ function Get-ProjectUsage {
 	$value
 }
 
-# A session's whole lines from a byte offset, a megabyte or so at a time (a long session is megabytes, and the app asks
-# again from X-Next until it has caught up); X-Next is the offset to ask from next time.
-$SessionChunk = 1MB
+# A session's whole lines from a byte offset, a few megabytes at a time (a long session is tens of megabytes, with its
+# screenshots, and the app asks again from X-Next until it has caught up); X-Next is the offset to ask from next time.
+$SessionChunk = 4MB
 function Send-SessionText($ctx, $t, [string]$key, [long]$from) {
 	$s = Find-TaskSessions $t | Where-Object { $_.key -eq $key } | Select-Object -First 1
 	if (-not $s) { Send-Text $ctx 404 'No such session for this task'; return }
@@ -233,4 +233,52 @@ function Send-SessionText($ctx, $t, [string]$key, [long]$from) {
 	$ctx.Response.Headers['X-Next'] = [string]($from + $bytes.Length)
 	$ctx.Response.Headers['X-Size'] = [string]$s.length
 	Send $ctx 200 'application/x-ndjson; charset=utf-8' ([byte[]]$bytes)
+}
+
+# ---- The plan's usage limits ----
+
+# Claude Code hands its status line the account's 5-hour and weekly limits (rate_limits: a Claude subscription's, not
+# an API key's). The status line of an agent Rocco opens posts them here (conductor.ps1 Write-ConductorHooks), and the
+# sidebar shows them above the lanes. They're the account's, not a project's, and kept in Rocco's own folder, so a
+# restart still has the last ones.
+$script:Limits = $null
+$script:LimitsWritten = @{ at = [datetime]::MinValue; what = '' }
+function Get-LimitsPath { Join-Path $RoccoHome 'limits.json' }
+
+function ConvertTo-LimitWindow($w) {
+	if ($null -eq $w -or $null -eq $w.used_percentage) { return $null }
+	[pscustomobject]@{ used = [Math]::Round([double]$w.used_percentage, 1); resets = [long]$w.resets_at }
+}
+
+# in: the status line's JSON. Returns the line the agent's own window shows, which says the same.
+function Save-Limits($in) {
+	$r = $in.rate_limits
+	if ($r) {
+		$script:Limits = [pscustomobject]@{ five = (ConvertTo-LimitWindow $r.five_hour); week = (ConvertTo-LimitWindow $r.seven_day); at = (Get-Date).ToString('o') }
+		# To disk when a number moves, or once a minute for its time: the status line runs after every message.
+		$what = ConvertTo-Json -Compress @($script:Limits.five, $script:Limits.week)
+		if ($what -ne $script:LimitsWritten.what -or ((Get-Date) - $script:LimitsWritten.at).TotalSeconds -ge 60) {
+			$script:LimitsWritten = @{ at = Get-Date; what = $what }
+			try { New-Item -ItemType Directory -Force $RoccoHome | Out-Null; [IO.File]::WriteAllText((Get-LimitsPath), (ConvertTo-Json -Compress $script:Limits), $Utf8) } catch { }
+		}
+	}
+	$l = Get-Limits
+	if (-not $l) { return '' }
+	$dot = " $([char]0x00B7) "
+	(@(if ($l.five) { "5h $([Math]::Round($l.five.used))%" }; if ($l.week) { "week $([Math]::Round($l.week.used))%" }) -join $dot)
+}
+
+# The last limits heard, with any window whose reset has passed left out (it starts again at 0). null with none.
+function Get-Limits {
+	if (-not $script:Limits) {
+		$path = Get-LimitsPath
+		if (Test-Path $path) { try { $script:Limits = [IO.File]::ReadAllText($path, $Utf8) | ConvertFrom-Json } catch { } }
+	}
+	$l = $script:Limits
+	if (-not $l) { return $null }
+	$now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+	$five = if ($l.five -and $l.five.resets -gt $now) { $l.five } else { $null }
+	$week = if ($l.week -and $l.week.resets -gt $now) { $l.week } else { $null }
+	if (-not $five -and -not $week) { return $null }
+	[pscustomobject]@{ five = $five; week = $week; at = $l.at }
 }

@@ -132,6 +132,7 @@ function Get-State([string]$projectId) {
 		main = Get-Main
 		tasks = $tasks
 		others = @(Get-OtherProjects $p.id)
+		limits = Get-Limits # the plan's 5-hour and weekly limits, when an agent Rocco opened last said them (sessions.ps1)
 	}
 }
 

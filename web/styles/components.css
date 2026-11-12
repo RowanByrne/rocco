@@ -100,10 +100,12 @@
 
 /* Toasts: a stack in the corner, newest at the bottom (ui/toast.js). */
 .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 80; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100vw - 40px); pointer-events: none; }
-.toast { display: flex; align-items: center; gap: 10px; max-width: 100%;
+.toast { display: flex; align-items: center; gap: 10px; max-width: min(100%, 440px);
   padding: 10px 14px; border-radius: var(--r); font-size: 13px; background: var(--panel);
   border: 1px solid var(--stroke-2); box-shadow: 0 18px 48px rgba(var(--shade), calc(.55 * var(--shade-k))); opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity .2s, transform .2s; }
 .toast.show { opacity: 1; transform: none; }
+/* At most two lines: a long one (a permission's command) ends in an ellipsis. */
+.toast > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .toast i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--tc, var(--green)); box-shadow: 0 0 10px var(--tc, var(--green)); }
 .toast.has-action.show { pointer-events: auto; }
 .toast-action { height: 26px; margin: -3px -6px -3px 4px; padding: 0 10px; border: 0; border-radius: 7px; font-size: 12.5px; font-weight: 600;
