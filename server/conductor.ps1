@@ -58,6 +58,7 @@ function Find-AgentBelow([int]$window) {
 # shows (thread.ps1): what it's doing, its open questions and permission requests, and its latest message.
 $script:ConductorCache = @{}
 $script:HookHeard = @{}   # project -> when a hook of its conductor, or of one of its workers, last reached Rocco
+$script:WindowAsk = @{}   # thread -> a dialog waiting in the agent's own window (Add-HookEvent): { id, text, at, agent }
 $StalledMinutes = 5
 function Get-Conductor {
 	$hit = $script:ConductorCache[(Get-ThreadKey)]
@@ -75,6 +76,8 @@ function Get-Conductor {
 		$fresh = $c.waiting -and ((Get-Date) - [datetime]$c.at).TotalSeconds -lt 20
 		$value.agent = "$($c.agent)"
 		$value.state = if ($fresh) { 'listening' } elseif ($alive) { 'busy' } else { 'none' }
+		$ask = $script:WindowAsk[(Get-ThreadKey)]
+		if ($ask -and $value.state -ne 'none') { $value | Add-Member -NotePropertyName windowAsk -NotePropertyValue ([pscustomobject]@{ id = $ask.id; text = $ask.text; at = $ask.at }) }
 		# Its latest step, while it's working and the step is recent.
 		if ($value.state -eq 'busy' -and $thread.step -and ((Get-Date) - [datetime]$thread.step.at).TotalMinutes -lt 3) { $value.doing = $thread.step.text }
 		# Opened with Rocco's hooks, and not a word from them since: it's asking something in its own window, before any
@@ -159,6 +162,7 @@ $InRocco = 'Rocco shows the user what you do, your messages, your questions (Ask
 #   its window, or a worker's session ending, sent straight to Rocco (an http hook: Claude Code posts the hook's JSON
 #   itself, so nothing is started for it. A hook that ran a program started PowerShell on every tool call of the
 #   conductor and of each worker). Rocco not running, or busy: the hook gives up in a moment and nothing is held up
+#   Notification: a dialog in its own window no hook can answer (Add-HookEvent), so the app says where to answer it
 #   Stop: rocco.ps1 hook stop keeps it from ending a turn while something waits on it, or with no wait watching the board
 # Written at each launch, so its paths follow the RoDev folder wherever it is.
 
@@ -195,6 +199,7 @@ function Write-ConductorHooks {
 		Stop = @([ordered]@{ hooks = @((& $post 'stop'), (& $command (& $wait 'stop'))) })
 		UserPromptSubmit = @([ordered]@{ hooks = @(& $post 'prompt') })
 		SubagentStop = @([ordered]@{ hooks = @(& $post 'worker-stop') })
+		Notification = @([ordered]@{ hooks = @(& $post 'notify') })
 	} }
 	$file = Join-Path (Get-ThreadDir) 'claude-settings.json'
 	New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
@@ -211,7 +216,24 @@ $NotTyped = '^\s*<[a-z]+(-[a-z]+)+[\s>]'
 # window. Its workers' steps are left out (their cards show them), but a worker's hooks still say it's alive, and
 # which task its session is for (sessions.ps1).
 function Add-HookEvent([string]$event, $in) {
-	$script:HookHeard[(Get-ThreadKey)] = Get-Date
+	$key = Get-ThreadKey
+	$script:HookHeard[$key] = Get-Date
+	# A dialog in the agent's own window that no hook can answer: Claude Code's "Read outside the working directories?",
+	# a sandboxed command's network request, an MCP server asking for input. Its Notification hook (about six seconds
+	# into the dialog) is the only word of it, so the app says where to answer it. A request Rocco is already showing
+	# (its PermissionRequest hook waits on it) is answered in Rocco, so that one isn't said twice.
+	if ($event -eq 'notify') {
+		if ("$($in.notification_type)" -notin 'permission_prompt', 'elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input') { return }
+		if (@((Get-ThreadState).open | Where-Object { $_.kind -eq 'permission' }).Count) { return }
+		$text = "$($in.message)".Trim()
+		if (-not $text) { $text = 'It needs your answer' }
+		$script:WindowAsk[$key] = [pscustomobject]@{ id = New-ThreadId; text = $text; at = (Get-Date).ToString('o'); agent = "$($in.agent_id)" }
+		$script:ConductorCache = @{}
+		return
+	}
+	# Anything else from the same agent means the dialog was answered and it moved on (no hook says so itself).
+	$ask = $script:WindowAsk[$key]
+	if ($ask -and ($ask.agent -eq "$($in.agent_id)" -or $event -eq 'stop')) { $script:WindowAsk.Remove($key); $script:ConductorCache = @{} }
 	if ($in.agent_id) { Add-WorkerEvent $event $in; return }
 	# The conductor's own session file, from the first hook that names it: its usage is read from there.
 	if ($in.transcript_path) {

@@ -41,7 +41,16 @@ const tickedOf = id => draft.get(`askticks:${id}`, []);
 const ASK_DRAFTS = ['ask:', 'askpicks:', 'askticks:'];
 
 const SKIP = "No preference: it's your call.";
-const leads = () => state.meta.leads || [];
+// A thread is a tab while its work is going: not once its card is approved or deleted, or every step of its feature
+// is done. Its agent has stopped by then (server/leads.ps1 Stop-Lead), and what it did is in the archive.
+const finished = l => {
+  const t = byId(l.id);
+  if (l.done || t?.status === 'done' || t?.status === 'removed') return true;
+  if (l.kind !== 'feature') return false;
+  const p = progressOf(l.id);
+  return p.total > 0 && p.done === p.total;
+};
+const leads = () => (state.meta.leads || []).filter(l => !finished(l));
 const leadOf = id => leads().find(l => l.id === id);
 const agentOf = id => (id ? leadOf(id)?.conductor : state.meta.conductor) || { state: 'none' };
 const conductor = () => agentOf(active);
@@ -194,14 +203,21 @@ const permission = p => html`<div class="c-perm${deciding.has(p.id) ? ' sending'
   p.detail && p.detail !== p.text ? html`<pre class="c-detail">${p.detail}</pre>` : nothing
 }<div class="c-perm-btns"><button class="btn-sm go" data-allow=${p.id}>${icon.check}Allow</button><button class="btn-sm danger" data-deny=${p.id}>Deny</button></div></div>`;
 
-// A request its hook stopped waiting on: the agent's own window asks now.
-const elsewhere = list => list.length ? html`<div class="c-perm late"><div class="c-ask-head"><span class="c-who">Rocco is waiting for your OK in its window</span></div><div class="c-ask-q">${list.at(-1).text}</div><div class="c-perm-btns"><button class="btn-sm" data-show-window>Show its window</button></div></div>` : nothing;
+// What the agent asks in its own window, which Rocco can't answer for you: a request its hook stopped waiting on, or a
+// dialog no hook is offered (Claude Code's "Read outside the working directories?"; server/conductor.ps1 windowAsk).
+// Where to answer it, and a way there.
+function inWindowCard(c) {
+  const late = (c.elsewhere || []).at(-1), ask = c.windowAsk;
+  if (!late && !ask) return nothing;
+  const text = ask ? ask.text : late.text;
+  return html`<div class="c-perm late"><div class="c-ask-head"><span class="c-who">${active ? 'Its agent' : 'Rocco'} is waiting for you in its window</span>${ask ? html`<span class="c-at">${hhmm(ask.at)}</span>` : nothing}</div><div class="c-ask-q">${text}</div><div class="c-hint">Rocco can't answer this one for you: answer it in the agent's window, and it carries on.</div><div class="c-perm-btns"><button class="btn-sm go" data-show-window>Show its window</button></div></div>`;
+}
 
 // Only what changed is touched, so each answer box keeps what's typed in it and where the caret is.
 function renderAsks() {
   const box = $('#condAsks'), list = $('#condList');
   const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-  render(html`${repeat(openPermissions(), p => p.id, permission)}${elsewhere(conductor().elsewhere || [])}${repeat(openAsks(), a => a.id, askCard)}`, box);
+  render(html`${repeat(openPermissions(), p => p.id, permission)}${inWindowCard(conductor())}${repeat(openAsks(), a => a.id, askCard)}`, box);
   for (const input of box.querySelectorAll('[data-c-input]')) grow(input);
   if (atEnd) list.scrollTop = list.scrollHeight; // the chat got shorter: it stays at its end
 }
@@ -210,7 +226,7 @@ function renderAsks() {
 
 // How an agent is doing, in one word: asking, busy, listening, or not running.
 function toneOf(c) {
-  if ((c.open || []).length || (c.elsewhere || []).length || c.inWindow || c.stalled) return 'ask';
+  if ((c.open || []).length || (c.elsewhere || []).length || c.windowAsk || c.inWindow || c.stalled) return 'ask';
   return c.state === 'busy' ? 'busy' : c.state === 'listening' ? 'on' : 'none';
 }
 
@@ -220,6 +236,8 @@ function progressOf(id) {
 }
 
 function renderTabs() {
+  // The thread shown just finished: back to Rocco's.
+  if (active && !leadOf(active)) { openThread(''); return; }
   const tab = (id, name, sub, vars) => html`<button class="tab${id === active ? ' on' : ''}" role="tab" aria-selected=${id === active ? 'true' : 'false'} data-thread=${id} style=${ifDefined(vars)} title=${name}><i class="tab-dot t-${toneOf(agentOf(id))}"></i><span class="tab-name">${name}</span>${
     sub ? html`<span class="tab-sub">${sub}</span>` : nothing}${unread(id) ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
   // Rocco's own chat is the main one: a tab of its own kind, with its mark, set apart from the features' threads.
@@ -302,7 +320,7 @@ function statusOf() {
   const c = conductor(), lead = active && leadOf(active), name = lead ? 'Its agent' : 'Rocco';
   if (openPermissions().length) return { tone: 'ask', text: `${name} wants your OK` };
   if (openAsks().length) return { tone: 'ask', text: `${name} is asking you something` };
-  if ((c.elsewhere || []).length) return { tone: 'ask', text: `${name} is waiting for your OK in its window` };
+  if ((c.elsewhere || []).length || c.windowAsk) return { tone: 'ask', text: `${name} is waiting for you in its window`, faded: 'answer it there' };
   // Opened by Rocco, and its hooks haven't spoken: it's asking something in its window first (whether to trust the folder).
   if (c.inWindow) return { tone: 'ask', text: `${name} is waiting for you in its window`, faded: 'the first time in a folder, it asks whether you trust it', show: true };
   // Running, but not watching the board, and silent while something waits on it (server/conductor.ps1): it has
@@ -355,8 +373,8 @@ function restartConductor(button) {
   }, button);
 }
 
-async function showWindow() {
-  try { const r = await api.showConductor(active); if (!r.shown) toast("Couldn't find its window. It's in your taskbar", 'var(--amber)'); } catch (err) { toast(err.message, 'var(--red)'); }
+async function showWindow(id = active) {
+  try { const r = await api.showConductor(id); if (!r.shown) toast("Couldn't find its window. It's in your taskbar", 'var(--amber)'); } catch (err) { toast(err.message, 'var(--red)'); }
 }
 
 // ---- The chat ----
@@ -622,10 +640,23 @@ function announce() {
       if (seen.has(e.id)) continue;
       seen.add(e.id);
       if (first) continue;
-      const who = lead ? `${lead.title}'s agent` : 'Rocco';
+      const who = lead ? `${lead.title}: its agent` : 'Rocco';
       const message = e.kind === 'permission' ? `${who} wants your OK: ${e.text}` : `${who} asks: ${e.questions?.[0]?.text || ''}`;
       const show = () => { go('workboard'); openThread(id); $('#condAsks').scrollIntoView({ block: 'center' }); };
       toast(message, 'var(--amber)', id !== active ? { label: 'Show', run: show } : null);
+      notify('Rocco', message, show);
+    }
+    // Something only its own window can answer: say where, and bring that window up from the notification.
+    const c = agentOf(id), late = (c.elsewhere || []).at(-1);
+    for (const w of [c.windowAsk, late].filter(Boolean)) {
+      const key = `window:${id}:${w.id || w.at}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (first) continue;
+      const who = lead ? `${lead.title}: its agent` : 'Rocco';
+      const message = `${who} is waiting for you in its window${lead?.lane ? ` (lane ${lead.lane})` : ''}: ${w.text}. Rocco can't answer this one: answer it there.`;
+      const show = () => { go('workboard'); openThread(id); showWindow(id); };
+      toast(message, 'var(--amber)', { label: 'Show its window', run: show });
       notify('Rocco', message, show);
     }
   }

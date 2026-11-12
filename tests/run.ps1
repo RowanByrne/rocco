@@ -418,6 +418,25 @@ try {
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.via -eq 'hook' }).Count 2 'and the real one'
 	}
 
+	Test 'a dialog only its window can answer is said, until it moves on' {
+		# A conductor that's running: this test's own process stands in for it.
+		$file = Join-Path $Game 'rocco\conductor.json'
+		$had = if (Test-Path $file) { [IO.File]::ReadAllText($file, $Utf8) } else { $null }
+		$me = Get-Process -Id $PID
+		[IO.File]::WriteAllText($file, (ConvertTo-Json @{ agent = 'Claude Code'; pid = $PID; started = $me.StartTime.ToString('o'); at = (Get-Date).ToString('o') }), $Utf8)
+		try {
+			$ask = { Start-Sleep -Milliseconds 3100; (Api '/api/state').conductor.windowAsk } # past the state's 3s cache
+			Api '/api/conductor/hook?e=notify' @{ notification_type = 'idle_prompt'; message = 'Claude is waiting for your input' } | Out-Null
+			Assert-Equal "$(& $ask)" '' 'an idle prompt is nothing to answer'
+			Api '/api/conductor/hook?e=notify' @{ notification_type = 'permission_prompt'; message = 'Claude needs your permission' } | Out-Null
+			Assert-Equal (& $ask).text 'Claude needs your permission' 'a dialog in its window is said'
+			Api '/api/conductor/hook?e=tool' @{ agent_id = 'w9'; tool_name = 'Read'; tool_input = @{ file_path = 'x.md' } } | Out-Null
+			Assert-Equal (& $ask).text 'Claude needs your permission' "a worker's step doesn't answer it"
+			Api '/api/conductor/hook?e=tool' @{ tool_name = 'Read'; tool_input = @{ file_path = 'x.md' } } | Out-Null
+			Assert-Equal "$(& $ask)" '' 'its next step means it was answered'
+		} finally { if ($null -ne $had) { [IO.File]::WriteAllText($file, $had, $Utf8) } else { Remove-Item $file -Force } }
+	}
+
 	Test 'a worker''s hooks pair its session with its task' {
 		Api '/api/conductor/hook?e=tool' @{ agent_id = 'abc123'; agent_type = 'worker'; tool_name = 'PowerShell'; tool_input = @{ command = '..\..\_tools\rocco\rocco.ps1 set T-001 -Step "Testing"' } } | Out-Null
 		$rows = @([IO.File]::ReadAllLines((Join-Path $Game 'rocco\conductor\workers.jsonl')) | ForEach-Object { $_ | ConvertFrom-Json })
@@ -464,6 +483,7 @@ try {
 			Assert-Equal $tool.headers.'X-Rocco' '1' 'the header a write needs'
 		} else { Assert-Match $tool.command 'hook-post\.ps1' 'the script that posts for it' }
 		Assert-Equal @($s.hooks.Stop[0].hooks).Count 2 'Stop passes the message on and checks the board'
+		Assert-Equal @($s.hooks.Notification[0].hooks).Count 1 'a dialog in its own window is passed on'
 		Assert-Equal @($s.hooks.Stop[0].hooks)[1].type 'command' 'the check that can send it back is a command'
 		Assert ($null -ne $s.hooks.SubagentStop) 'a worker ending is passed on'
 		# A feature's own agent: its hooks name its thread.
