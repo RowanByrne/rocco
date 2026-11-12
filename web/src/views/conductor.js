@@ -55,7 +55,7 @@ const fileOf = rel => api.conductorFile(rel, active);
 // The thread shown, for the cards beside it (workboard.js lists a feature's own cards on its tab).
 export const activeThread = () => active;
 
-// A check-in with nothing in it: "Watching.", "Still watching the board." The history folds a run of them into one line.
+// A check-in with nothing in it: "Watching.", "Still watching the board." The history leaves them out.
 const IDLE = /^(still |back to )?(watching|listening|waiting|standing by)\b[^\n]{0,70}$/i;
 const isIdle = e => e.kind === 'said' && IDLE.test(String(e.text || '').trim());
 
@@ -435,18 +435,50 @@ function row(e, all, prev = '') {
   return nothing;
 }
 
-// Steps between two messages fold into one line that opens to the list.
-function stepGroup(group) {
-  const key = group[0].at, open = unfolded.has(key), last = group.at(-1);
-  return html`<div class="h-steps${open ? ' open' : ''}"><button class="h-steps-head" data-steps=${key}>${icon.chev}<span>${group.length} step${group.length === 1 ? '' : 's'}</span><span class="h-steps-last">${last.text}</span><span class="h-at">${hhmm(group[0].at)}${group.length > 1 ? `–${hhmm(last.at)}` : ''}</span></button>${
-    open ? html`<ul>${group.map(s => html`<li><span class="h-at">${hhmm(s.at)}</span>${s.text}</li>`)}</ul>` : nothing}</div>`;
+// What a step did, from how the server words it (server/thread.ps1 Get-ToolSummary): the kind of action, and what it
+// was done to. A command is said by its description, so anything not worded as a tool is a command.
+/** @type {[RegExp, string, (what: string) => string, (n: number, what: string) => string][]} */
+const ACTIONS = [
+  [/^Reading a web page$|^Reading \S+\.(?:com|org|net|io|dev|gg|ai)$/, 'web', () => 'read a web page', n => `read ${n} web pages`],
+  [/^Reading (.+)$/, 'read', x => `read ${x}`, n => `read ${n} files`],
+  [/^Editing (.+)$/, 'edit', x => `edited ${x}`, n => `edited ${n} files`],
+  [/^Writing (.+)$/, 'write', x => `wrote ${x}`, n => `wrote ${n} files`],
+  [/^Searching for /, 'search', () => 'searched code', () => 'searched code'],
+  [/^Looking up /, 'lookup', () => 'searched the web', () => 'searched the web'],
+  [/^Starting a worker/, 'worker', () => 'started a worker', n => `started ${n} workers`],
+  [/^Using Studio/, 'studio', () => 'used Studio', () => 'used Studio'],
+  [/^Using ([^:]+):/, 'mcp', x => `used ${x}`, (_, x) => `used ${x}`],
+  [/^/, 'run', () => 'ran a command', n => `ran ${n} commands`],
+];
+// Claude Code's way of saying a run of steps: "Read 3 files, edited TradeWindow.luau, and 2 more actions".
+// The first three kinds in the order they came, then how many steps are left over.
+function stepsLine(texts) {
+  const kinds = new Map(); // key -> { one, many, n, what }
+  for (const text of texts) {
+    for (const [re, kind, one, many] of ACTIONS) {
+      const m = re.exec(text);
+      if (!m) continue;
+      const key = kind === 'mcp' ? `mcp:${m[1]}` : kind;
+      const k = kinds.get(key) || { one, many, n: 0, what: m[1] || '' };
+      k.n++;
+      kinds.set(key, k);
+      break;
+    }
+  }
+  const all = [...kinds.values()];
+  const parts = all.slice(0, 3).map(k => k.n === 1 ? k.one(k.what) : k.many(k.n, k.what));
+  const rest = all.slice(3).reduce((n, k) => n + k.n, 0);
+  if (rest) parts.push(`${rest} more action${rest === 1 ? '' : 's'}`);
+  const last = parts.pop() || '';
+  const line = !parts.length ? last : parts.length === 1 ? `${parts[0]} and ${last}` : `${parts.join(', ')}, and ${last}`;
+  return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
-// A run of check-ins with nothing in them, as one line: how many, and when the latest was. It opens to each one.
-function idleRun(lines) {
-  const key = `idle:${lines[0].id}`, open = unfolded.has(key), last = lines.at(-1);
-  return html`<div class="h-steps h-idle${open ? ' open' : ''}"><button class="h-steps-head" data-steps=${key}>${icon.chev}<span>Watching the board</span><span class="h-steps-last">${lines.length} check-ins with nothing new</span><span class="h-at">latest ${hhmm(last.at)}</span></button>${
-    open ? html`<ul>${lines.map(e => html`<li><span class="h-at">${hhmm(e.at)}</span>${e.text}</li>`)}</ul>` : nothing}</div>`;
+// Steps between two messages fold into one line that says what they did, and opens to the list.
+function stepGroup(group) {
+  const key = group[0].at, open = unfolded.has(key);
+  return html`<div class="h-steps${open ? ' open' : ''}"><button class="h-steps-head" data-steps=${key} title="${group.length} step${group.length === 1 ? '' : 's'}"><span class="h-steps-last">${stepsLine(group.map(s => s.text))}</span>${icon.chev}</button>${
+    open ? html`<ul>${group.map(s => html`<li><span class="h-at">${hhmm(s.at)}</span>${s.text}</li>`)}</ul>` : nothing}</div>`;
 }
 
 function historyView() {
@@ -478,9 +510,9 @@ function historyView() {
   let group = [], day = '', idle = null; // idle: the run of check-ins being read, and the steps since its last one
   let marked = !v.since || !rows.some(r => String(r.at) <= v.since); // "new" is marked once, and never above everything
   const flushSteps = () => { if (group.length) { out.push(stepGroup(group)); group = []; } };
+  // Check-ins with nothing new are Rocco's own bookkeeping: they aren't shown, nor the steps between them.
   const flushIdle = () => {
     if (!idle) return;
-    out.push(idle.lines.length > 1 ? idleRun(idle.lines) : row(idle.lines[0], history.items));
     group = idle.after; // what it did after its last check-in belongs to what comes next
     idle = null;
   };

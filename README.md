@@ -162,7 +162,7 @@ A project is a folder in the RoDev folder whose `repo\` has `docs/game/PROJECT.m
 
 The middle of the Workboard is a thread: the conductor's, or, on its own tab, the thread of a feature (or a card) that has an agent of its own. A thread is a folder of the same files whoever's it is ("The conductor in Rocco", Files), and the same code draws either.
 
-- **What's in it:** your messages; the agent's messages (each with **Reply**), its questions with your answers, and its permission requests; what you did to a card ("You approved", then the card); milestones (a plan posted, a card started in a lane, ready to test, merged), each a line that opens its card; and the agent's steps, folded between messages. A run of check-ins with nothing in them ("Watching.") folds into one line. The last week is kept.
+- **What's in it:** your messages; the agent's messages (each with **Reply**), its questions with your answers, and its permission requests; what you did to a card ("You approved", then the card); milestones (a plan posted, a card started in a lane, ready to test, merged), each a line that opens its card; and the agent's steps, folded between messages into one line that says what they did ("Read 3 files, used Studio, and ran a command"). Check-ins with nothing in them ("Watching.") aren't shown. The last week is kept.
 - **New since you were last here** marks where to read from when you come back to a thread, and a tab with something new in it shows a dot.
 - **Under it:** the agent's open questions, each with its own answer box; the note box; and the status line, which says what the agent is doing (listening, working on a step, asking, or not running), the model it's on, and what its session has used.
 

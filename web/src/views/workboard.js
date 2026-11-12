@@ -18,7 +18,6 @@ import { refresh, taskFrom } from '../sync.js';
 import { settings } from '../settings.js';
 import { toast } from '../ui/toast.js';
 import { showSheet, closeSheet, openSheetKey } from '../ui/sheet.js';
-import { initPopover, hidePopover } from '../ui/popover.js';
 import { shotOf, imagesIn, shotThumbs, shotClick, clip } from '../ui/shots.js';
 import { pics, picOption, openPicsFrom } from '../ui/pics.js';
 import { showDoc } from './docs.js';
@@ -40,10 +39,7 @@ const isQuestion = t => t.kind === 'question';
 // On a feature's tab, the rail is that feature's: its plan and its steps. On the conductor's, everything.
 const inView = t => { const thread = activeThread(); return !thread || t.id === thread || t.plan === thread; };
 const work = status => of(status).filter(t => !isPlan(t) && !isQuestion(t) && inView(t));
-// The user's questions to the conductor: waiting, or answered and not yet marked "got it". (Rocco answers most in
-// the chat and keeps no card: rocco.ps1 reply -Answer. These are the ones it's still on.)
-const openQuestions = () => state.tasks.filter(t => isQuestion(t) && t.status !== 'done' && t.status !== 'removed' && inView(t));
-const answered = () => openQuestions().filter(t => t.status === 'ready');
+// The user's questions to the conductor aren't in the rail: they're asked and answered in the chat.
 // An errand (open the lanes, push main) was done, not approved: it's said in the chat, and not counted here.
 const approvedWork = () => approvedToday().filter(t => !isPlan(t) && !isQuestion(t) && t.kind !== 'errand');
 const queue = () => work('queued').sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id));
@@ -189,16 +185,6 @@ const feature = p => {
   return html`<button class="feat" style=${featureVars(p.id)} data-id=${p.id} title=${p.title}><span class="feat-dot"></span><span class="feat-name">${p.title}</span><span class="feat-bar"><i style="width:${Math.round(done / Math.max(total, 1) * 100)}%"></i></span><span class="feat-count">${done}/${total}</span></button>`;
 };
 
-// ---- Questions Rocco is still on, or has answered and kept for a "Got it" ----
-
-function question(t) {
-  const done = t.status === 'ready';
-  return html`<div class="card s-question${t.fresh ? ' fresh' : ''}" data-id=${t.id} tabindex="0" role="button" aria-label=${t.title}><div class="c-title"><span class="qa-icon">?</span><span>${t.note || t.title}</span></div><div class="c-meta">${
-    done ? html`<span class="note-meta">Answered</span>` : html`<span class="note-meta"><span class="spin"></span>Waiting for an answer</span>`}</div>${
-    done ? html`<div class="card-actions"><button class="btn-sm go" data-got-it=${t.id}>${icon.check}Got it</button><button class="btn-sm" data-open=${t.id}>Read it</button></div>`
-      : html`<div class="card-actions"><button class="linkish" data-unask=${t.id}>Take it back</button></div>`}</div>`;
-}
-
 // ---- What the agent spotted ----
 
 const why = t => t.summary || (t.note && t.note !== t.title ? t.note : '');
@@ -238,10 +224,9 @@ export function renderWorkboard() {
 
 function renderBoard() {
   const ready = work('ready'), stuck = work('stuck'), working = work('working'), spotted = work('inbox'), plans = plansToApprove();
-  const asked = openQuestions().sort((a, b) => a.id.localeCompare(b.id)), replies = answered();
-  const needs = stuck.length + plans.length + spotted.length + replies.length, waiting = ready.length + needs;
+  const needs = stuck.length + plans.length + spotted.length, waiting = ready.length + needs;
   // The sidebar's badge and the tab's title count everything that waits on the user, whichever tab is showing.
-  const all = state.tasks.filter(t => (['ready', 'stuck', 'inbox'].includes(t.status) && !isQuestion(t)) || (isQuestion(t) && t.status === 'ready')).length;
+  const all = state.tasks.filter(t => ['ready', 'stuck', 'inbox'].includes(t.status) && !isQuestion(t)).length;
   $('#boardBadge').textContent = String(all);
   $('#boardBadge').hidden = !all;
   document.title = all ? `(${all}) Rocco` : 'Rocco';
@@ -251,9 +236,9 @@ function renderBoard() {
   render(repeat(feats, p => p.id, feature), $('#features'));
   $('#features').hidden = !feats.length;
   render(html`${group('ready', 'To test', COLOR.ready, ready.length, repeat(ready, t => t.id, card))}${
-    group('stuck', 'Needs you', COLOR.stuck, needs, html`${repeat(stuck, t => t.id, card)}${repeat(replies, t => t.id, question)}${repeat(plans, p => p.id, planCard)}${repeat(spotted, t => t.id, suggestion)}${
+    group('stuck', 'Needs you', COLOR.stuck, needs, html`${repeat(stuck, t => t.id, card)}${repeat(plans, p => p.id, planCard)}${repeat(spotted, t => t.id, suggestion)}${
       spotted.length > 1 ? html`<button class="linkish rail-all" data-queue-all>Queue all ${spotted.length} that Rocco spotted</button>` : nothing}`)}${
-    group('working', 'Working', COLOR.working, working.length + asked.length - replies.length, html`${repeat(working, t => t.id, card)}${repeat(asked.filter(t => t.status !== 'ready'), t => t.id, question)}`)}`, $('#board'));
+    group('working', 'Working', COLOR.working, working.length, repeat(working, t => t.id, card))}`, $('#board'));
   render(upNext(), $('#queue'));
   // On a narrow window, the rail is this row of counts, which opens to the lists.
   const count = (key, name, n, color) => html`<button class="rc${n ? '' : ' none'}" data-rail=${key} style="--c:${color}"><span class="sdot"></span>${name}<b>${n}</b></button>`;
@@ -275,42 +260,6 @@ function waitText(t) {
     || (x.lead && x.status !== 'done' && x.status !== 'removed'))).map(x => x.lane));
   const free = Array.from({ length: count }, (_, i) => i + 1).filter(n => !held.has(n));
   return free.length ? `Lane ${free[0]} is free: Rocco starts it next` : `Waiting for a free lane: all ${count} are busy`;
-}
-const lanePart = t => t.lane ? `lane ${t.lane}` : 'conductor';
-
-// Up to n words of each text in turn, and whether any were left out.
-function cutWords(texts, n) {
-  let cut = false;
-  const out = [];
-  for (const text of texts) {
-    const words = String(text).split(/\s+/).filter(Boolean);
-    if (n <= 0) { if (words.length) cut = true; continue; }
-    if (words.length > n) { out.push(words.slice(0, n).join(' ') + '…'); cut = true; } else out.push(words.join(' '));
-    n -= words.length;
-  }
-  return { out: out.filter(Boolean), cut };
-}
-
-// The hover: what the card is now, in a few lines. Rocco keeps a summary and a test to 30 words each (rocco.ps1
-// Assert-CardText); a card written before that is cut short here, and its sheet has it all.
-function summary(t) {
-  const head = label => html`<div class="ph"><span class="sdot" style="--c:${COLOR[t.status]}"></span>${label}</div>`;
-  const words = 30, more = html`<div class="pmore">Open it for the rest</div>`;
-  const sum = cutWords([t.summary || ''], words);
-  switch (t.status) {
-    case 'ready': {
-      const test = cutWords(stepsOf(t), words);
-      return html`${head(`Ready to test · ${place(t)}`)}${sum.out.length ? html`<div class="pl">What changed</div><div class="pt">${sum.out[0]}</div>` : nothing}${
-        test.out.length ? html`<div class="try"><div class="pl">Try</div>${trySteps(test.out)}</div>` : nothing}${sum.cut || test.cut ? more : nothing}`;
-    }
-    case 'stuck': {
-      const qs = cutWords(questionsOf(t).map(q => q.text), words * 2);
-      return html`${head('Needs your answer')}<div class="pt">${qs.out.join(' · ')}</div>${qs.cut ? more : nothing}`;
-    }
-    case 'working':
-      return html`${head(`${t.step || 'Working'} · ${lanePart(t)} · ${minsSince(t.startedAt)}m`)}<div class="pt">${sum.out.length ? sum.out[0] : 'No report yet'}</div>${sum.cut ? more : nothing}`;
-  }
-  return null;
 }
 
 // ---- A task in the sheet ----
@@ -625,7 +574,6 @@ function fold(el) {
 function approve(id) {
   const t = byId(id);
   if (!t) return;
-  hidePopover();
   attempt('approve it', async () => {
     folding.add(id);
     renderBoard();
@@ -652,7 +600,6 @@ const askMore = (id, text) => attempt('ask it', async () => {
   draft.clear(`sheet:${id}`);
   toast('Asked. The answer shows here.', 'var(--claude)');
 }, id);
-const unask = id => attempt('take it back', async () => { await act(id, 'remove'); undoable(id, 'Question taken back', 'var(--gray)'); }, id);
 const dismiss = id => attempt('dismiss it', async () => { await act(id, 'remove'); undoable(id, 'Dismissed', 'var(--gray)'); }, id);
 // An approved feature is built by an agent of its own, on a tab of its own (unless this PC turned that off).
 const approvePlan = id => attempt('approve the plan', async () => {
@@ -792,7 +739,6 @@ function initReorder() {
 }
 
 export function initWorkboard() {
-  initPopover('.card', el => { const t = byId(el.dataset.id); return t ? summary(t) : null; });
   initReorder();
   on('prose', renderWorkboard);
   // What the open card's sessions used has come in (session.js): its line under the title follows.
@@ -835,18 +781,16 @@ export function initWorkboard() {
     else if (hit('[data-queue]')) queueIt(hit('[data-queue]').dataset.queue);
     else if (hit('[data-dismiss]')) dismiss(hit('[data-dismiss]').dataset.dismiss);
     else if (hit('[data-queue-all]')) queueAll();
-    else if (hit('[data-got-it]')) gotIt(card);
-    else if (hit('[data-unask]')) unask(card);
     else if (hit('[data-plan-approve]')) approvePlan(card);
     // A plan or an answer is read as its card, whatever thread it has.
     else if (hit('[data-open]')) openTask(card, true);
-    else if (hit('.card, .q-row, .feat')) openTask(card, hit('.s-plan, .s-question') != null);
+    else if (hit('.card, .q-row, .feat')) openTask(card, hit('.s-plan') != null);
     else return;
     // A card picked from the opened row of counts: the row closes, so the card's conversation shows.
     if (railOpen && hit('.card, .q-row, .feat') && openSheetKey()) { railOpen = false; renderBoard(); }
   });
   rail.addEventListener('keydown', e => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id, e.target.matches('.s-plan, .s-question')); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card, .q-row')) { e.preventDefault(); openTask(e.target.dataset.id, e.target.matches('.s-plan')); }
   });
 
   // What's typed in a task's sheet is kept as it's typed.

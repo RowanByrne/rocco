@@ -21,8 +21,8 @@
 .pop .pl { margin: 8px 0 2px; font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-3); }
 .pop .ph + .pl { margin-top: 2px; }
 .pop .pt { line-height: 1.45; overflow-wrap: anywhere; }
-.pop .try { margin-top: 9px; padding: 7px 9px 8px; border-radius: 8px; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; background: rgba(var(--green-rgb), .07); border: 1px solid rgba(var(--green-rgb), .16); }
-.pop .try .pl { margin-top: 0; color: var(--green); }
+.pop .try { margin-top: 8px; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
+.pop .try .pl { margin-top: 0; }
 .pop ul, .s-try ul { margin: 0; padding-left: 16px; }
 .pop li + li, .s-try li + li { margin-top: 2px; }
 .pop .pmore { margin-top: 8px; font-size: 11.5px; color: var(--text-3); }
