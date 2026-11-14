@@ -42,7 +42,9 @@ function agents() {
   if (!a) return nothing;
   return html`<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span><span class="sp"></span><button class="mini" data-accounts>Your accounts</button></div>${
     a.agents.map(x => html`<button class="set-row agent-row${x.id === a.id ? ' on' : ''}" data-agent=${x.id} role="radio" aria-checked=${x.id === a.id ? 'true' : 'false'}><span class="radio"></span><span class="set-text"><span class="set-title">${x.name}</span><span class="set-sub">${x.installed ? 'Installed' : 'Not installed on this PC (Connections)'}</span></span></button>`)
-  }${model(a)}${effort(a)}${
+  }${model(a)}${effort(a)}${a.id === 'codex' ? row('Full access for the Codex conductor',
+    'The next conductor starts with access to your files and network and skips shell command approvals.',
+    html`<button class="switch" role="switch" aria-checked=${a.codexConductorFullAccess ? 'true' : 'false'} data-codex-conductor-full-access aria-label="Full access for the Codex conductor"><span></span></button>`) : nothing}${
     row('Features get an agent of their own', `A feature you approve is built by its own ${a.short} session, in a lane it keeps, and you talk to it on its own tab above the chat. Off: the conductor builds it with its workers, and everything goes through the conductor.`,
       html`<button class="switch" role="switch" aria-checked=${a.leads !== false ? 'true' : 'false'} data-leads aria-label="Features get an agent of their own"><span></span></button>`)
   }<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
@@ -115,6 +117,18 @@ export function initSettings() {
   body.addEventListener('click', async e => {
     const pick = e.target.closest('[data-theme-pick]');
     if (pick) { setTheme(pick.dataset.themePick); return; }
+    const fullAccess = e.target.closest('[data-codex-conductor-full-access]');
+    if (fullAccess) {
+      const on = fullAccess.getAttribute('aria-checked') !== 'true';
+      once('codex-conductor-full-access', async () => {
+        try {
+          state.agent = await api.setCodexConductorFullAccess(on);
+          toast(on ? 'The next Codex conductor starts with full access' : 'The next Codex conductor uses your Codex permission settings');
+        } catch (err) { toast(`Couldn't change full access: ${err.message}`, 'var(--red)'); }
+        renderSettings();
+      });
+      return;
+    }
     // Whether an approved feature gets its own agent: this PC's, kept by the server (server/leads.ps1).
     const leads = e.target.closest('[data-leads]');
     if (leads) {

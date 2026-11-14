@@ -120,6 +120,10 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	$extra = @()
 	$hooks = [bool]$Agents[$agent.id].hooks
 	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
+	# The first turn starts with the launch prompt, so apply the user's opt-in before sending that prompt.
+	if ($agent.id -eq 'codex' -and -not $script:ThreadId -and $agent.codexConductorFullAccess) {
+		$extra += '--sandbox', 'danger-full-access', '--ask-for-approval', 'never'
+	}
 	# The model the user picked for the conductor in Settings, for an agent that takes one on its command line.
 	if ($agent.model -and $Agents[$agent.id].model) { $extra += $Agents[$agent.id].model, $agent.model }
 	# And how hard it thinks.

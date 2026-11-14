@@ -171,6 +171,11 @@ function Invoke-Request($ctx) {
 		try { Send-Json $ctx (Set-AgentEffort ([string](Read-Json $req).effort)) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
 	}
+	if ($path -eq '/api/agent/codex-conductor-full-access') {
+		$on = (Read-Json $req).on
+		if ($on -isnot [bool]) { Send-Text $ctx 400 'Full access must be true or false.'; return }
+		Send-Json $ctx (Set-CodexConductorFullAccess $on); return
+	}
 	# Whether a feature the user approves gets an agent of its own (Settings, leads.ps1).
 	if ($path -eq '/api/agent/leads') { Send-Json $ctx (Set-LeadsOn ([bool](Read-Json $req).on)); return }
 	# A background job the user gave up on (a new project, opening lanes): stopped, with whatever it started.

@@ -328,6 +328,16 @@ try {
 		Api '/api/agent/model' @{ model = '' } | Out-Null
 	}
 
+	Test 'the Codex conductor full access setting accepts only a boolean' {
+		$path = '/api/agent/codex-conductor-full-access'
+		Assert-Equal (Api '/api/agent').codexConductorFullAccess $false 'defaults off'
+		try {
+			Assert-Equal (Api $path @{ on = $true }).codexConductorFullAccess $true 'saved on'
+			Assert-Throws { Api $path @{ on = 'false' } } 'HTTP 400' 'rejects a string'
+			Assert-Equal (Api '/api/agent').codexConductorFullAccess $true 'keeps the selection'
+		} finally { Api $path @{ on = $false } | Out-Null }
+	}
+
 	Test 'an errand is done and said, with nothing to approve' {
 		$n = Api '/api/note' @{ text = 'open 4 lanes and main'; type = '' }
 		Rocco set $n.id -Title 'Open Main and 4 lanes' -Status working | Out-Null
@@ -467,6 +477,38 @@ try {
 
 	Stop-Server
 	Write-Host 'Pieces'
+
+	Test 'the Codex conductor gets full access before its first prompt only when enabled' {
+		$settings = Read-RoccoSettings
+		$launch = @{}
+		function Find-AgentExe([string]$id) { "C:\fake\$id.exe" }
+		function Start-Process {
+			$data = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_START)) | ConvertFrom-Json
+			$launch.arguments = $data.arguments -join '|'
+			[pscustomobject]@{ Id = 0 }
+		}
+		function Save-Conductor {}
+		function Add-Event {}
+		try {
+			Set-Agent 'codex' | Out-Null
+			Set-CodexConductorFullAccess $false | Out-Null
+			Open-Conductor 'Watch the board' | Out-Null
+			Assert-Equal $launch.arguments 'Watch the board' 'default launch'
+			Set-CodexConductorFullAccess $true | Out-Null
+			Open-Conductor 'Watch the board' | Out-Null
+			Assert-Equal $launch.arguments '--sandbox|danger-full-access|--ask-for-approval|never|Watch the board' 'full access applies before the prompt'
+			Use-Thread 'T-900'
+			Open-Conductor 'Build this feature' | Out-Null
+			Assert-Equal $launch.arguments 'Build this feature' 'feature agent keeps its own permissions'
+			Use-Thread ''
+			Set-Agent 'gemini' | Out-Null
+			Open-Conductor 'Watch the board' | Out-Null
+			Assert-Equal $launch.arguments '-i|Watch the board' 'other agents keep their launch arguments'
+		} finally {
+			Use-Thread ''
+			Save-RoccoSettings $settings
+		}
+	}
 
 	Test 'a lane that went down: its places are looked at, and Fix lanes tells the agent' {
 		Use-Project $Game

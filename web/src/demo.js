@@ -668,12 +668,13 @@ const installed = id => id !== 'gemini' || fixed.has('gemini-update');
 const models = {};
 // Whether a feature the user approves gets an agent of its own (server/leads.ps1).
 let leadsOn = true;
+let codexConductorFullAccess = false;
 export async function agent() {
   const a = AGENTS.find(x => x.id === agentId), takes = a.id === 'claude';
   return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] ?? (takes ? 'claude-opus-5-5' : ''), takesModel: takes,
     models: takes ? ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'opusplan'] : [],
     effort: efforts[a.id] ?? (takes ? 'high' : ''), takesEffort: takes, efforts: takes ? ['low', 'medium', 'high', 'xhigh', 'max'] : [],
-    leads: leadsOn, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+    codexConductorFullAccess, leads: leadsOn, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
 }
 const efforts = {};
 export async function setAgentEffort(effort) {
@@ -682,6 +683,7 @@ export async function setAgentEffort(effort) {
   return agent();
 }
 export async function setLeads(on) { leadsOn = !!on; return agent(); }
+export async function setCodexConductorFullAccess(on) { codexConductorFullAccess = on; return agent(); }
 export async function setAgent(id) { agentId = id; return agent(); }
 export async function setAgentModel(model) {
   if (model && !/^[A-Za-z0-9][\w.:[\]-]{0,79}$/.test(model)) throw new Error("That doesn't look like a model's name (like opus, sonnet, or a full name such as claude-opus-5-5).");

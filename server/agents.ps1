@@ -52,6 +52,7 @@ function Get-Agent {
 			id = $id; name = $Agents[$id].name; short = $Agents[$id].short; installed = ($installed -contains $id); chosen = [bool]$chosen
 			model = $model; takesModel = [bool]$Agents[$id].model; models = @($Agents[$id].models | Where-Object { $_ })
 			effort = $effort; takesEffort = [bool]$Agents[$id].effort; efforts = @($Agents[$id].efforts | Where-Object { $_ })
+			codexConductorFullAccess = ($settings.codexConductorFullAccess -is [bool] -and $settings.codexConductorFullAccess)
 			# Whether a feature the user approves gets an agent of its own (leads.ps1): on unless turned off here.
 			leads = -not ($settings.PSObject.Properties['leads'] -and $settings.leads -eq $false)
 			agents = @($Agents.Keys | ForEach-Object { [pscustomobject]@{ id = $_; name = $Agents[$_].name; short = $Agents[$_].short; installed = ($installed -contains $_) } })
@@ -64,6 +65,13 @@ function Save-RoccoSettings($settings) {
 	New-Item -ItemType Directory -Force (Split-Path $SettingsFile) | Out-Null
 	[IO.File]::WriteAllText($SettingsFile, (ConvertTo-Json -InputObject $settings -Depth 5), $Utf8)
 	$script:AgentCache = $null
+}
+
+function Set-CodexConductorFullAccess([bool]$on) {
+	$settings = Read-RoccoSettings
+	$settings | Add-Member -Force -NotePropertyName codexConductorFullAccess -NotePropertyValue $on
+	Save-RoccoSettings $settings
+	Get-Agent
 }
 
 function Set-Agent([string]$id) {

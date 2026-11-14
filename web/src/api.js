@@ -81,6 +81,7 @@ export const api = {
   setAgentModel: model => DEMO ? demo.setAgentModel(model) : post(withProject('/api/agent/model'), { model }),
   // How hard it thinks ('' for the agent's own default): low, medium, high, xhigh or max.
   setAgentEffort: effort => DEMO ? demo.setAgentEffort(effort) : post(withProject('/api/agent/effort'), { effort }),
+  setCodexConductorFullAccess: on => DEMO ? demo.setCodexConductorFullAccess(on) : post(withProject('/api/agent/codex-conductor-full-access'), { on }),
   // The user's own accounts on this PC: each agent's sign-in, Codex for images, GitHub, and the linked keys (server/accounts.ps1).
   accounts: refresh => DEMO ? demo.accounts() : getJson(`/api/accounts${refresh ? '?refresh=1' : ''}`),
   // Onboarding (server/onboarding.ps1). A game being made isn't the open project yet, so these name theirs.
