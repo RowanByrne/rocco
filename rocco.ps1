@@ -9,6 +9,8 @@
 #   rocco.ps1 show T-012               one task in full: note, screenshots, questions, follow-ups, history
 #   rocco.ps1 new -Title "..." [-Type bug] [-Plan T-020] [-After T-011,T-012]   add a task to Up next; prints its id.
 #                                      -Plan: a step of that feature plan (plans are never worked as cards)
+#                                      -From C-1a2b3c: made from the user's message (new and plan): its words are the
+#                                      note (unless -Note), its screenshots go with it, and the chat shows the card under it
 #   rocco.ps1 suggest -Title "..." [-Summary "why"]   put something you spotted in the inbox, for the user to queue or dismiss
 #   rocco.ps1 plan -Title "..." -Summary "..." -Steps "Trade window UI|4|standard","Trade service|6|heavy" [-Spec docs/game/features/trading.md]
 #                                      a feature plan for the user to approve; prints its id. -Spec: the feature's spec,
@@ -28,6 +30,9 @@
 #   rocco.ps1 set T-012 -Status ready -Where main -Summary "what changed" -Test "Drive a lap","Drift the hairpin"
 #                                      what a card shows has to fit it: a title is 50 characters at most (one line), a
 #                                      task's summary and its test (the steps to try) 30 words each. The detail goes in log
+#   rocco.ps1 set T-012 -Status ready -NothingToTest -Summary "what changed" [-Test "why"]   nothing for the user to try
+#                                      yet: the card approves itself, as Approve would (on a lane, the conductor merges),
+#                                      and its plan moves on. A test that starts "Nothing to..." without it is refused
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 set T-012 -ForLane       every lane is busy: it waits in Up next, and wait hands it back ([lane]) the
 #                                      moment one is free. new takes -ForLane too. Starting it ends the wait
@@ -50,10 +55,12 @@ param(
 	[string]$Type, [int]$Progress = -1, [string[]]$After, [int]$Order = -1, [string]$Plan, [string[]]$Steps,
 	[string]$Who = 'worker', [string]$Text, [switch]$Feature, [switch]$Pending, [switch]$Open, [switch]$ForLane, [int]$Port = 34860,
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
+	[string]$From, # new, plan: the user's message (C-1a2b3c) the card is made from
 	[switch]$Pass, [switch]$Fail, [string]$File,
 	[Alias('Thread')] [string]$ThreadId, # -Thread T-020: the thread a command is about, a feature's (or a card's) with an agent of its own (LEAD.md)
 	[switch]$Answer,  # reply: the note was only a question, and this answers it (no card is kept)
 	[switch]$Done,    # reply: the note was an errand (nothing to test), done now, and this says what was done (no card is kept)
+	[switch]$NothingToTest, # set -Status ready: nothing for the user to try yet, so the card approves itself
 	[switch]$Restart # started by a Rocco that just updated itself: wait for its port, and don't open another tab
 )
 $ErrorActionPreference = 'Stop'
@@ -165,7 +172,7 @@ function Test-ConductorStop($in) {
 	ConvertTo-Json -Compress -InputObject ([ordered]@{ decision = 'block'; reason = $reason })
 }
 
-$PendingHead = 'Waiting on you. Show each, then handle it as CONDUCTOR.md "The Workboard" says: a note you take on gets set -Title "<a few words>" -Status working first, so it leaves Up next. Clear a C- message or answer once you''ve acted on it:'
+$PendingHead = 'Waiting on you. Show each, then handle it as CONDUCTOR.md "The Workboard" says: a message gets a card only for work that comes of it (new -Title "<a few words>" -From C-..., then set it working as you start), and a note card you take on gets set -Title "<a few words>" -Status working first, so it leaves Up next. Clear a C- message or answer once you''ve acted on it:'
 
 # The text of doing and say: -Text, or the first word after the command.
 function Get-Words { if ($Text) { $Text } else { $Id } }
@@ -201,6 +208,30 @@ function Assert-CardText([bool]$words) {
 # -Test: the steps to try, one a line.
 function Join-Steps { (@($Test) | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join "`n" }
 
+# The user's message a card is made from (-From C-1a2b3c): a message carries no card of its own, so one is made only
+# for work that comes of it, and the chat shows it under their message.
+function Get-FromMessage {
+	if (-not $From) { return $null }
+	$m = Find-ThreadItem $From
+	if ($m.kind -ne 'message' -or $m.who -ne 'you') { throw "$From isn't a message the user sent." }
+	$m
+}
+
+# The card gets the message's screenshots, and the message the card (after Save-Task: a thread line names it).
+function Add-FromMessage($t, $m) {
+	Set-Field $t 'from' $m.id
+	$i = @(Get-List $t.shots).Count
+	foreach ($s in @($m.shots | Where-Object { $_ })) {
+		$src = Join-Path (Get-ThreadDir) "files\$($s -replace '/', '\')"
+		if (-not (Test-Path -LiteralPath $src)) { continue }
+		$i++
+		$name = "shot-$i$([IO.Path]::GetExtension($src))"
+		Copy-Item -LiteralPath $src (Join-Path (Get-TaskDir $t.id) $name) -Force
+		Set-Field $t 'shots' (@(Get-List $t.shots) + $name)
+	}
+}
+function Add-MadeLine($t, $m) { if ($m) { Add-Thread 'made' @{ to = $m.id; task = $t.id; title = $t.title } | Out-Null } }
+
 # The fields new and set share.
 function Set-Common($t) {
 	if ($Type) {
@@ -218,6 +249,10 @@ function Set-Common($t) {
 	}
 }
 
+# What a command held to change (tasks.ps1 Lock-Task) is let go as it ends, saved or not. An agent runs this inside its
+# own PowerShell (& rocco.ps1), whose process outlives the command: a lock left open there kept the next command, in
+# the same shell, out of that task.
+try {
 switch ($Command) {
 	# 3: this Rocco updated itself, and the new one carries on in the background.
 	'serve' { if (Start-Rocco) { exit 3 } }
@@ -308,13 +343,15 @@ switch ($Command) {
 			''
 			"Sort it first (README.md `"Sorting`"). Only a question, with nothing to change: answer it with reply $($t.id) -Answer -Text `"...`", and no card is kept. Something to do that changes nothing in the game, so there's nothing to test (open the lanes, start Studio, push main, run the checks): do it, then reply $($t.id) -Done -Text `"<what you did>`", and no card is kept. A small fix: set $($t.id) -Title `"<a few words>`" -Status working -Step `"...`", so it leaves Up next. A feature (it needs a plan, a decision, or several steps): post its plan (plan -Title ... -Steps ...), then set $($t.id) -Status removed. Several unrelated requests in it: a task each (new -Title `"...`" -Note `"<their words>`"), not a plan."
 		}
-		# The user stepped in on its worker (the card's Pause, Resume, Start again, or its lane and worker): what to do.
+		# The user stepped in on its worker (the card's Pause, Resume, Start again, or its lane and worker), or approved
+		# it in its lane: what to do.
 		$stepIn = switch ($t.pending) {
 			'handoff' { "The user gave it an agent of its own, which Rocco opens once your worker has let go of it. Stop the worker on it now, commit what it has on its branch so nothing is lost, then clear $($t.id). From then on it isn't yours, except to merge when it's approved." }
 			'stop' { "The user paused it. Stop its worker now, commit what it has on its branch so nothing is lost, then set $($t.id) -Status queued and clear $($t.id). Don't start it again until they resume it (wait hands it back as [resume])." }
 			'resume' { "The user resumed it. $(if ($t.branch) { "Carry it on from $($t.branch) and its notes.md" } else { 'Start it when its turn comes' }): set $($t.id) -Status working -Lane <n> -Step `"...`" as you do." }
 			'restart' { "The user wants a fresh worker on it. Stop the one it has, then start a new one on $($t.id) $(if ($t.branch) { "from $($t.branch) and its notes.md" } else { 'from the start' }) (attempt $($t.attempt)), and clear $($t.id). Their reason, if they gave one, is the latest 'you' line." }
 			'assign' { "The user wants it on $(Format-Wanted $t). Stop its worker, commit what it has, start it there (set $($t.id) -Status working -Lane <n>), and clear $($t.id)." }
+			'merge' { "It's approved$(if ($t.PSObject.Properties['nothingToTest'] -and $t.nothingToTest) { ' (it had nothing to test, so it approved itself)' } else { ' (the user tested it in its lane)' }), so it's done. Merge $(if ($t.branch) { $t.branch } else { 'its branch' }) (CONDUCTOR.md `"A round`", step 4), then clear $($t.id). It stays done: don't set it ready, since they've already tried it." }
 		}
 		if ($stepIn) { ''; $stepIn }
 		# Waiting for a lane: whether one is free now.
@@ -346,13 +383,19 @@ switch ($Command) {
 	'new' {
 		if (-not $Title) { throw 'new needs -Title.' }
 		Assert-CardText $false
-		$t = New-Task $Title $(if ($Note) { $Note } else { $Title }) $(if ($Status) { $Status } else { 'queued' }) 'task'
-		Set-Common $t
-		if ($Waiting) { Set-Field $t 'waiting' $Waiting }
-		if ($ForLane) { Set-LaneWait $t $Waiting }
-		Save-Task $t
-		# A plan's step: the plan is under way (approved, if the user said so in words).
-		if ($Plan) { Open-Plan $Plan }
+		$m = Get-FromMessage
+		$t = New-Task $Title $(if ($Note) { $Note } elseif ($m -and $m.text) { $m.text } else { $Title }) $(if ($Status) { $Status } else { 'queued' }) 'task'
+		# All or nothing: a card whose command failed is taken back, so trying again doesn't leave a second one.
+		try {
+			if ($m) { Add-FromMessage $t $m }
+			Set-Common $t
+			if ($Waiting) { Set-Field $t 'waiting' $Waiting }
+			if ($ForLane) { Set-LaneWait $t $Waiting }
+			Save-Task $t
+			# A plan's step: the plan is under way (approved, if the user said so in words).
+			if ($Plan) { Open-Plan $Plan }
+		} catch { Remove-TaskFolder $t.id; throw }
+		Add-MadeLine $t $m
 		$t.id
 	}
 
@@ -371,12 +414,15 @@ switch ($Command) {
 		if (-not $Title) { throw 'plan needs -Title.' }
 		if (-not $Steps) { throw 'plan needs -Steps "title|lane|tier", one per task.' }
 		Assert-CardText $false
-		$t = New-Task $Title $Title 'inbox' 'plan' 'feature'
+		$m = Get-FromMessage
+		$t = New-Task $Title $(if ($m -and $m.text) { $m.text } else { $Title }) 'inbox' 'plan' 'feature'
+		if ($m) { Add-FromMessage $t $m }
 		Set-Field $t 'feature' $true
 		if ($Summary) { Set-Field $t 'summary' $Summary }
 		Set-Field $t 'steps' (ConvertTo-Steps $Steps)
 		Set-Common $t
 		Save-Task $t
+		Add-MadeLine $t $m
 		Add-Event "Posted a plan for your OK: $Title" $t.id
 		$t.id
 	}
@@ -412,7 +458,22 @@ switch ($Command) {
 		$t = Read-Task $Id
 		# A worker finds out here (set -Step) that the user deleted its task.
 		if ($t.status -eq 'removed' -and $Status -ne 'removed') { throw ($DeletedText -f $t.id) }
+		# The user's approval stands. An approved card never goes back to To test, and one approved in its lane waits
+		# only on its merge, done all the while: merging it doesn't make it ready again.
+		if ($t.status -eq 'done' -and $Status -and $Status -notin 'done', 'removed' -and ($Status -eq 'ready' -or $t.pending -eq 'merge')) {
+			if ($t.pending -eq 'merge') { throw "$($t.id) is done: it's approved, so it doesn't go to To test again. Merge its branch, then clear $($t.id), and it stays done." }
+			throw "$($t.id) is done: it's approved, so it doesn't go back to To test. To work on it again (a follow-up on it), set -Status working first."
+		}
 		if ($t.kind -eq 'plan' -and ($Status -in 'working', 'stuck', 'ready' -or $Lane -gt 0)) { throw ($PlanNotWorked -f $t.id) }
+		# Nothing for the user to try yet (groundwork the next step makes visible, a record of their pick, agents' own
+		# tools): said with -NothingToTest, so the card approves itself, never in words on a card they'd approve by hand.
+		if ($NothingToTest) {
+			if ($Status -ne 'ready') { throw '-NothingToTest goes with -Status ready: the card approves itself as it turns ready.' }
+			# What they added while it ran may be something to try.
+			if ([int]$t.followups -gt 0 -or $t.pending -eq 'followup') { throw "The user added to $($t.id) while it ran (show $($t.id)). Handle that and clear $($t.id) first: it may give them something to test." }
+		} elseif ($PSBoundParameters.ContainsKey('Test') -and (Join-Steps) -match '^\s*nothing\s+(to|in|for)\b') {
+			throw "That test says there's nothing to try. If there's nothing for the user to test, add -NothingToTest: the card approves itself and its plan moves on, with -Test saying why. Otherwise -Test says what to try, even when it takes some setting up (two players)."
+		}
 		Assert-CardText ($t.kind -ne 'plan' -and -not ($t.PSObject.Properties['auto'] -and $t.auto))
 		$before = $t.status
 		if ($Status) {
@@ -428,7 +489,10 @@ switch ($Command) {
 		# Every lane busy: it waits in Up next until wait hands it back. Starting it, or giving it a lane, ends the wait.
 		if ($ForLane) { Set-LaneWait $t $Waiting }
 		elseif ($t.PSObject.Properties['waitingFor'] -and $t.waitingFor -and ($t.status -ne 'queued' -or $Lane -gt 0)) { Clear-LaneWait $t }
-		if ($PSBoundParameters.ContainsKey('Test')) { Set-Field $t 'test' (Join-Steps) }
+		if ($NothingToTest) {
+			$why = Join-Steps
+			Set-Field $t 'test' $(if (-not $why) { 'Nothing to test' } elseif ($why -match '^\s*nothing\s+(to|in|for)\b') { $why } else { "Nothing to test: $why" })
+		} elseif ($PSBoundParameters.ContainsKey('Test')) { Set-Field $t 'test' (Join-Steps) }
 		# One question in one go; ask adds more, with audio.
 		if ($Question) { Set-Field $t 'questions' @(); Add-Question $t $Question @($Options) @($Audio) @($Images) @($Show) }
 		if ($Lane -ge 0) { Set-Field $t 'lane' $(if ($Lane -eq 0) { $null } else { $Lane }) }
@@ -439,6 +503,16 @@ switch ($Command) {
 		Set-Common $t
 		# Where to test it is checked against git: an agent with an old picture can't send the user to the wrong place.
 		if ($t.status -eq 'ready' -and ($Status -eq 'ready' -or $PSBoundParameters.ContainsKey('Where') -or $PSBoundParameters.ContainsKey('Branch'))) { Assert-TestPlace $t }
+		if ($Status -eq 'ready') { Set-Field $t 'nothingToTest' ([bool]$NothingToTest) }
+		# Approved as the user's Approve would: done, and on its branch the conductor merges it. There's no Undo: they
+		# didn't click anything. (A setup card is done already: it approves itself.)
+		$selfApproved = $NothingToTest -and $t.status -eq 'ready'
+		if ($selfApproved) {
+			Set-Status $t 'done'
+			Set-Field $t 'undo' $null
+			Add-Log $t 'conductor' 'Nothing for you to test, so it approved itself.'
+			if ($t.where -eq 'lane') { Set-Field $t 'pending' 'merge' }
+		}
 		Save-Task $t
 		# A step task approved, taken back or deleted: its plan follows. One just linked to a plan puts it under way.
 		if ($Plan) { Open-Plan $Plan }
@@ -448,10 +522,19 @@ switch ($Command) {
 			switch ($t.status) {
 				'working' { Add-Event "$(if ($t.lane) { "Started in lane $($t.lane)" } else { 'Started' }): $($t.title)" $t.id }
 				'ready' { Add-Event "Ready to test: $($t.title)" $t.id }
-				'done' { if ($t.PSObject.Properties['auto'] -and $t.auto) { Add-Event "Done: $($t.title)" $t.id } }
+				'done' {
+					if ($selfApproved) { Add-Event "Done, nothing to test: $($t.title)" $t.id }
+					elseif ($t.PSObject.Properties['auto'] -and $t.auto) { Add-Event "Done: $($t.title)" $t.id }
+				}
 			}
 		}
 		"$($t.id) $($t.status)"
+		if ($selfApproved) {
+			"Nothing for the user to test, so it approved itself.$(if ($t.pending -eq 'merge') { ' The conductor merges its branch.' })$(if ($t.plan) { " Go on to $($t.plan)'s next step." })"
+		}
+		# Its work over (a feature set done, a card with an agent of its own approved or deleted): that agent and the
+		# window it runs in close, as when the user approves it. Last, as it may be the agent running this.
+		if ($t.status -ne $before) { Close-FinishedLead (Get-Task $t.id) }
 		# Ready, with nothing on the card about what was run: say how to put it there.
 		if ($Status -eq 'ready' -and $t.status -eq 'ready' -and $t.kind -eq 'task' -and -not @(Get-List $t.checks | Where-Object { [int]$_.attempt -eq [int]$t.attempt }).Count) {
 			"No check on the card for this attempt. Whatever you ran (tests, a playtest) shows there with: result $($t.id) -Pass -Text `"12 of 12 tests pass`" [-File <the tests' output or Studio's console, as a text file>]"
@@ -572,4 +655,5 @@ switch ($Command) {
 
 	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, doing, say, reply, set, result, log, clear, wait or lanes." }
 }
+} finally { Unlock-Tasks }
 foreach ($line in $script:SplitNote) { $line }

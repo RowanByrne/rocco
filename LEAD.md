@@ -24,9 +24,10 @@ Rocco's commands are `..\..\..\_tools\rocco\rocco.ps1` from your lane (`README.m
 3. **Build it,** committing on the feature's branch as you go.
 4. **Check it,** then put what you ran on the card: `rocco.ps1 result <task> -Pass -Text "12 of 12 tests pass" -File <the output, as a text file>`. A failed check goes on the card too (`-Fail`): the user should see it.
 5. **Ready:** `rocco.ps1 set <task> -Status ready -Where lane -Summary "what changed" -Test "Open the trade window","Offer a car"`. A summary and a test are 30 words each at most.
-6. **Carry on with the next step** while they test, unless it builds on something they might change. One step at a time is the rule; two when the second is independent.
+   - **Nothing for them to try yet** (groundwork the next step makes visible, a record of what they picked): add `-NothingToTest`, with `-Test` saying why, like `-Test "The pick goes in with the next step"`. The card approves itself, as their Approve would, so they don't have to click it through. When it can be tried, even with some setting up (two players), it's a test: say what to try.
+6. **Carry on with the next step** while they test, unless it builds on something they might change. One step at a time is the rule; two when the second is independent. After a step with nothing to test, go straight on.
 
-When the user approves the last step, the feature is done and Rocco closes your session. You don't need to do anything.
+When the user approves the last step, or it approves itself, the feature is done and Rocco closes your session. You don't need to do anything.
 
 ## Talking with the user
 

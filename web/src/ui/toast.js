@@ -14,12 +14,14 @@ function drop(t) {
   setTimeout(() => t.el.remove(), 220);
 }
 
-// action: { label, run }. ms: how long it stays (5 s with an action, 3 s without).
+// action: { label, run }. ms: how long it stays (5 s with an action, 3 s without); STAY keeps it until it's closed
+// (its ×, its action, or the caller). Returns what closes it.
+export const STAY = -1;
 export function toast(message, color = 'var(--green)', action = null, ms = 0) {
   const stay = ms || (action ? 5000 : 3000);
   // The same plain message again (something that keeps failing) just stays longer.
   const same = !action && shown.find(t => !t.action && t.message === message);
-  if (same) { clearTimeout(same.timer); same.timer = setTimeout(() => drop(same), stay); return; }
+  if (same) { clearTimeout(same.timer); if (stay !== STAY) same.timer = setTimeout(() => drop(same), stay); return () => drop(same); }
 
   const el = document.createElement('div'), text = document.createElement('span');
   el.className = `toast${action ? ' has-action' : ''}`;
@@ -35,10 +37,23 @@ export function toast(message, color = 'var(--green)', action = null, ms = 0) {
     button.addEventListener('click', () => { drop(t); action.run?.(); });
     el.append(button);
   }
+  // One that stays can be closed by hand.
+  if (stay === STAY) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.title = 'Close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    close.addEventListener('click', () => drop(t));
+    el.classList.add('has-action');
+    el.append(close);
+  }
   $('#toasts').append(el);
   shown.push(t);
   while (shown.length > MAX) drop(shown.find(x => !x.action && x !== t) || shown[0]);
   void el.offsetWidth; // so it fades in from where it starts
   el.classList.add('show');
-  t.timer = setTimeout(() => drop(t), stay);
+  if (stay !== STAY) t.timer = setTimeout(() => drop(t), stay);
+  return () => drop(t);
 }

@@ -538,17 +538,22 @@ function Open-Plan([string]$id) {
 }
 
 # A plan is done once the user has approved a task for each of its steps, and open again if one comes back (Undo).
+# Whether every step of a plan is approved or dropped. A step whose task was deleted (by the user, or folded into
+# another) is dropped, not waiting: it still counts toward every step being covered, so the plan can finish.
+function Test-PlanFinished($p, $tasks) {
+	$all = @($tasks | Where-Object { $_.plan -eq $p.id })
+	$kids = @($all | Where-Object { $_.status -ne 'removed' })
+	$kids.Count -gt 0 -and @($kids | Where-Object { $_.status -eq 'done' }).Count -eq $kids.Count -and $all.Count -ge @(Get-List $p.steps).Count
+}
+
 function Sync-Plan([string]$id) {
 	if (-not $id) { return }
+	# Held by something else this moment: Rocco's server tries again as it looks at the board (leads.ps1 Update-Leads).
 	try { $p = Read-Task $id } catch { return }
 	if ($p.kind -ne 'plan' -or $p.status -notin 'queued', 'done') { return }
-	$all = @(Get-Tasks | Where-Object { $_.plan -eq $id })
-	$kids = @($all | Where-Object { $_.status -ne 'removed' })
-	# A step whose task was deleted (by the user, or folded into another) is dropped, not waiting: it still counts
-	# toward every step being covered, so the plan can finish.
-	$dropped = $all.Count - $kids.Count
-	$approved = @($kids | Where-Object { $_.status -eq 'done' }).Count
-	$finished = $kids.Count -gt 0 -and $approved -eq $kids.Count -and ($kids.Count + $dropped) -ge @(Get-List $p.steps).Count
+	$tasks = @(Get-Tasks)
+	$dropped = @($tasks | Where-Object { $_.plan -eq $id -and $_.status -eq 'removed' }).Count
+	$finished = Test-PlanFinished $p $tasks
 	if ($finished -and $p.status -ne 'done') {
 		Set-Status $p 'done'
 		Add-Log $p 'conductor' $(if ($dropped) { 'Every step approved or dropped, so the feature is done.' } else { 'Every step approved, so the feature is done.' })

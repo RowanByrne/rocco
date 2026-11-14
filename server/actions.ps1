@@ -110,13 +110,47 @@ if (Get-Process lync -ErrorAction SilentlyContinue) {
 	} catch { Write-Host $_.Exception.Message; $code = 1 }
 }
 '@
+# Claude Code installed with winget (as claude-install does) never updates itself, and claude update only says to run
+# winget: so winget updates it. Left on an old version it can stop working (on 2026-11-09 auto mode began refusing every
+# command a 2.1.263 conductor ran). winget can't replace the program while a Claude Code from it is running.
+$ClaudeUpdate = @'
+$exe = "$((Get-Command claude).Source)"
+if ($exe -match '\\Microsoft\\WinGet\\') {
+	$running = @(Get-Process claude -ErrorAction SilentlyContinue | Where-Object { "$($_.Path)" -match '\\Microsoft\\WinGet\\' })
+	if ($running.Count) {
+		Write-Host "Claude Code is running ($($running.Count) open: the conductor, a feature's agent, or a window of your own). Close them, then update again."
+		$code = 1
+	} else { winget upgrade --id Anthropic.ClaudeCode --exact; $code = $LASTEXITCODE }
+} else { claude update; $code = $LASTEXITCODE }
+'@
+# Node.js from winget's LTS package (as node-install puts it there), or its Current one.
+$NodeUpdate = @'
+winget upgrade --id OpenJS.NodeJS.LTS --exact; $code = $LASTEXITCODE
+if ($code) { Write-Host ''; Write-Host 'Trying winget''s Node.js Current package instead.'; winget upgrade --id OpenJS.NodeJS --exact; $code = $LASTEXITCODE }
+'@
+# Python updates within the version installed (3.13 gets 3.13's fixes): winget has a package for each, and a newer one
+# installs beside it rather than over it.
+$PythonUpdate = @'
+$v = "$(cmd /d /c 'python --version 2>nul')"
+if ($v -notmatch '\d+\.\d+') { $v = "$(cmd /d /c 'py --version 2>nul')" }
+if ($v -match '(\d+)\.(\d+)') { winget upgrade --id "Python.Python.$($Matches[1]).$($Matches[2])" --exact; $code = $LASTEXITCODE }
+else { Write-Host 'Python isn''t on this PC''s PATH.'; $code = 1 }
+'@
 $WindowActions = @{
-	'claude-update' = @('Updating Claude Code', 'claude update; $code = $LASTEXITCODE')
+	'claude-update' = @('Updating Claude Code', $ClaudeUpdate)
 	'codex-update'  = @('Updating Codex', 'npm install -g @openai/codex@latest; $code = $LASTEXITCODE')
 	'gemini-update' = @('Installing the latest Gemini CLI', 'npm install -g @google/gemini-cli@latest; $code = $LASTEXITCODE')
 	'git-update'    = @('Updating Git for Windows', 'git update-git-for-windows; $code = $LASTEXITCODE')
 	'gh-update'     = @('Updating the GitHub CLI', 'winget upgrade --id GitHub.cli --exact; $code = $LASTEXITCODE')
 	'gh-install'    = @('Installing the GitHub CLI', 'winget install --id GitHub.cli --exact; $code = $LASTEXITCODE')
+	# Optional tools an agent may want (connections.ps1). Python installs as 3.14: the newest most packages support. Move
+	# it on (here and in connections.ps1) once the next version has been out a while.
+	'node-install'   = @('Installing Node.js', 'winget install --id OpenJS.NodeJS.LTS --exact; $code = $LASTEXITCODE')
+	'node-update'    = @('Updating Node.js', $NodeUpdate)
+	'python-install' = @('Installing Python', 'winget install --id Python.Python.3.14 --exact; $code = $LASTEXITCODE')
+	'python-update'  = @('Updating Python', $PythonUpdate)
+	'ffmpeg-install' = @('Installing FFmpeg', 'winget install --id Gyan.FFmpeg --exact; $code = $LASTEXITCODE')
+	'ffmpeg-update'  = @('Updating FFmpeg', 'winget upgrade --id Gyan.FFmpeg --exact; $code = $LASTEXITCODE')
 	'lync-update'   = @('Updating Lync', $LyncUpdate)
 	# Installing an agent, and signing in to the user's own accounts (onboarding's accounts screen, accounts.ps1).
 	'claude-install' = @('Installing Claude Code', 'winget install --id Anthropic.ClaudeCode --exact; $code = $LASTEXITCODE')
@@ -130,7 +164,7 @@ $WindowActions = @{
 # show "the term is not recognized" and close.
 function Assert-ActionTools([string]$steps) {
 	$has = { param($name) [bool](Get-Command $name -ErrorAction SilentlyContinue) }
-	if ($steps -match '(?m)^\s*npm\s' -and -not (& $has 'npm')) { throw 'That needs Node.js, which isn''t on this PC (it brings npm, which installs it). Get it from nodejs.org, then try again.' }
+	if ($steps -match '(?m)^\s*npm\s' -and -not (& $has 'npm')) { throw 'That needs Node.js, which isn''t on this PC (it brings npm, which installs it). Install it from Connections (Developer tools), then try again.' }
 	if ($steps -match '(?m)^\s*winget\s' -and -not (& $has 'winget')) { throw 'That needs winget (Windows'' App Installer), which isn''t on this PC. Get "App Installer" from the Microsoft Store, then try again.' }
 	if ($steps -match '(?m)^\s*gh\s' -and -not (& $has 'gh')) { throw 'The GitHub CLI isn''t on this PC yet. Install it first (Connections).' }
 	if ($steps -match '(?m)^\s*claude\s' -and -not (& $has 'claude')) { throw 'Claude Code isn''t on this PC''s PATH. Install it first (Connections).' }
@@ -145,6 +179,8 @@ function Start-ActionWindow([string]$action) {
 		if ($r.Action -eq $action -and -not $r.Process.HasExited) { return [pscustomobject]@{ run = $key } }
 	}
 	$label, $steps = $WindowActions[$action]
+	# What's been installed since Rocco started counts, here and in the window.
+	Update-EnvPath
 	Assert-ActionTools $steps
 	$steps = $steps.Replace('__LYNC__', (Join-Path $RoDev '_tools\lync').Replace("'", "''"))
 	if ($steps.Contains('__CODEX__')) {

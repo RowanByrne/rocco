@@ -16,6 +16,7 @@ import { once } from './lib/busy.js';
 import { toast } from './ui/toast.js';
 import { notify } from './notify.js';
 import { refresh } from './sync.js';
+import { showUsage } from './views/usage.js';
 
 // A lane is busy while a worker is in it, or while it holds a branch: stuck, or a feature waiting for the user or the conductor.
 function laneState(n) {
@@ -289,4 +290,8 @@ export function initSidebar() {
 
   $('#laneDown').addEventListener('click', e => { const b = /** @type {Element} */ (e.target).closest('[data-fix-lanes]'); if (b) fixLanes(b); });
   $('#laneStat').addEventListener('click', () => { if (!currentProject().template && !state.meta.lanes.jobs?.length) openLanesDialog(); });
+  // The usage limits open Usage: what each task took (views/usage.js), on the Workboard, where its sheet shows.
+  const openUsage = () => { go('workboard'); showUsage(); };
+  $('#limits').addEventListener('click', openUsage);
+  $('#limits').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openUsage(); } });
 }

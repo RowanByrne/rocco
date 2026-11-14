@@ -14,12 +14,12 @@ import { storage } from '../lib/storage.js';
 import { once } from '../lib/busy.js';
 import { api } from '../api.js';
 import { refresh } from '../sync.js';
-import { toast } from '../ui/toast.js';
+import { toast, STAY } from '../ui/toast.js';
 import { notify } from '../notify.js';
 import { agentName } from '../agent.js';
 import { go } from '../router.js';
 import { prose, proseLine } from '../prose.js';
-import { pics, picOption, openPicsFrom } from '../ui/pics.js';
+import { pics, picOption, openPicsFrom, sentShots, sentRow } from '../ui/pics.js';
 
 let active = '';             // the thread shown: '' for the conductor's, else the id of a feature or card with its own agent
 const threads = new Map();   // thread -> { history: { stamp, items, steps }, loading, loadError, since }
@@ -30,6 +30,7 @@ const expanded = new Set();  // long messages the user opened in full
 const seen = new Set();      // open questions and requests already announced
 const whyOf = new Map();     // an open question -> what the agent said just before asking it (historyView)
 const answering = new Set(); // questions whose answers are on their way
+const stays = new Map();     // what an agent waits on, announced while its thread wasn't shown -> { thread, close }: its toast
 const deciding = new Set();  // permission requests whose answer is on its way
 let first = true;
 
@@ -54,10 +55,39 @@ const leads = () => (state.meta.leads || []).filter(l => !finished(l));
 const leadOf = id => leads().find(l => l.id === id);
 const agentOf = id => (id ? leadOf(id)?.conductor : state.meta.conductor) || { state: 'none' };
 const conductor = () => agentOf(active);
+
+// ---- What an agent waits on you for ----
+// Its open questions and requests for your OK, and a dialog only its own window can answer. Whichever way it asked
+// (on a card, in its chat, in its window), the user sees it in Needs you (workboard.js) and on its tab.
+export function waitingOn(id) {
+  const c = agentOf(id);
+  return [...(c.open || []), ...(c.elsewhere || []), ...(c.windowAsk ? [c.windowAsk] : [])];
+}
+// The threads whose agent waits on the user: '' for Rocco's own, else a feature's or a card's.
+export const askThreads = () => ['', ...leads().map(l => l.id)].filter(id => waitingOn(id).length);
+// What it waits for, in a line: its first question, the request, or where to answer.
+export function askLine(id) {
+  const e = waitingOn(id)[0];
+  if (!e) return '';
+  const more = waitingOn(id).length > 1 ? ` (+${waitingOn(id).length - 1} more)` : '';
+  if (e.kind === 'asked') return `${e.questions?.[0]?.text || 'A question for you'}${more}`;
+  if (e.kind === 'permission') return `Wants your OK: ${e.text}${more}`;
+  return `Waiting for you in its window: ${e.text}${more}`;
+}
+// Who's asking: Rocco, or the feature's (or card's) own agent.
+export const askerOf = id => id ? `${leadOf(id)?.title || id}: its agent` : 'Rocco';
+// Takes the user to it: that thread, at its questions.
+export function showAsk(id) {
+  go('workboard');
+  openThread(id);
+  requestAnimationFrame(() => $('#condAsks').scrollIntoView({ block: 'center' }));
+}
+
 const opened = () => (conductor().open || []);
 const openAsks = () => opened().filter(e => e.kind === 'asked');
 const openPermissions = () => opened().filter(e => e.kind === 'permission');
-const view = (id = active) => { let v = threads.get(id); if (!v) threads.set(id, v = { history: null, loading: false, loadError: '', since: '' }); return v; };
+// outbox: what the user sent in it that the thread doesn't have yet (sendMessage).
+const view = (id = active) => { let v = threads.get(id); if (!v) threads.set(id, v = { history: null, loading: false, loadError: '', since: '', outbox: [] }); return v; };
 // A picture on one of this thread's questions.
 const fileOf = rel => api.conductorFile(rel, active);
 
@@ -103,6 +133,57 @@ const savedMode = () => { const to = draft.get('note-to'); return !to ? null : S
 // Back to a plain note (the chip's ×, or picking what the note is).
 export function leaveMode() { setMode(null); }
 
+// ---- What you send shows at once ----
+// A sent message is in the chat the moment Send is pressed, marked as on its way, until the thread has it. Each is
+// { key, kind: 'message' or 'sent' (to a card), text, shots (addresses), act, task, title, id: the thread's, once known }.
+
+let sendKey = 0;
+// Sends go one after another, so two typed quickly reach the agent in the order they were written.
+/** @type {Promise<unknown>} */
+let sendQueue = Promise.resolve();
+const arrived = (o, items) => o.id ? items.some(e => e.id === o.id)
+  // Words to a card are a 'sent' line, whose id the request doesn't give: the first one like it after it went.
+  : o.done && items.some(e => e.kind === 'sent' && e.who === 'you' && e.task === o.task && e.act === o.act && (e.text || '') === o.text && Date.parse(e.at) >= o.sentAt - 60e3);
+
+// Shown until it's sent; on its way while run() goes; gone again if run() throws (the caller puts the words back).
+// Returns what run() did.
+/** @template T @param {any} o @param {string} thread @param {() => Promise<T>} run @returns {Promise<T>} */
+async function showSending(o, thread, run) {
+  const v = view(thread);
+  Object.assign(o, { key: ++sendKey, sentAt: Date.now() });
+  v.outbox.push(o);
+  if (thread === active) stickToEnd();
+  const turn = sendQueue.then(run);
+  sendQueue = turn.catch(() => {});
+  let result;
+  try {
+    result = await turn;
+    o.done = true;
+  } catch (e) {
+    v.outbox.splice(v.outbox.indexOf(o), 1);
+    if (thread === active) renderHistory();
+    throw e;
+  }
+  if (thread === active) renderHistory();
+  return result;
+}
+
+// What the user types in a chat: a message, with no card (the agent makes one only for work that comes of it). Its
+// screenshots go up first, so the agent never reads it without them. to: what it replies to. type: what they said
+// it is (fix, question, feature). shots: { file, url }, as the note box keeps them. Throws when it couldn't be sent.
+export async function sendMessage(text, { to = '', type = '', shots = [], thread = active } = {}) {
+  const o = { kind: 'message', text, type, shots: shots.map(s => s.url) };
+  const r = await showSending(o, thread, async () => {
+    const names = [];
+    for (const s of shots) names.push((await api.conductorPicture(s.file, thread)).name);
+    const sent = await api.conductorMessage(text, to, thread, type, names);
+    o.id = sent.id;
+    return sent;
+  });
+  await refresh();
+  if (r.opened) toast(`${r.opened} started, minimized in your taskbar, to pick it up`, 'var(--claude)');
+}
+
 // What the user typed, sent in the note box's mode. Returns false when it's a plain note.
 export async function sendInMode(text) {
   const m = noteMode();
@@ -111,14 +192,12 @@ export async function sendInMode(text) {
   setMode(null);
   try {
     if (m.kind === 'card') {
-      const t = byId(was.task);
-      const r = await api.act(t.id, cardAction(t), text);
+      const t = byId(was.task), act = cardAction(t);
+      const r = await showSending({ kind: 'sent', act, task: t.id, title: t.title, text }, thread, () => api.act(t.id, act, text));
       await refresh();
       toast(`${t.status === 'ready' ? 'Sent back' : t.status === 'stuck' ? 'Answer sent' : 'Added'}: ${t.title}${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
     } else {
-      const r = await api.conductorMessage(text, m.kind === 'reply' ? was.to : '', thread);
-      await refresh();
-      if (r.opened) toast(`${r.opened} started, minimized in your taskbar, to pick it up`, 'var(--claude)');
+      await sendMessage(text, { to: m.kind === 'reply' ? was.to : '', thread });
     }
     stickToEnd();
   } catch (e) {
@@ -235,14 +314,17 @@ function progressOf(id) {
   return { done: kids.filter(k => k.status === 'done').length, total: Math.max(kids.length, (plan?.steps || []).length - (all.length - kids.length)) };
 }
 
+// On a tab whose agent waits on you: a "?" that says so, louder than its dot.
+const asking = id => waitingOn(id).length ? html`<i class="tab-ask" title=${askLine(id)}>?</i>` : nothing;
+
 function renderTabs() {
   // The thread shown just finished: back to Rocco's.
   if (active && !leadOf(active)) { openThread(''); return; }
   const tab = (id, name, sub, vars) => html`<button class="tab${id === active ? ' on' : ''}" role="tab" aria-selected=${id === active ? 'true' : 'false'} data-thread=${id} style=${ifDefined(vars)} title=${name}><i class="tab-dot t-${toneOf(agentOf(id))}"></i><span class="tab-name">${name}</span>${
-    sub ? html`<span class="tab-sub">${sub}</span>` : nothing}${unread(id) ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
+    sub ? html`<span class="tab-sub">${sub}</span>` : nothing}${asking(id)}${unread(id) && !waitingOn(id).length ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
   // Rocco's own chat is the main one: a tab of its own kind, with its mark, set apart from the features' threads.
   const main = html`<button class="tab tab-main${active === '' ? ' on' : ''}" role="tab" aria-selected=${active === '' ? 'true' : 'false'} data-thread="" title="Rocco: the main chat"><span class="tab-mark">R</span><span class="tab-name">Rocco</span><i class="tab-dot t-${toneOf(agentOf(''))}"></i>${
-    unread('') ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
+    asking('')}${unread('') && !waitingOn('').length ? html`<i class="tab-new" title="New since you were last here"></i>` : nothing}</button>`;
   const threads = leads();
   render(html`${main}${threads.length ? html`<span class="tabs-sep" aria-hidden="true"></span>` : nothing}${repeat(threads, l => l.id, l => {
     const p = l.kind === 'feature' ? progressOf(l.id) : null;
@@ -257,6 +339,8 @@ export function openThread(id) {
   if (id === active) return;
   markSeen(active);
   active = id;
+  // Its questions are on the page now: their toasts have said what they had to.
+  for (const [key, s] of stays) if (s.thread === id) { s.close(); stays.delete(key); }
   decisionsOpen = false;
   view().since = seenAt(id);
   if (mode) setMode(null);
@@ -386,25 +470,22 @@ const DID = {
   promote: 'gave an agent of its own to', 'make-task': 'made a task of', reopen: 'sent back', followup: 'added to', answer: 'answered',
   revise: 'asked for changes to', 'ask-more': 'asked more about',
 };
+// What the user said a message is (the note box's Fix, Ask, Feature), under it.
+const KIND = { fix: 'Fix', question: 'Question', feature: 'Feature' };
 // What the user typed about a card, above their words.
 const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revise: 'Asked for changes', 'ask-more': 'Asked more', restart: 'Started again', 'make-task': 'Made a task' };
 
 // What you write sits on the right in a bubble, as in any chat app; what Rocco says and does runs down the left, so
 // its work never reads as yours.
-const yours = (body, foot, shots = []) => html`<div class="h-you">${
-  shots.length ? html`<div class="h-shots" data-pic-set>${pics(shots)}</div>` : nothing}${
+const yours = (body, foot, shots = []) => html`<div class="h-you">${sentRow(shots)}${
   body ? html`<div class="h-bubble">${body}</div>` : nothing}${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
 
-// The screenshots that went with what the user sent: a note's (kept on the message), or a send-back's, which names
-// them in its text ("Screenshots: shot-2.png, shot-3.png"); that line comes out of the words shown. A note sent before
-// they were kept on the message shows its card's.
-const SHOTS_LINE = /^Screenshots: (.+)$/m;
-function sentShots(e) {
-  const text = String(e.text || '');
-  const named = [...(e.shots || []), ...(text.match(SHOTS_LINE)?.[1].split(',').map(s => s.trim()) || [])].filter(Boolean);
-  const urls = named.map(n => /^(data|blob|https?):/.test(n) ? n : api.file(e.task, n));
-  if (!urls.length && (e.act === 'note' || e.act === 'question') && e.task) urls.push(...(byId(e.task)?.shots || []));
-  return { text: text.replace(SHOTS_LINE, '').trim(), shots: urls };
+// The screenshots that went with what the user sent (ui/pics.js sentShots). A note sent before they were kept on the
+// message shows its card's.
+function shotsOf(e) {
+  const r = sentShots(e.text, e.task, e.shots || []);
+  if (!r.shots.length && (e.act === 'note' || e.act === 'question') && e.task) r.shots.push(...(byId(e.task)?.shots || []));
+  return r;
 }
 
 // A card, small, where the chat mentions it: its name and where it is now. It opens the card's own conversation.
@@ -434,14 +515,18 @@ function row(e, all, prev = '') {
       return html`<div class="h-msg them"><div class="h-body"><div class="h-head">${e.re && task !== prev ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
         long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div></div>`;
     }
-    case 'message':
+    case 'message': {
       // Rocco's own word to the agent (Fix lanes): a line, in the words meant for the user.
       if (e.who === 'rocco') return html`<div class="h-event"><span class="h-dot"></span><span class="h-line">${e.line || e.text}</span>${at}</div>`;
-      return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${at}`);
+      // A message is just a message: a card shows under it only once the agent makes one from it (rocco.ps1 new -From).
+      const made = all.filter(x => x.kind === 'made' && x.to === e.id);
+      return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${KIND[e.type] ? html`<span>${KIND[e.type]}</span>` : nothing}${
+        made.map(x => taskChip(x.task, x.title, e.text))}${at}`, (e.shots || []).map(fileOf));
+    }
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
       const typed = e.act === 'note' || e.act === 'question';
-      const { text, shots } = sentShots(e);
+      const { text, shots } = shotsOf(e);
       if (typed || (SAID[e.act] && e.text)) return yours(text || (shots.length ? '' : e.title || ''), html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title, e.text || e.title) : nothing}${at}`, shots);
       // Something you did to a card, with no words: a small line on your side.
       return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span>${e.title || ''}</span>`}${at}</div></div>`;
@@ -520,8 +605,12 @@ function historyView() {
   const v = view(), history = v.history;
   const failed = v.loadError ? html`<div class="load-error">${icon.alert}<span>Couldn't load the chat: ${v.loadError}</span><button class="btn-sm" data-history-retry>Retry</button></div>` : nothing;
   if (!history) return v.loadError ? failed : html`<div class="h-empty"><span class="spin"></span>Loading</div>`;
-  const items = history.items.filter(e => !['answered', 'decided', 'expired', 'handled'].includes(e.kind));
-  if (!items.length && !history.steps.length) {
+  // What was sent and is in the thread now is drawn from the thread; the rest is still on its way, at the end.
+  v.outbox = v.outbox.filter(o => !arrived(o, history.items));
+  const sending = v.outbox.map(o => yours(o.text, html`${o.kind === 'sent' ? html`<span>${SAID[o.act]}</span>${taskChip(o.task, o.title)}` : KIND[o.type] ? html`<span>${KIND[o.type]}</span>` : nothing}<span class="h-sending">${o.done ? 'Sent' : 'Sending'}</span>`, o.shots || []));
+  // 'made': which card came of a message, shown under it.
+  const items = history.items.filter(e => !['answered', 'decided', 'expired', 'handled', 'made'].includes(e.kind));
+  if (!items.length && !history.steps.length && !sending.length) {
     return html`<div class="h-empty">${active ? "Nothing here yet. What this feature's agent does and says shows here, and what you type goes straight to it."
       : 'Tell Rocco what you noticed, ask it something, or describe a feature. What it does and says shows here, with a line for each card as it moves.'}</div>${failed}`;
   }
@@ -537,7 +626,8 @@ function historyView() {
   });
   // A card that came from something you typed shows where it is under your message, so "Started: ..." about it
   // says nothing new. The lines that need you (ready to test, an answer) stay.
-  const yoursTasks = new Set(items.filter(e => e.kind === 'sent' && (e.act === 'note' || e.act === 'question') && e.task).map(e => e.task));
+  const yoursTasks = new Set([...items.filter(e => e.kind === 'sent' && (e.act === 'note' || e.act === 'question') && e.task).map(e => e.task),
+    ...history.items.filter(e => e.kind === 'made').map(e => e.task)]);
   for (const e of items) if (e.kind === 'event' && e.task && yoursTasks.has(e.task) && /^Started\b/.test(e.text || '')) hidden.add(e.id);
   const rows = [...items.filter(e => !hidden.has(e.id)).map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const out = [];
@@ -580,8 +670,8 @@ function historyView() {
   flushIdle();
   // The steps it's still taking are the live line's while it works: they fold into the chat once it's done.
   if (conductor().state !== 'busy') flushSteps();
-  // At the end: what the agent is doing now, kept current every second (liveView).
-  return html`${out}${failed}<div class="h-live" id="chatLive"></div>`;
+  // At the end: what you just sent, then what the agent is doing now, kept current every second (liveView).
+  return html`${out}${sending}${failed}<div class="h-live" id="chatLive"></div>`;
 }
 
 // ---- What it's doing right now, at the end of the chat ----
@@ -663,7 +753,10 @@ function announce() {
       // The corner says only that it asks, and about what: the question itself is on the page.
       const topic = e.questions?.[0]?.header;
       const short = e.kind === 'permission' ? message : topic ? `${who} asks about ${topic}` : `${who} has a question for you`;
-      toast(short, 'var(--amber)', id !== active ? { label: 'Show', run: show } : null);
+      // Asked in a thread that isn't showing (a feature's agent, most often): it stays until it's seen, answered or
+      // closed, as nothing else on the page says so as loudly.
+      if (id !== active) stays.set(e.id, { thread: id, close: toast(short, 'var(--amber)', { label: 'Show', run: show }, STAY) });
+      else toast(short, 'var(--amber)');
       notify('Rocco', message, show);
     }
     // Something only its own window can answer: say where, and bring that window up from the notification.
@@ -676,10 +769,19 @@ function announce() {
       const who = lead ? `${lead.title}: its agent` : 'Rocco';
       const message = `${who} is waiting for you in its window${lead?.lane ? ` (lane ${lead.lane})` : ''}: ${w.text}. Rocco can't answer this one: answer it there.`;
       const show = () => { go('workboard'); openThread(id); showWindow(id); };
-      toast(message, 'var(--amber)', { label: 'Show its window', run: show });
+      const close = toast(message, 'var(--amber)', { label: 'Show its window', run: show }, id !== active ? STAY : 0);
+      if (id !== active) stays.set(key, { thread: id, close });
       notify('Rocco', message, show);
     }
   }
+  // Answered, or no longer waiting: its toast goes.
+  const still = new Set();
+  for (const id of ['', ...leads().map(l => l.id)]) {
+    const c = agentOf(id);
+    for (const e of c.open || []) still.add(e.id);
+    for (const w of [c.windowAsk, (c.elsewhere || []).at(-1)].filter(Boolean)) still.add(`window:${id}:${w.id || w.at}`);
+  }
+  for (const [key, s] of stays) if (!still.has(key)) { s.close(); stays.delete(key); }
   first = false;
 }
 
@@ -715,6 +817,8 @@ export function renderConductor() {
 // A different project: its own threads, and its own reply in progress.
 export function resetConductor() {
   threads.clear();
+  for (const s of stays.values()) s.close();
+  stays.clear();
   active = '';
   view().since = seenAt('');
   mode = savedMode();

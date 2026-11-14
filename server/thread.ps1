@@ -12,7 +12,9 @@
 #   permission  a permission request (Claude Code): tool, text, detail, worker
 #   decided     the user's decision on one: to, allow
 #   expired     a hook stopped waiting: to. A question then waits for wait; a permission is answered in the agent's window
-#   message     the user wrote to the conductor: text [, to (what it replies to)], via (rocco, terminal)
+#   message     the user wrote to the conductor: text [, to (what it replies to)], via (rocco, terminal) [, type (what
+#               they said it is: fix, question, feature), shots (its screenshots, in files\<id>\, as <id>/<file>)]
+#   made        a card the agent made from a message (rocco.ps1 new -From): to (the message), task, title
 #   sent        the user did something on the Workboard that goes to the conductor: act, text, task
 #   event       a milestone: text [, task]
 #   handled     the conductor has read it: to
@@ -294,10 +296,23 @@ function Get-ConductorThread {
 
 function Format-ThreadItem($e, $s) {
 	$one = { param($t) $t = (([string]$t) -replace '\s+', ' ').Trim(); if ($t.Length -gt 160) { $t.Substring(0, 157) + '...' } else { $t } }
-	if ($e.kind -eq 'message') { return '{0}  [message]  {1}' -f $e.id, (& $one $e.text) }
+	if ($e.kind -eq 'message') {
+		$n = @($e.shots | Where-Object { $_ }).Count
+		return '{0}  [message]  {1}{2}{3}' -f $e.id, $(if ($e.type) { "($(Get-MessageKind $e.type)) " }), (& $one $e.text), $(if ($n) { " (+$n screenshot$(if ($n -gt 1) { 's' }))" })
+	}
 	$q = $s.asked[$e.to]
 	$question = if ($q) { (@($q.questions) | ForEach-Object { $_.text }) -join ' / ' } else { '' }
 	'{0}  [answer]   {1} -> {2}' -f $e.id, (& $one $question), (& $one ((@($e.answers) | Where-Object { "$_" }) -join ' / '))
+}
+
+# What the user said a message is (the note box's Fix, Ask or Feature), in the agent's words.
+function Get-MessageKind([string]$type) {
+	switch ($type) {
+		'question' { 'a question: answer it, with no card' }
+		'feature' { 'a feature: plan it first' }
+		'idea' { 'an idea' }
+		default { "a $type" }
+	}
 }
 
 function Show-ThreadItem([string]$id) {
@@ -306,8 +321,19 @@ function Show-ThreadItem([string]$id) {
 	$time = ([datetime]$e.at).ToString('HH:mm')
 	switch ($e.kind) {
 		'message' {
-			"$($e.id)  message from $(if ($e.who -eq 'rocco') { 'Rocco itself (Fix lanes)' } else { 'the user' }), $time$(if ($e.to) { ", replying to $($e.to)" })"
+			"$($e.id)  message from $(if ($e.who -eq 'rocco') { 'Rocco itself (Fix lanes)' } else { 'the user' }), $time$(if ($e.to) { ", replying to $($e.to)" })$(if ($e.type) { ". They said it's $(Get-MessageKind $e.type)" })"
 			$e.text
+			$shots = @($e.shots | Where-Object { $_ })
+			if ($shots.Count) {
+				'Screenshots (look at each):'
+				foreach ($s in $shots) { '  ' + (Join-Path (Get-ThreadDir) "files\$($s -replace '/', '\')") }
+			}
+			$made = @(Get-Thread | Where-Object { $_.kind -eq 'made' -and $_.to -eq $e.id })
+			if ($made.Count) { "Cards made from it: $(($made | ForEach-Object { "$($_.task) ($($_.title))" }) -join ', ')" }
+			elseif ($e.who -eq 'you' -and -not $e.to) {
+				''
+				"No card comes of it until it asks for work (CONDUCTOR.md `"Taking a message on`"). A question, or something that changes nothing in the game: answer or do it, and say so in the chat. A fix: new -Title `"<a few words>`" -From $($e.id), then set it working as you start it. A feature: plan ... -From $($e.id). Several requests: a card each, each -From $($e.id) with -Note `"<their words for it>`"."
+			}
 		}
 		'answered' {
 			$q = $s.asked[$e.to]

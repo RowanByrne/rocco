@@ -229,6 +229,14 @@ try {
 		Start-Sleep -Seconds 7
 		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match 'T-001\s.*\[merge\]' }).Count 1 'handed over once Undo is gone'
 		Assert-Throws { Api '/api/tasks/T-001/undo' @{} } 'Too late to undo' 'a late Undo'
+		# Approved in its lane, it stays done through the merge: the conductor can't hand it back to To test.
+		Assert-Match ((Rocco show T-001) -join "`n") "don't set it ready" 'show says it stays done'
+		Assert-Throws { Rocco set T-001 -Status ready -Where main } 'stays done' 'merged, it isn''t handed back to test'
+		Assert-Throws { Rocco set T-001 -Status working } 'stays done' 'nor taken up again before its merge'
+		Rocco clear T-001 | Out-Null
+		$t = Read-TaskJson 'T-001'
+		Assert-Equal "$($t.status)/$($t.pending)" 'done/' 'merged and cleared, it''s done'
+		Assert-Throws { Rocco set T-001 -Status ready } "doesn't go back to To test" 'an approved card isn''t made ready again'
 	}
 
 	Test 'pause, the lane and worker, resume and restart' {
@@ -292,6 +300,106 @@ try {
 		Assert-Match ((Rocco show $plan) -join "`n") 'has an agent of its own' 'show tells the conductor it isn''t its to build'
 	}
 
+	Test 'a card with nothing to test approves itself, and its plan moves on' {
+		$plan = @(Rocco plan -Title 'Garage' -Summary 'Players keep cars.' -Steps 'Garage records|1|standard,Garage screen|1|standard')[0]
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		Api '/api/state' | Out-Null # looking at the board gives it its lane
+		$p = Read-TaskJson $plan
+		$env:ROCCO_THREAD = $plan
+		try {
+			$first = @(Rocco new -Title 'Garage records' -Plan $plan)[0]
+			Rocco set $first -Status working -Lane $p.lane -Branch feature/garage | Out-Null
+			Assert-Throws { Rocco set $first -Status ready -Where lane -Summary 'Records kept.' -Test 'Nothing to try yet' } 'add -NothingToTest' 'nothing to try, in words alone'
+			Assert-Throws { Rocco set $first -Status working -NothingToTest } 'goes with -Status ready' '-NothingToTest on another status'
+			# What the user added while it ran is read first: it may be something to try.
+			Api "/api/tasks/$first/followup" @{ text = 'show the car colours too' } | Out-Null
+			Assert-Throws { Rocco set $first -Status ready -NothingToTest -Where lane -Summary 'Records kept.' } 'added to' 'with a follow-up unread'
+			Rocco clear $first | Out-Null
+			$said = (Rocco set $first -Status ready -NothingToTest -Where lane -Summary 'Records kept.' -Test 'The screen shows them in the next step') -join "`n"
+			Assert-Match $said 'approved itself' 'its agent hears it approved itself'
+			$t = Read-TaskJson $first
+			Assert-Equal "$($t.status)/$($t.pending)" 'done/merge' 'done, and on its branch it waits on its merge'
+			Assert-Equal $t.test 'Nothing to test: The screen shows them in the next step' 'the card says why'
+			Assert-Match (@($t.log)[-1].text) 'approved itself' 'and that it approved itself'
+		} finally { Remove-Item Env:ROCCO_THREAD }
+		Assert-Match ((Rocco list -Pending) -join "`n") "$first\s.*\[merge\]" 'the conductor gets the merge at once, with no Undo to wait out'
+		Assert-Match ((Rocco show $first) -join "`n") 'approved itself' 'show tells the conductor why it''s done'
+		Assert (@((Api "/api/conductor/thread?t=$plan").items | Where-Object { "$($_.text)" -match 'Done, nothing to test: Garage records' }).Count -eq 1) 'the thread says so'
+		Assert-Equal (Read-TaskJson $plan).status 'queued' 'the feature carries on'
+		# Its last step, with nothing to test either: every step is approved, so the feature is done.
+		$env:ROCCO_THREAD = $plan
+		try {
+			$last = @(Rocco new -Title 'Garage screen' -Plan $plan)[0]
+			Rocco set $last -Status working -Lane $p.lane -Branch feature/garage | Out-Null
+			Rocco set $last -Status ready -NothingToTest -Where lane -Summary 'The screen.' | Out-Null
+		} finally { Remove-Item Env:ROCCO_THREAD }
+		Assert-Equal (Read-TaskJson $last).test 'Nothing to test' 'with no reason given, the card still says so'
+		Assert-Equal (Read-TaskJson $plan).status 'done' 'the feature is done'
+	}
+
+	Test 'two commands in one shell: the first lets go of what it held, and a failed new leaves no card' {
+		$plan = @(Rocco plan -Title 'Paint shop' -Summary 'Players paint cars.' -Steps 'Paint booth|1|standard,Colour picker|1|standard')[0]
+		$first = @(Rocco new -Title 'Paint booth' -Plan $plan)[0]
+		Rocco set $first -Status working -Lane 1 | Out-Null
+		$count = { @(Get-ChildItem (Join-Path $Game 'rocco\tasks') -Directory).Count }
+		$before = & $count
+		# As an agent runs them: one after the other, in its own PowerShell. Making the first ready looks at its plan,
+		# which the second then changes.
+		$rocco = Join-Path $App 'rocco.ps1'
+		$out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& '$rocco' set $first -Status ready -Summary 'The booth.' -Test 'Open it' -Project Game; & '$rocco' new -Title 'Colour picker' -Plan $plan -Project Game" 2>&1 | ForEach-Object { "$_" }
+		Assert-Equal $LASTEXITCODE 0 "both ran ($($out -join ' '))"
+		Assert-Equal (& $count) ($before + 1) 'one card for the step'
+		Assert-Throws { Rocco new -Title 'Lost step' -Plan 'T-999' } 'No task T-999' 'a step for a plan that isn''t there'
+		Assert-Equal (& $count) ($before + 1) 'and no card is left from it'
+	}
+
+	Test 'a finished feature''s agent closes with its window, however it finished' {
+		# An agent in a window as Rocco opens one (agents.ps1's window script, run as is), standing in for Claude Code.
+		$script = [regex]::Match([IO.File]::ReadAllText((Join-Path $App 'server\agents.ps1')), "(?s)\`$AgentWindowScript = @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+		$openAgent = {
+			param($plan)
+			$start = ConvertTo-Json -Compress @{ title = 'Rocco: test'; dir = $Repo; exe = (Get-Command powershell).Source; agent = 'claude'; desktopCodex = $false; arguments = @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300'); set = @{} }
+			$env:ROCCO_START = [Convert]::ToBase64String($Utf8.GetBytes($start))
+			try { $window = Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))) -WindowStyle Hidden -PassThru }
+			finally { Remove-Item Env:ROCCO_START }
+			$agent = $null
+			for ($i = 0; $i -lt 100 -and -not $agent; $i++) { Start-Sleep -Milliseconds 100; $agent = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($window.Id)" | Where-Object { $_.Name -eq 'powershell.exe' } | Select-Object -First 1 }
+			Assert ([bool]$agent) 'the stand-in agent started in its window'
+			# The record a wait leaves: the agent, without its window.
+			$record = [ordered]@{ agent = 'Claude Code'; window = 0; windowStarted = ''; pid = [int]$agent.ProcessId; started = (Get-Process -Id $agent.ProcessId).StartTime.ToString('o'); waiting = $true; at = (Get-Date).ToString('o') }
+			[IO.File]::WriteAllText((Join-Path $Game "rocco\threads\$plan\agent.json"), (ConvertTo-Json $record), $Utf8)
+			@($window.Id, [int]$agent.ProcessId)
+		}
+		$gone = { param($ids) -not @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }).Count }
+
+		# Set done by hand: set closes it.
+		$plan = @(Rocco plan -Title 'Wheels' -Summary 'Rims to pick.' -Steps 'Rim shop|1|standard')[0]
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		New-Item -ItemType Directory -Force (Join-Path $Game "rocco\threads\$plan") | Out-Null
+		$ids = & $openAgent $plan
+		Rocco set $plan -Status done | Out-Null
+		Start-Sleep -Milliseconds 500
+		Assert (& $gone $ids) 'its agent and its window are closed'
+		Assert (-not (Test-Path (Join-Path $Game "rocco\threads\$plan\agent.json"))) 'and its record'
+		Assert-Equal @((Api "/api/conductor/thread?t=$plan").items | Where-Object { $_.text -match 'The feature is done, so its agent' }).Count 1 'its thread says so'
+
+		# Its last step approved while the plan was held: the step's command couldn't finish it, and the server does,
+		# as it looks at the board.
+		$plan = @(Rocco plan -Title 'Paint' -Summary 'Colours to pick.' -Steps 'Paint booth|1|standard')[0]
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		New-Item -ItemType Directory -Force (Join-Path $Game "rocco\threads\$plan") | Out-Null
+		$step = @(Rocco new -Title 'Paint booth' -Plan $plan)[0]
+		$ids = & $openAgent $plan
+		$lock = New-Object IO.FileStream((Join-Path $Game "rocco\tasks\$plan\task.lock"), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+		try { Rocco set $step -Status done | Out-Null } finally { $lock.Close() }
+		Assert-Equal (Read-TaskJson $plan).status 'queued' 'the plan was held, so it isn''t finished yet'
+		Assert (-not (& $gone $ids)) 'and its agent still runs'
+		Api '/api/state' | Out-Null
+		Start-Sleep -Milliseconds 500
+		Assert-Equal (Read-TaskJson $plan).status 'done' 'the server finishes it'
+		Assert (& $gone $ids) 'and closes its agent and window'
+	}
+
 	Test 'a card can be given an agent of its own' {
 		$id = @(Rocco new -Title 'Stubborn bug')[0]
 		Rocco set $id -Status working -Lane 2 | Out-Null
@@ -303,6 +411,34 @@ try {
 		Assert-Match ((Rocco list -Pending -Thread $id) -join "`n") "$id\s.*\[reopen\]" 'which hears the send-back'
 		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match "^$id\s" }).Count 0 'and the conductor no longer does'
 		Assert-Throws { Api "/api/tasks/$id/promote" @{} } 'already has an agent' 'twice'
+	}
+
+	Test 'a message carries no card: one is made from it only for work, with its screenshot' {
+		$before = @(Get-ChildItem (Join-Path $Game 'rocco\tasks') -Directory).Count
+		Assert-Throws { Api '/api/conductor/picture' ([byte[]](1, 2, 3)) 'text/plain' } 'HTTP 415' 'not a picture'
+		Assert-Throws { Api '/api/conductor/picture' (New-Object byte[] 0) 'image/png' } 'HTTP 400' 'an empty picture'
+		Assert-Throws { Api '/api/conductor/message' @{ text = ' ' } } 'HTTP 400' 'nothing to send'
+		$pic = (Api '/api/conductor/picture' ([byte[]](137, 80, 78, 71, 1, 2, 3)) 'image/png').name
+		Assert-Match $pic '^pic-[0-9a-f]{8}\.png$' 'the picture is up, by name'
+		# A name that isn't one of the pictures sent up is dropped, not looked for elsewhere.
+		$m = Api '/api/conductor/message' @{ text = 'the car spins out on the hairpin'; type = 'fix'; shots = @($pic, '..\..\x.png') }
+		Assert-Equal @(Get-ChildItem (Join-Path $Game 'rocco\tasks') -Directory).Count $before 'no card for a message'
+		$e = @((Api '/api/conductor/thread').items | Where-Object { $_.id -eq $m.id })[0]
+		Assert-Equal "$($e.type)|$(@($e.shots) -join ',')" "fix|$($m.id)/$pic" 'it keeps what they said it is, and its screenshot'
+		Assert-Equal ((Api "/files/conductor/$($m.id)/$pic").Length) 7 'the screenshot is served with it'
+		Assert-Match ((Rocco list -Pending) -join "`n") "$($m.id)\s+\[message\]\s+\(a fix\) the car spins out on the hairpin \(\+1 screenshot\)" 'the conductor sees it as a message'
+		$shown = (Rocco show $m.id) -join "`n"
+		Assert-Match $shown ([regex]::Escape($pic)) 'show gives the screenshot''s path'
+		Assert-Match $shown 'No card comes of it until it asks for work' 'and says when to make a card'
+		Assert-Throws { Rocco new -Title 'Spin-out' -From 'C-000000' } 'No C-000000' 'a card from a message that isn''t there'
+		$id = @(Rocco new -Title 'Hairpin spin-out' -From $m.id)[-1]
+		$t = Read-TaskJson $id
+		Assert-Equal "$($t.note)|$($t.from)|$(@($t.shots).Count)" "the car spins out on the hairpin|$($m.id)|1" 'the card has their words, the message and its screenshot'
+		Assert (Test-Path (Join-Path $Game "rocco\tasks\$id\$(@($t.shots)[0])")) 'copied to the card'
+		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'made' -and $_.to -eq $m.id -and $_.task -eq $id }).Count 1 'the chat shows it under the message'
+		Assert-Match ((Rocco show $m.id) -join "`n") "Cards made from it: $id" 'and show says so'
+		Rocco clear $m.id | Out-Null
+		Rocco set $id -Status removed | Out-Null
 	}
 
 	Test 'a note that was only a question is answered, with no card kept' {

@@ -134,9 +134,14 @@ function Get-RecordedLibraries {
 	foreach ($line in [IO.File]::ReadAllLines($file)) {
 		if ($line -match '^## ') { $inTable = $line -match '^## Vendored libraries'; continue }
 		if (-not $inTable -or $line -notmatch '^\|') { continue }
-		$cells = @(($line.Trim().Trim('|') -split '\|') | ForEach-Object { $_.Trim().Trim('`').Trim() })
+		# Shown as plain text: the code marks an agent writes (`CmdrClient/...`) go, not only the ones at the ends.
+		$cells = @(($line.Trim().Trim('|') -split '\|') | ForEach-Object { ($_ -replace '`', '').Trim() })
 		if ($cells.Count -lt 4 -or -not $cells[0] -or $cells[0] -eq 'Library' -or $cells[0] -match '^-+$') { continue }
-		[pscustomobject]@{ name = $cells[0]; version = $cells[1]; source = $cells[2]; patches = $cells[3] }
+		# The library's own name, from a cell an agent may have said more in ("Cmdr, at `src/ServerStorage/Cmdr` (the
+		# admin console)"): what comes before a comma, a bracket or " at ". Else it's taken for another library.
+		$name = (($cells[0] -split '\s*[,(]|\s+at\s+')[0]).Trim().Trim('`').Trim()
+		if (-not $name) { $name = $cells[0] }
+		[pscustomobject]@{ name = $name; version = $cells[1]; source = $cells[2]; patches = $cells[3] }
 	}
 }
 
@@ -247,7 +252,11 @@ $CheckPc = {
 
 	# Claude Code: on PATH, or the copy the Claude desktop app keeps.
 	$version = ''; $how = ''; $cmd = ''
-	if (Get-Command claude) { $version = Ver (Run 'cmd.exe' '/d /c claude --version'); $how = 'Update it:'; $cmd = 'claude update' }
+	# One installed with winget doesn't update itself, and claude update only says to use winget (actions.ps1 $ClaudeUpdate).
+	if (Get-Command claude) {
+		$version = Ver (Run 'cmd.exe' '/d /c claude --version'); $how = 'Update it:'
+		$cmd = if ("$((Get-Command claude).Source)" -match '\\Microsoft\\WinGet\\') { 'winget upgrade --id Anthropic.ClaudeCode --exact' } else { 'claude update' }
+	}
 	$appDir = Join-Path $env:APPDATA 'Claude\claude-code'
 	if (-not $version -and (Test-Path $appDir)) {
 		$version = (Get-ChildItem $appDir -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
@@ -400,6 +409,57 @@ $CheckPc = {
 		$items += Act $item 'window' 'Install' @{ id = 'gh-install' }
 	}
 
+	# Node.js, Python and FFmpeg: optional, for what an agent may want to run (npm packages, Python scripts, turning audio
+	# and video into what Roblox takes). Each installs and updates with winget (actions.ps1). Their checks send stderr to
+	# nul: a program that isn't installed has cmd say so there, and anything on this job's stderr fails it.
+	$dot = [char]0x00B7
+	# Node.js: against the newest LTS release.
+	$version = Ver (Run 'cmd.exe' '/d /c node --version 2>nul')
+	$lts = ''
+	$releases = Latest 'https://nodejs.org/dist/index.json'
+	foreach ($r in $releases) { if ($r.lts) { $lts = Ver "$($r.version)"; break } }
+	if ($version) {
+		$npm = Ver (Run 'cmd.exe' '/d /c npm --version 2>nul')
+		$status = Status $version $lts
+		$item = Item 'Tools' 'Node.js' $status $version $lts "Runs JavaScript tools$(if ($npm) { " $dot npm $npm" })" 'Update it:' 'winget upgrade --id OpenJS.NodeJS.LTS --exact'
+		$items += if ($status -eq 'update') { Act $item 'window' 'Update' @{ id = 'node-update' } } else { $item }
+	} else {
+		$item = Item 'Tools' 'Node.js' 'off' '' $lts 'Optional, not installed.' 'Install it if you want your agent to run JavaScript tools and npm packages:' 'winget install --id OpenJS.NodeJS.LTS --exact'
+		$items += Act $item 'window' 'Install' @{ id = 'node-install' }
+	}
+
+	# Python: against the newest release of the version installed (3.13 gets 3.13's fixes; a newer 3.x installs beside
+	# it). The python command Windows comes with only opens the Microsoft Store, and says nothing on stdout.
+	$version = Ver (Run 'cmd.exe' '/d /c python --version 2>nul')
+	if (-not $version) { $version = Ver (Run 'cmd.exe' '/d /c py --version 2>nul') }
+	$pyLatest = ''
+	if ($version -match '^(\d+\.\d+)') {
+		$cycle = $Matches[1]
+		$cycles = Latest 'https://endoflife.date/api/python.json'
+		foreach ($c in $cycles) { if ("$($c.cycle)" -eq $cycle) { $pyLatest = "$($c.latest)"; break } }
+		$status = Status $version $pyLatest
+		$item = Item 'Tools' 'Python' $status $version $pyLatest "Runs Python scripts $dot updates within $cycle" 'Update it:' "winget upgrade --id Python.Python.$cycle --exact"
+		$items += if ($status -eq 'update') { Act $item 'window' 'Update' @{ id = 'python-update' } } else { $item }
+	} else {
+		$stub = "$((Get-Command python | Select-Object -First 1).Source)" -match '\\WindowsApps\\'
+		$item = Item 'Tools' 'Python' 'off' '' '' $(if ($stub) { 'Optional, not installed: the python command only opens the Microsoft Store.' } else { 'Optional, not installed.' }) 'Install it if you want your agent to run Python scripts:' 'winget install --id Python.Python.3.14 --exact'
+		$items += Act $item 'window' 'Install' @{ id = 'python-install' }
+	}
+
+	# FFmpeg: against the newest release build from gyan.dev, which winget's Gyan.FFmpeg installs. A build from git says
+	# "ffmpeg version N-..." rather than a number, and is never offered an update.
+	$out = Run 'cmd.exe' '/d /c ffmpeg -version 2>nul'
+	$version = if ($out -match 'ffmpeg version n?(\d+\.\d+(\.\d+)?)') { $Matches[1] } elseif ($out -match 'ffmpeg version (\S+)') { $Matches[1] } else { '' }
+	$ffLatest = Ver "$(Latest 'https://www.gyan.dev/ffmpeg/builds/release-version')"
+	if ($version) {
+		$status = Status $version $ffLatest
+		$item = Item 'Tools' 'FFmpeg' $status $version $ffLatest 'Converts audio and video' 'Update it:' 'winget upgrade --id Gyan.FFmpeg --exact'
+		$items += if ($status -eq 'update') { Act $item 'window' 'Update' @{ id = 'ffmpeg-update' } } else { $item }
+	} else {
+		$item = Item 'Tools' 'FFmpeg' 'off' '' $ffLatest 'Optional, not installed.' 'Install it if you want your agent to convert audio and video (sounds, music, trailers):' 'winget install --id Gyan.FFmpeg --exact'
+		$items += Act $item 'window' 'Install' @{ id = 'ffmpeg-install' }
+	}
+
 	ConvertTo-Json -InputObject ([pscustomobject]@{ online = $net.up; items = $items; eleven = [pscustomobject]$eleven }) -Depth 4 -Compress
 }
 
@@ -511,7 +571,8 @@ function Get-Connections([bool]$refresh) {
 		}
 	}
 	$stale = -not $script:PcResult -or ((Get-Date) - [datetime]$script:PcResult.At).TotalMinutes -gt 30
-	if (($refresh -or $stale) -and -not $script:PcJob) { $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev, $AppDir, (Get-Agent).id }
+	# The job inherits this process's PATH: with anything installed since Rocco started.
+	if (($refresh -or $stale) -and -not $script:PcJob) { Update-EnvPath; $script:PcStarted = Get-Date; $script:PcJob = Start-Job -ScriptBlock $CheckPc -ArgumentList $RoDev, $AppDir, (Get-Agent).id }
 	$checkedAt = $null; $online = $true; $pcItems = @()
 	if ($script:PcResult) { $checkedAt = $script:PcResult.At; $online = $script:PcResult.Value.online; $pcItems = @($script:PcResult.Value.items) }
 	$items = @(@(Get-ProjectConnections $refresh) + @(Get-LibraryConnections $refresh) + $pcItems + @(Get-StudioMcpItem) + @(Get-RobloxItem) + @(Get-ElevenLabsItem))

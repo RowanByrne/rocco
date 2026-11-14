@@ -284,13 +284,14 @@ async function ask() {
   if (!text || !open || asking) return;
   asking = true;
   try {
-    await api.note(`Change ${open.path}: ${text}`, '');
+    // A message, like one typed in the chat: Rocco makes a card for the change when it takes it on.
+    await api.conductorMessage(`Change ${open.path}: ${text}`, '');
     // Only what was sent goes: more typed while it was on its way stays in the box.
     if (askText.trim() === text) askText = '';
     renderDoc();
-    toast('Added to Up next', 'var(--violet)', { label: 'Workboard', run: () => go('workboard') });
+    toast('Sent to Rocco', 'var(--violet)', { label: 'Chat', run: () => go('workboard') });
     sync.refresh();
-  } catch (e) { toast(`Couldn't add the note: ${e.message}`, 'var(--red)'); }
+  } catch (e) { toast(`Couldn't send it: ${e.message}`, 'var(--red)'); }
   asking = false;
 }
 

@@ -112,6 +112,30 @@ function Set-AgentEffort([string]$effort) {
 	Get-Agent
 }
 
+# What an agent's window runs is fixed text: the title, folder, program and its arguments reach it as data, in
+# ROCCO_START (JSON, base64), never as part of the script. So nothing in a prompt can be read as PowerShell, whatever
+# quotes it has (a curly apostrophe closes a quoted string in PowerShell just as a straight one does). Being fixed, it
+# also tells Rocco's own windows from any other (Get-AgentWindow).
+# A session of its own: what marks an agent's child processes (Rocco started from an agent's shell) is left behind,
+# or Claude Code takes it for a sub-session and doesn't save its transcript.
+$AgentWindowScript = @'
+$start = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_START)) | ConvertFrom-Json
+Remove-Item Env:ROCCO_START, Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION, Env:ROCCO_THREAD -ErrorAction SilentlyContinue
+foreach ($p in $start.set.PSObject.Properties) { if ("$($p.Value)") { Set-Item "Env:$($p.Name)" "$($p.Value)" } }
+$Host.UI.RawUI.WindowTitle = $start.title
+Set-Location -LiteralPath $start.dir
+$arguments = @($start.arguments)
+if ($start.agent -eq 'codex' -and $env:TERM -eq 'dumb') {
+	Remove-Item Env:TERM -ErrorAction SilentlyContinue
+}
+# The desktop app can supply a CLI executable without the CLI's daemon package.
+if ($start.desktopCodex -and ((& $start.exe --help | Out-String) -match '(?m)^\s+--no-daemon\b')) {
+	$arguments = @('--no-daemon') + $arguments
+}
+& $start.exe @arguments
+'@
+$AgentWindowCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($AgentWindowScript))
+
 # The user's agent, opened in a window of its own in $dir with a first prompt: their session, which they can watch and
 # steer. It starts minimized in the taskbar, out of the way: the user follows it in Rocco, and opens the window only when
 # they want to (or the agent asks them something there). The prompt has no double quotes: they don't survive the npm
@@ -121,28 +145,24 @@ function Start-AgentWindow([string]$dir, [string]$prompt, [string]$title, [strin
 	$exe = Find-AgentExe $agent.id
 	if (-not $exe) { throw "$($agent.name) isn't installed on this PC (Connections)." }
 	$arguments = @($extra | Where-Object { $_ }) + @($Agents[$agent.id].prompt) + $prompt.Replace('"', '')
-	# What the window runs is fixed text: the title, folder, program and its arguments reach it as data, in ROCCO_START
-	# (JSON, base64), never as part of the script. So nothing in a prompt can be read as PowerShell, whatever quotes it
-	# has (a curly apostrophe closes a quoted string in PowerShell just as a straight one does).
-	# A session of its own: what marks an agent's child processes (Rocco started from an agent's shell) is left behind,
-	# or Claude Code takes it for a sub-session and doesn't save its transcript.
-	$text = @'
-$start = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_START)) | ConvertFrom-Json
-Remove-Item Env:ROCCO_START, Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION, Env:ROCCO_THREAD -ErrorAction SilentlyContinue
-foreach ($p in $start.set.PSObject.Properties) { if ("$($p.Value)") { Set-Item "Env:$($p.Name)" "$($p.Value)" } }
-$Host.UI.RawUI.WindowTitle = $start.title
-Set-Location -LiteralPath $start.dir
-$arguments = @($start.arguments)
-& $start.exe @arguments
-'@
-	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($text))
+	$desktopBin = (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') + '\'
+	$desktopCodex = $agent.id -eq 'codex' -and $exe.StartsWith($desktopBin, [StringComparison]::OrdinalIgnoreCase)
 	# set: what the window's environment is given (ROCCO_THREAD, for a feature's own agent: conductor.ps1).
-	$data = ConvertTo-Json -Compress -InputObject ([ordered]@{ title = "Rocco: $title"; dir = $dir; exe = $exe; arguments = @($arguments); set = $set })
+	$data = ConvertTo-Json -Compress -InputObject ([ordered]@{ title = "Rocco: $title"; dir = $dir; exe = $exe; agent = $agent.id; desktopCodex = $desktopCodex; arguments = @($arguments); set = $set })
 	# The window inherits this process's environment as it is when it starts.
 	$env:ROCCO_START = [Convert]::ToBase64String($Utf8.GetBytes($data))
 	try {
-		Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded -WorkingDirectory $dir -WindowStyle Minimized -PassThru
+		Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $AgentWindowCommand -WorkingDirectory $dir -WindowStyle Minimized -PassThru
 	} finally { Remove-Item Env:ROCCO_START -ErrorAction SilentlyContinue }
+}
+
+# The window an agent runs in, when Rocco opened it: the PowerShell around it, running Rocco's window script. 0 for
+# anything else, like a terminal of the user's own, which is never closed for them.
+function Get-AgentWindow([int]$agentPid) {
+	$p = Get-CimInstance Win32_Process -Filter "ProcessId=$agentPid" -ErrorAction SilentlyContinue
+	if (-not $p) { return 0 }
+	$w = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$p.ParentProcessId)" -ErrorAction SilentlyContinue
+	if ($w -and $w.Name -eq 'powershell.exe' -and "$($w.CommandLine)".Contains($AgentWindowCommand)) { [int]$w.ProcessId } else { 0 }
 }
 
 # Whether the chosen agent has the Roblox Studio MCP registered, by the name workers rely on.

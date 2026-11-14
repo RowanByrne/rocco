@@ -103,7 +103,11 @@ export const api = {
   conductorThread: (stamp, thread = '') => DEMO ? demo.conductorThread(stamp, thread) : getJson(withProject('/api/conductor/thread', (stamp ? `&stamp=${encodeURIComponent(stamp)}` : '') + inThread(thread))),
   conductorAnswer: (id, answers, text, thread = '') => DEMO ? demo.conductorAnswer(id, answers, text, thread) : post(withProject('/api/conductor/answer', inThread(thread)), { id, answers, text }),
   conductorPermission: (id, allow, thread = '') => DEMO ? demo.conductorPermission(id, allow, thread) : post(withProject('/api/conductor/permission', inThread(thread)), { id, allow }),
-  conductorMessage: (text, to, thread = '') => DEMO ? demo.conductorMessage(text, to, thread) : post(withProject('/api/conductor/message', inThread(thread)), { text, to }),
+  // A message, with no card (an agent makes one only for work that comes of it). type: fix, question or feature, or ''
+  // to leave it to the agent; shots: its screenshots, already up (conductorPicture), by name.
+  conductorMessage: (text, to, thread = '', type = '', shots = []) => DEMO ? demo.conductorMessage(text, to, thread, type, shots) : post(withProject('/api/conductor/message', inThread(thread)), { text, to, type, shots }),
+  // A screenshot for the message about to be sent: { name }.
+  conductorPicture: (file, thread = '') => DEMO ? demo.conductorPicture(file) : post(withProject('/api/conductor/picture', inThread(thread)), file, file.type),
   showConductor: (thread = '') => DEMO ? demo.showConductor() : post(withProject('/api/conductor/show-window', inThread(thread))),
   // An agent has stopped answering: its session is ended and a new one opened on what's on the board. { agent }.
   restartConductor: (thread = '') => DEMO ? demo.restartConductor(thread) : post(withProject('/api/conductor/restart', inThread(thread))),
@@ -112,7 +116,7 @@ export const api = {
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   // Stops a background job (a new project, opening lanes) and whatever it started.
   cancelJob: id => DEMO ? demo.cancelJob(id) : post(`/api/jobs/${id}/cancel`),
-  file: (taskId, name) => withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
+  file: (taskId, name) => (DEMO && demo.file(taskId, name)) || withProject(`/files/${taskId}/${encodeURIComponent(name)}`),
   // A picture on one of the conductor's questions: '<question id>/<file>'. data: ones (the demo's) are already addresses.
   conductorFile: (rel, thread = '') => /^(data|blob|https?):/.test(rel) ? rel : withProject(`/files/conductor/${rel.split('/').map(encodeURIComponent).join('/')}`, inThread(thread)),
   // Updates: the calendar's cards (live/CALENDAR.md) and the game page's events.

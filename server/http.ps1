@@ -46,6 +46,34 @@ function Read-Json($req) {
 	if ($body) { $body | ConvertFrom-Json } else { [pscustomobject]@{} }
 }
 
+# The picture the request carries, saved as $file plus its type's extension. Returns the file's name, or '' once it
+# has answered why it couldn't.
+function Receive-Picture($ctx, $req, [string]$file) {
+	$ext = $ImageExt[($req.ContentType -split ';')[0].Trim().ToLower()]
+	if (-not $ext) { Send-Text $ctx 415 'Screenshots must be PNG, JPEG, GIF or WebP.'; return '' }
+	$tooBig = "That picture is over $([int]($ShotMax / 1MB)) MB. Crop it, or save it as a JPEG."
+	if ($req.ContentLength64 -gt $ShotMax) { Send-Text $ctx 413 $tooBig; return '' }
+	$file += $ext
+	New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+	$out = [IO.File]::Create($file)
+	$total = [long]0
+	try {
+		# Counted as it arrives: a size isn't always given up front.
+		$buffer = New-Object byte[] 81920
+		while (($n = $req.InputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+			$total += $n
+			if ($total -gt $ShotMax) { break }
+			$out.Write($buffer, 0, $n)
+		}
+	} finally { $out.Close() }
+	if ($total -gt $ShotMax) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Send-Text $ctx 413 $tooBig; return '' }
+	if (-not $total) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Send-Text $ctx 400 'That picture was empty.'; return '' }
+	Split-Path $file -Leaf
+}
+
+# Screenshots for a message, up before the message itself (/api/conductor/picture), in its thread's files\incoming\.
+function Get-IncomingDir { Join-Path (Get-ThreadDir) 'files\incoming' }
+
 # A file from web\, never from outside it.
 function Send-Static($ctx, [string]$path) {
 	$relative = if ($path -eq '/') { 'index.html' } else { $path.TrimStart('/') }
@@ -228,13 +256,33 @@ function Invoke-Request($ctx) {
 		$script:ConductorCache = @{}
 		Send-Json $ctx @{ ok = $true }; return
 	}
+	# What the user writes in a chat: a message, with no card. The agent makes a card only for work that comes of it
+	# (rocco.ps1 new -From). type: what they said it is (fix, question, feature), or '' to leave it to the agent.
+	# shots: its screenshots, already up (/api/conductor/picture), by name.
 	if ($path -eq '/api/conductor/message') {
 		$body = Read-Json $req
 		$text = ([string]$body.text).Trim()
-		if (-not $text) { Send-Text $ctx 400 'Write something to send.'; return }
-		$e = Add-Thread 'message' @{ text = $text; to = [string]$body.to; via = 'rocco' } 'you'
+		$names = @(@($body.shots) | Where-Object { "$_" -match '^pic-[0-9a-f]{8}\.(png|jpg|gif|webp)$' -and (Test-Path -LiteralPath (Join-Path (Get-IncomingDir) $_)) })
+		if (-not $text -and -not $names.Count) { Send-Text $ctx 400 'Write something to send.'; return }
+		$fields = @{ id = (New-ThreadId); text = $text; to = [string]$body.to; via = 'rocco' }
+		if ([string]$body.type -in $Types) { $fields.type = [string]$body.type }
+		if ($names.Count) {
+			$dir = Get-AskFilesDir $fields.id
+			New-Item -ItemType Directory -Force $dir | Out-Null
+			foreach ($n in $names) { Move-Item -LiteralPath (Join-Path (Get-IncomingDir) $n) (Join-Path $dir $n) -Force }
+			$fields.shots = @($names | ForEach-Object { "$($fields.id)/$_" })
+		}
+		$e = Add-Thread 'message' $fields 'you'
 		$script:ConductorCache = @{}
 		Send-Json $ctx @{ id = $e.id; opened = (Request-Conductor) }; return
+	}
+	# A message's screenshot, up before the message, which names it. One never sent is cleared out after a day.
+	if ($path -eq '/api/conductor/picture') {
+		$dir = Get-IncomingDir
+		Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue
+		$name = Receive-Picture $ctx $req (Join-Path $dir ('pic-{0:x8}' -f (Get-Random -Maximum ([int]::MaxValue))))
+		if ($name) { Send-Json $ctx @{ name = $name } }
+		return
 	}
 	# Claude Code's background hooks for a conductor Rocco opened (server\hook-post.ps1).
 	if ($path -eq '/api/conductor/hook') {
@@ -352,26 +400,9 @@ function Invoke-Request($ctx) {
 	}
 	if ($path -match '^/api/tasks/(T-\d+)/shot$') {
 		$id = $Matches[1]
-		$ext = $ImageExt[($req.ContentType -split ';')[0].Trim().ToLower()]
-		if (-not $ext) { Send-Text $ctx 415 'Screenshots must be PNG, JPEG, GIF or WebP.'; return }
-		$tooBig = "That picture is over $([int]($ShotMax / 1MB)) MB. Crop it, or save it as a JPEG."
-		if ($req.ContentLength64 -gt $ShotMax) { Send-Text $ctx 413 $tooBig; return }
 		$t = Read-Task $id
-		$name = 'shot-{0}{1}' -f (@(@($t.shots) | Where-Object { $_ }).Count + 1), $ext
-		$file = Join-Path (Get-TaskDir $id) $name
-		$out = [IO.File]::Create($file)
-		$total = [long]0
-		try {
-			# Counted as it arrives: a size isn't always given up front.
-			$buffer = New-Object byte[] 81920
-			while (($n = $req.InputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-				$total += $n
-				if ($total -gt $ShotMax) { break }
-				$out.Write($buffer, 0, $n)
-			}
-		} finally { $out.Close() }
-		if ($total -gt $ShotMax) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Send-Text $ctx 413 $tooBig; return }
-		if (-not $total) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue; Send-Text $ctx 400 'That picture was empty.'; return }
+		$name = Receive-Picture $ctx $req (Join-Path (Get-TaskDir $id) ('shot-{0}' -f (@(@($t.shots) | Where-Object { $_ }).Count + 1)))
+		if (-not $name) { Unlock-Tasks; return }
 		Set-Field $t 'shots' (@(@($t.shots) | Where-Object { $_ }) + $name)
 		Save-Task $t
 		Send-Json $ctx @{ name = $name }; return

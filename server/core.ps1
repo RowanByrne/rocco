@@ -65,6 +65,17 @@ function Invoke-GitNet([string]$dir, [string[]]$arguments, [int]$seconds = 60, [
 
 function Now { (Get-Date).ToString('o') }
 
+# This process's PATH, with what Windows has on record now put first: a program installed since Rocco started (from
+# Connections, say) is found by Rocco, its checks, and the agents and windows it opens, without restarting it. Whatever
+# only this process had stays, after.
+function Update-EnvPath {
+	$entries = New-Object Collections.Generic.List[string]
+	foreach ($path in @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User'), $env:Path)) {
+		foreach ($e in "$path" -split ';') { $e = $e.Trim(); if ($e -and -not ($entries -contains $e)) { $entries.Add($e) } }
+	}
+	$env:Path = $entries -join ';'
+}
+
 # Where this PC's Rocco keeps its own things (settings, the log): with the user, not in a project or the RoDev folder.
 # ROCCO_HOME moves it, so a test run leaves the user's settings and log alone.
 $RoccoHome = if ($env:ROCCO_HOME) { $env:ROCCO_HOME } else { Join-Path $env:APPDATA 'Rocco' }

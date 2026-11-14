@@ -11,6 +11,7 @@ import { hhmm } from '../lib/format.js';
 import { icon } from '../lib/icons.js';
 import { prose } from '../prose.js';
 import { openSheetKey } from '../ui/sheet.js';
+import { sentShots, sentRow, openPicsFrom } from '../ui/pics.js';
 
 const POLL = 2500;
 const RESULT_MAX = 6000;
@@ -156,9 +157,13 @@ function row(r) {
     }
     case 'said': return html`<div class="sx-msg agent"><div class="sx-head"><span class="sx-who">Agent</span>${at}</div><div class="sx-text">${prose(r.text)}</div></div>`;
     case 'told': return html`<div class="sx-msg rocco"><div class="sx-head"><span class="sx-who">Rocco</span>${at}</div><div class="sx-text">${prose(r.text)}</div></div>`;
-    case 'log': return r.who === 'you'
-      ? html`<div class="sx-msg you"><div class="sx-head">${at}</div><div class="sx-text">${r.text}</div></div>`
-      : html`<div class="sx-msg note"><div class="sx-head"><span class="sx-who">${WHO[r.who] || r.who}</span>${at}</div><div class="sx-text">${prose(r.text)}</div></div>`;
+    case 'log': {
+      if (r.who !== 'you') return html`<div class="sx-msg note"><div class="sx-head"><span class="sx-who">${WHO[r.who] || r.who}</span>${at}</div><div class="sx-text">${prose(r.text)}</div></div>`;
+      // Yours, with any screenshots that went with it above it, as in the main chat. Its time shows beside it on
+      // hover, so the bubble is only your words.
+      const { text, shots } = sentShots(r.text, view.id);
+      return html`<div class="sx-you">${sentRow(shots)}${text ? html`<div class="sx-msg you">${text}</div>` : nothing}${at}</div>`;
+    }
   }
   return nothing;
 }
@@ -250,6 +255,8 @@ export function initSession() {
   document.addEventListener('click', /** @param {MouseEvent & { target: any }} e */ e => {
     if (!view || !$('#sx')?.contains(e.target)) return;
     if (e.target.closest('[data-sx-retry]')) { tick(view.id); return; }
+    const pic = e.target.closest('[data-pic-src]');
+    if (pic) { openPicsFrom(pic, null); return; }
     const head = e.target.closest('[data-sx]');
     if (!head) return;
     const key = head.dataset.sx;

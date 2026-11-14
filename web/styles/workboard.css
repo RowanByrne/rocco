@@ -150,10 +150,13 @@
 .sx-msg.agent .sx-who { color: var(--accent-text); }
 .sx-msg.rocco, .sx-msg.note { padding: 8px 11px; border-radius: 12px; background: var(--glass); border: 1px solid var(--stroke); }
 .sx-msg.note { color: var(--text-2); }
-.sx-msg.you { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: 14px; border-top-right-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere;
+/* Yours: on the right, the screenshots that went with it in a short row above (chat.css .h-shots), and its time
+   to its left on hover, so it takes no line of its own. */
+.sx-you { position: relative; align-self: flex-end; max-width: 85%; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.sx-you > .at { position: absolute; right: 100%; bottom: 9px; margin-right: 8px; white-space: nowrap; font-size: 11px; color: var(--text-3); opacity: 0; transition: opacity .15s; }
+.sx-you:hover > .at { opacity: 1; }
+.sx-msg.you { padding: 8px 12px; border-radius: 14px; border-top-right-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere;
   background: rgba(var(--accent-rgb), .14); border: 1px solid rgba(var(--accent-rgb), .28); }
-.sx-msg.you .sx-head { justify-content: flex-end; }
-.sx-msg.you .sx-head .at { margin-left: 0; }
 .sx-brief { padding: 8px 11px; border-radius: 12px; background: var(--glass); border: 1px dashed var(--stroke-2); color: var(--text-2); }
 .sx-brief:not(.open) .sx-text { max-height: 6.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
 .sx-more { margin-top: 4px; font-size: 12px; }
@@ -178,6 +181,9 @@
 .sx-pre.err { color: var(--red); }
 .sx-img { display: block; max-width: 100%; margin-top: 4px; border-radius: 8px; border: 1px solid var(--stroke); }
 .sx-wait { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }
+/* A plan Rocco is changing: in Approve's place, a quiet bar saying so, until the new plan is in. */
+.plan-wait { flex: 1; min-height: 34px; padding: 7px 14px; display: flex; align-items: center; justify-content: center; gap: 9px; text-align: center;
+  border: 1px dashed rgba(var(--ink), .22); border-radius: var(--r); color: var(--text-2); font-size: 13px; }
 
 /* A task's sheet: its top (what it is, what to try, Approve, its questions) stays in view while the rest scrolls. */
 .s-top { position: sticky; top: -8px; z-index: 2; max-height: 48vh; overflow-y: auto; margin: -8px -20px 0; padding: 8px 20px 14px;

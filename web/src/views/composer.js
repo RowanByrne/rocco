@@ -6,8 +6,6 @@ import { $ } from '../lib/dom.js';
 import { html, render, nothing } from '../lib/html.js';
 import { lineIcon } from '../lib/icons.js';
 import { draft } from '../lib/drafts.js';
-import { api } from '../api.js';
-import { refresh } from '../sync.js';
 import { toast } from '../ui/toast.js';
 import { settings } from '../settings.js';
 import { keyFor } from '../hotkeys.js';
@@ -16,7 +14,7 @@ import { voiceSupported, listening, listeningFor, toggleVoice, cancelVoice } fro
 import { shotOf, imagesIn, shotThumbs, shotClick } from '../ui/shots.js';
 import { openSheetKey } from '../ui/sheet.js';
 import { go } from '../router.js';
-import { noteMode, sendInMode } from './conductor.js';
+import { noteMode, sendInMode, sendMessage } from './conductor.js';
 
 // What a message is (README.md "Sorting"). Auto leaves it to Rocco, which sorts each one first: a question is
 // answered in the chat with no card kept, a fix becomes a card that's done and handed back to test, and a feature
@@ -32,7 +30,6 @@ const MIC = lineIcon('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M
 let drafts = []; // screenshots going with the next note: { file, url }
 let type = '';
 let voiceTimer = null;
-let sending = false; // a note is on its way: Enter again doesn't send it twice
 
 const text = () => $('#noteText');
 const hint = id => keyFor(id) ? ` (${keyFor(id)})` : '';
@@ -78,34 +75,14 @@ function grow() {
   if (box.value) box.style.height = box.scrollHeight + 'px';
 }
 
-// The screenshots, one at a time; returns the ones that didn't go up.
-async function upload(id, shots) {
-  const failed = [];
-  for (const d of shots) { try { await api.shot(id, d.file); } catch { failed.push(d); } }
-  return failed;
+// Words that didn't send go back in the box, ahead of anything typed since.
+function putBack(words) {
+  const now = text().value.trim();
+  setText(now ? `${words}\n${now}` : words);
 }
 
-// The note is in, without some of its screenshots: Retry sends just those, to the same note.
-function shotsFailed(id, failed) {
-  const n = failed.length;
-  toast(`Note added, but ${n} screenshot${n === 1 ? '' : 's'} didn't upload`, 'var(--amber)', { label: 'Retry', run: async () => {
-    const still = await upload(id, failed);
-    await refresh();
-    if (still.length) shotsFailed(id, still); else toast(`${n === 1 ? 'The screenshot is' : 'The screenshots are'} on the note now`);
-  } }, 20000);
-}
-
-// A note with screenshots is made on hold, so the conductor doesn't pick it up before they're on it; this lets it go.
-async function release(id) {
-  try { return (await api.release(id)).opened || ''; }
-  catch (e) {
-    toast(`Note added, but it couldn't be handed to Rocco: ${e.message}`, 'var(--red)', { label: 'Retry', run: async () => { const opened = await release(id); await refresh(); if (opened !== null) toast('Handed to Rocco', 'var(--violet)'); } }, 20000);
-    return null;
-  }
-}
-
+// Enter: it's in the chat at once, and the box is free for the next one while it goes (conductor.js sendMessage).
 async function addNote() {
-  if (sending) return;
   // What it still hears after this isn't part of the note.
   if (listening()) cancelVoice();
   const note = text().value.trim(), shots = drafts, noteType = type;
@@ -113,9 +90,7 @@ async function addNote() {
   if (noteMode()) {
     if (!note) { text().focus(); return; }
     setText('');
-    sending = true;
-    try { await sendInMode(note); } catch { setText(note); }
-    sending = false;
+    try { await sendInMode(note); } catch { putBack(note); }
     return;
   }
   if (!note && !shots.length) return;
@@ -124,33 +99,19 @@ async function addNote() {
   type = '';
   renderDrafts();
   renderComposerTools();
-  sending = true;
-  let made;
   try {
-    made = await api.note(note, noteType, shots.length > 0);
+    await sendMessage(note, { type: noteType, shots });
   } catch (e) {
     // Put it all back so nothing is lost.
-    setText(note);
-    drafts = shots;
-    type = noteType;
+    putBack(note);
+    drafts = [...shots, ...drafts];
+    if (!type) type = noteType;
     renderDrafts();
     renderComposerTools();
-    toast(`Couldn't add the note: ${e.message}`, 'var(--red)');
-    sending = false;
+    toast(`Couldn't send it: ${e.message}`, 'var(--red)');
     return;
   }
-  // From here the note exists: a screenshot that fails doesn't put the text back, or sending it again would add it twice.
-  const failed = await upload(made.id, shots);
-  const handed = shots.length ? await release(made.id) : made.opened || '';
-  // opened: no conductor was running, so Rocco opened the user's agent to pick it up.
-  const opened = handed || made.opened || '';
-  await refresh();
-  sending = false;
   emit('note-sent', noteType);
-  if (failed.length) shotsFailed(made.id, failed);
-  if (handed === null) return; // its own toast said so
-  // It shows in the chat, so nothing more is said, unless an agent had to be opened for it.
-  if (opened) toast(`${opened} started, minimized in your taskbar, to pick it up.`, 'var(--claude)');
 }
 
 export const focusComposer = () => { go('workboard'); text().focus(); };

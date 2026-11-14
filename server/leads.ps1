@@ -93,10 +93,31 @@ function Request-Lead {
 
 # As the board is looked at: a lead that has never been opened is, once it can be (it has a lane to take, and a card's
 # old worker has let go of it). After that it's opened again only when something waits on it, like the conductor.
+# And a lead whose work is over has its agent and window closed, however it came to be over (Close-FinishedLead).
 function Update-Leads {
-	foreach ($t in @(Get-Tasks | Where-Object { $_.lead -and -not $_.leadOpened -and $_.status -notin 'done', 'removed' -and $_.pending -ne 'handoff' })) {
+	$tasks = @(Get-Tasks)
+	foreach ($t in @($tasks | Where-Object { $_.lead -and -not $_.leadOpened -and $_.status -notin 'done', 'removed' -and $_.pending -ne 'handoff' })) {
 		try { Use-Thread $t.id; Start-Lead $t.id | Out-Null } catch { } finally { Use-Thread '' }
 	}
+	# A feature whose every step is approved, still open: the command that approved the last one didn't get to it (its
+	# plan was held that moment). Finishing it closes its agent.
+	foreach ($p in @($tasks | Where-Object { $_.lead -and $_.kind -eq 'plan' -and $_.status -eq 'queued' })) {
+		if (Test-PlanFinished $p $tasks) { Sync-Plan $p.id }
+	}
+	foreach ($t in @(Get-Tasks | Where-Object { $_.lead -and $_.status -in 'done', 'removed' })) { Close-FinishedLead $t }
+}
+
+# A feature done or deleted, or a card approved or deleted, whose agent is still running (or left a record behind): its
+# agent goes, and the window it ran in. Whatever ended it (the last step approved, a delete, an agent setting it done
+# itself), it's closed here, so no finished agent sits idle in the taskbar.
+function Close-FinishedLead($t) {
+	if (-not $t.lead -or $t.status -notin 'done', 'removed') { return }
+	$was = $script:ThreadId
+	try { Use-Thread $t.id; $running = Test-Path -LiteralPath (Get-ConductorFile) } finally { $script:ThreadId = $was }
+	if (-not $running) { return }
+	Stop-Lead $t.id $(if ($t.status -eq 'removed') { 'Deleted, so its agent''s session is closed' }
+		elseif ($t.kind -eq 'plan') { 'The feature is done, so its agent''s session is closed' }
+		else { 'Approved, so its agent''s session is closed' })
 }
 
 # Ends a thread's agent: its feature is finished or deleted, or its card approved. Its thread says so.

@@ -131,6 +131,8 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	if ($effort) { $extra += $Agents[$agent.id].effort, $effort }
 	if (-not $dir) { $dir = $RepoDir }
 	if (-not $as) { $as = "conductor on $(Split-Path $Root -Leaf)" }
+	# Its window inherits Rocco's PATH: with anything installed since Rocco started (FFmpeg from Connections, say).
+	Update-EnvPath
 	$window = Start-AgentWindow $dir $prompt "$($agent.name), $as" $extra @{ ROCCO_THREAD = "$($script:ThreadId)" }
 	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now)
 		hooks = $hooks; opened = (Now); model = "$($agent.model)"; effort = $effort; transcript = ''; session = '' })
@@ -144,7 +146,11 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 function Stop-Conductor {
 	$c = Read-Conductor
 	if (-not $c) { return $false }
-	$id = if ($c.window -and (Test-ProcessAlive $c.window $c.windowStarted)) { [int]$c.window } elseif ($c.pid -and (Test-ProcessAlive $c.pid $c.started)) { [int]$c.pid } else { 0 }
+	# Its window goes with it, so no PowerShell is left open behind it: the one recorded, else the window Rocco opened
+	# around it (a record a `wait` rewrote has only the agent). An agent in a terminal of the user's own leaves that open.
+	$id = if ($c.window -and (Test-ProcessAlive $c.window $c.windowStarted)) { [int]$c.window }
+		elseif ($c.pid -and (Test-ProcessAlive $c.pid $c.started)) { $w = Get-AgentWindow $c.pid; if ($w) { $w } else { [int]$c.pid } }
+		else { 0 }
 	if ($id) { try { & taskkill.exe /T /F /PID $id 2>$null | Out-Null } catch { } }
 	Remove-Item -LiteralPath (Get-ConductorFile) -Force -ErrorAction SilentlyContinue
 	$script:ConductorCache = @{}

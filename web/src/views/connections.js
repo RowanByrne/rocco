@@ -286,10 +286,11 @@ async function runAction(button) {
     working.set(key, 'Asking');
     renderConnections();
     try {
-      await api.note(a.note, '');
+      // A message, like one typed in the chat: Rocco makes a card only if there's work in it.
+      await api.conductorMessage(a.note, '');
       asked.add(a.note);
-      toast('Added to Up next', 'var(--violet)');
-    } catch (e) { toast(`Couldn't add the note: ${e.message}`, 'var(--red)'); }
+      toast('Sent to Rocco', 'var(--violet)');
+    } catch (e) { toast(`Couldn't send it: ${e.message}`, 'var(--red)'); }
     working.delete(key);
     renderConnections();
     return;

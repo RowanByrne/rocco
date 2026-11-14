@@ -90,13 +90,15 @@ function seed(id) {
           { text: 'Play it on every swing, or only when it hits?', options: [{ label: 'Every swing' }, { label: 'Only on hits' }] },
         ],
         log: [{ who: 'worker', at: ago(20), text: 'Sound asset deleted. Found 3 replacements.' }] },
-      { ...base, id: 'T-046', status: 'working', type: 'bug', lane: 3, startedAt: ago(12), step: 'Testing 6 hallway spots', progress: 70, title: 'Camera clips into walls',
+      // A card with an agent of its own, which asks something in its chat a moment after the page opens (cameraThread).
+      { ...base, id: 'T-046', status: 'working', type: 'bug', lane: 3, lead: true, startedAt: ago(12), step: 'Testing 6 hallway spots', progress: 70, title: 'Camera clips into walls',
         note: 'camera goes inside the walls in the hallway by the shop', shots: [picture(260), picture(280)], branch: 'agent/camera-clip',
         // Its time at work, and the checks its worker ran (rocco.ps1 result): the card shows both.
         worked: 0, workSince: ago(12),
         checks: [{ at: ago(8), ok: false, text: 'Camera test: 2 of 6 hallway spots still clip', file: 'check-1.txt', attempt: 1 }, { at: ago(4), ok: true, text: 'Camera test: 6 of 6 hallway spots clear', file: 'check-2.txt', attempt: 1 }],
         log: [{ who: 'conductor', at: ago(12), text: 'Lane 3.' }, { who: 'worker', at: ago(10), text: 'Found it: the camera only checks walls behind the head.' },
-          { who: 'worker', at: ago(6), text: 'Raycast from the head to the camera.' }, { who: 'worker', at: ago(3), text: 'Camera pulls in on wall hits.' }] },
+          { who: 'worker', at: ago(6), text: 'Raycast from the head to the camera.' }, { who: 'you', at: ago(5), text: 'it still clips by the stairs, here\nScreenshots: shot-1.png, shot-2.png' },
+          { who: 'worker', at: ago(3), text: 'Camera pulls in on wall hits.' }] },
       { ...base, id: 'T-047', status: 'working', type: 'bug', lane: 1, startedAt: ago(6), step: 'Coding', title: 'New players show 0 coins on leaderboard',
         note: 'my alt shows 0 coins on the leaderboard till it rejoins', followups: 1, pending: 'followup', branch: 'agent/leaderboard-zero',
         log: [{ who: 'conductor', at: ago(6), text: 'Lane 1.' }, { who: 'worker', at: ago(5), text: 'Leaderstats are made before the data loads.' },
@@ -137,8 +139,8 @@ function seed(id) {
     conductor: { state: 'busy', agent: 'Claude Code', doing: 'Merge the daily reward fix into main' },
     thread: sampleThread(),
     // The threads with an agent of their own, and what each agent is doing.
-    threads: { 'T-040': featureThread() },
-    agents: { 'T-040': { state: 'listening', agent: 'Claude Code' } },
+    threads: { 'T-040': featureThread(), 'T-046': cameraThread() },
+    agents: { 'T-040': { state: 'listening', agent: 'Claude Code' }, 'T-046': { state: 'busy', agent: 'Claude Code', doing: 'Testing 6 hallway spots' } },
   };
 }
 
@@ -162,6 +164,20 @@ function featureThread() {
   const steps = [[121, 'Reading LEAD.md'], [120, 'Reading docs/game/features/trading.md'], [110, 'Editing TradeService.luau'], [95, 'Using Studio: start stop play'], [70, 'Editing TradeWindow.luau'],
     [52, 'Editing TradeWindow.luau'], [39, 'Editing TradeWindow.luau'], [20, 'Using Studio: start stop play'], [13, 'Asking on the card'], [10, 'Wait for what the feature needs']].map(([m, text]) => ({ at: at(m), text }));
   return { items, steps };
+}
+
+// A card's own agent at work, which asks in its chat (Claude Code's AskUserQuestion, through Rocco's hook) a few seconds
+// after the page opens, so the card moves to Needs you and the question is announced, as a real one would be.
+function cameraThread() {
+  const at = ago;
+  const thread = { items: /** @type {any[]} */ ([
+    { id: 'C-000201', at: at(12), who: 'rocco', kind: 'event', text: 'Rocco opened Claude Code on this card, in lane 3', task: 'T-046' },
+    { id: 'C-000202', at: at(10), who: 'conductor', kind: 'said', text: 'Testing the camera in the six hallway spots where it clipped.' },
+  ]), steps: [[11, 'Reading CameraController.luau'], [6, 'Using Studio: start stop play']].map(([m, text]) => ({ at: at(m), text })) };
+  setTimeout(() => thread.items.push({ id: 'C-000203', at: new Date().toISOString(), who: 'conductor', kind: 'asked', via: 'hook', questions: [
+    { text: 'Two spots by the shop still clip with the camera pulled in. Should the wall fade out there, or the camera stop short of it?', header: 'Hallway walls', multi: false,
+      options: [{ label: 'Fade the wall' }, { label: 'Stop short' }] }] }), 8000);
+  return thread;
 }
 
 // The conductor's thread (server/thread.ps1): what it said and asked, what the user sent, milestones, and its steps.
@@ -257,11 +273,31 @@ export async function conductorAnswer(id, answers, text, thread = '') {
   return { ok: true, opened: '' };
 }
 export async function conductorPermission(id, allow, thread = '') { addLine(current(), 'decided', { to: id, allow }, 'you', thread); return { ok: true }; }
-export async function conductorMessage(text, to, thread = '') {
-  const d = current();
-  const e = addLine(d, 'message', { text, to, via: 'rocco' }, 'you', thread);
+// A screenshot up before its message, by the name the message gives it.
+const pictures = new Map();
+export async function conductorPicture(file) {
+  const name = `pic-${String(next++).padStart(8, '0')}.png`;
+  pictures.set(name, URL.createObjectURL(file));
+  return { name };
+}
+export async function conductorMessage(text, to, thread = '', type = '', shots = []) {
+  const d = current(), pics = shots.map(n => pictures.get(n)).filter(Boolean);
+  // The demo's sends take a moment, as a real one does, so the bubble that shows at once has something to wait for.
+  await new Promise(done => setTimeout(done, 600));
+  const e = addLine(d, 'message', { text, to, via: 'rocco', ...(type ? { type } : {}), ...(pics.length ? { shots: pics } : {}) }, 'you', thread);
+  // What asks for work becomes a card, under the message; a question is only answered.
+  if (!thread && !to && type !== 'question') {
+    setTimeout(() => {
+      const title = (text || 'From your screenshot').split('\n')[0].slice(0, 50);
+      const t = { id: `T-${next++}`, kind: 'task', type: type === 'feature' ? 'feature' : 'bug', attempt: 1, where: 'main', title, note: text, shots: pics, options: [], log: [],
+        status: 'working', pending: '', lane: 2, step: 'Starting', startedAt: new Date().toISOString(), from: e.id };
+      d.tasks.push(t);
+      addLine(d, 'made', { to: e.id, task: t.id, title }, 'conductor');
+    }, 3000);
+  }
   carryOn(d, thread ? "Got it. In a real project this feature's own agent reads this through rocco.ps1 wait, and answers here."
-    : 'Got it. In a real project the conductor reads this through rocco.ps1 wait and answers here.', 'Reading your message', thread);
+    : type === 'question' ? 'In a real project the conductor answers your question here, with no card.'
+      : 'Got it. In a real project the conductor reads this through rocco.ps1 wait, and makes a card for what it asks.', 'Reading your message', thread);
   return { id: e.id, opened: '' };
 }
 export async function showConductor() { return { shown: true }; }
@@ -269,6 +305,12 @@ export async function showConductor() { return { shown: true }; }
 const data = {};
 const current = () => (data[state.project] ??= seed(state.project));
 const find = id => current().tasks.find(t => t.id === id);
+
+// A task's file by name: its screenshots are data or blob addresses here, in the order they were added (shot-1 first).
+export function file(taskId, name) {
+  const n = Number(/^shot-(\d+)\./.exec(name)?.[1]);
+  return (n && find(taskId)?.shots?.[n - 1]) || '';
+}
 const nextOrder = () => Math.max(0, ...current().tasks.filter(t => t.status === 'queued').map(t => t.order || 0)) + 1;
 let next = 100;
 const bookmarks = new Set();

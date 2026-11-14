@@ -5,6 +5,7 @@
 // A set is the element with data-pic-set around a question's pictures; the caller's pick gets the label and the set.
 import { $ } from '../lib/dom.js';
 import { html, render, nothing, ifDefined, fixed } from '../lib/html.js';
+import { api } from '../api.js';
 
 const arrow = d => fixed(`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`);
 const PREV = arrow('M15 6l-6 6 6 6'), NEXT = arrow('M9 6l6 6-6 6');
@@ -17,6 +18,19 @@ export function pics(srcs) {
   const shown = (srcs || []).filter(Boolean);
   return shown.length ? html`<div class="pics">${shown.map((src, i) => html`<button type="button" class="pic-img" data-pic-src=${src} title="See it bigger"><img src=${src} alt="Picture ${i + 1}" loading="lazy"></button>`)}</div>` : nothing;
 }
+
+// The screenshots that went with something the user sent, from the main chat or a card's: the names kept with it
+// (a note's), and any its text names on a line of their own ("Screenshots: shot-2.png, shot-3.png", how a send-back
+// or a message to a card's agent carries them). That line comes out of the words shown. Returns { text, shots: urls }.
+const SHOTS_LINE = /^Screenshots: (.+)$/m;
+export function sentShots(text, taskId, names = []) {
+  const said = String(text || '');
+  const all = [...names, ...(said.match(SHOTS_LINE)?.[1].split(',').map(s => s.trim()) || [])].filter(Boolean);
+  return { text: said.replace(SHOTS_LINE, '').trim(), shots: all.map(n => /^(data|blob|https?):/.test(n) || !taskId ? n : api.file(taskId, n)) };
+}
+
+// Those screenshots, in a short row above the message (chat.css .h-shots); each opens big.
+export const sentRow = shots => shots.length ? html`<div class="h-shots" data-pic-set>${pics(shots)}</div>` : nothing;
 
 // An option with a picture: the picture opens it big, the label under it picks it. data: what makes the label a pick,
 // as the data attributes the caller's click handler reads ({ pick, q } on a task, { cPick, ask } on the conductor's).
