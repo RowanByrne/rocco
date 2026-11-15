@@ -10,7 +10,7 @@ Merged into main and pushed, not released (no new `v*` or `template/v*` tag):
 |---|---|---|
 | Rocco: checkouts, loans, the line, taking back, agents at once, feature agents in checkouts, the card's Load into a lane, Settings, README and LEAD.md | Rocco's `main` | 54 of 54 server tests pass (7 of them new), and the app's lint, type check and 20 tests pass. The card's button and the two settings were looked at in the app's demo mode |
 | Template: LANES.md, WORKER.md, CONDUCTOR.md and 17 more files, and the worker launcher | The template's `main` | Followed by a Claude worker and a Codex worker on a scratch game |
-| Drift | Untouched, so still a lane per task | Rocco reads a game's own `docs/workflow/LANES.md` to tell which way it works. Drift lends lanes once it takes the template's docs ("update from template", after a template release, or by hand from the template's main), with its PROJECT.md rule "keep that lane on the task branch until the user approves" changed to match: the lane then holds the commit, lent for the user's testing |
+| Drift | Switched on 2026-11-15 | It took the template's main by hand (`tools\update-from-template.ps1 -To template/main`), ahead of a template release, and its PROJECT.md lane-review rule now follows lent lanes. Both of this PC's lanes matched their fingerprints that day. No task has been run this way in Drift yet |
 
 **Going back:** `git -C _tools\rocco switch --detach fallback/before-lent-lanes`, then start Rocco again. Cards made the new way keep their `work` checkouts on disk; the old Rocco just doesn't know about them.
 
