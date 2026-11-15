@@ -265,6 +265,9 @@
 .rail .rail-list .c-meta > *, .rail .rail-list .q-meta > * { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 0; border: 0; border-radius: 0; background: none;
   box-shadow: none; font-size: 12px; font-weight: 400; line-height: 18px; color: var(--text-3); }
 .rail .c-meta > * + *::before, .rail .q-meta > * + *::before { content: '\00b7'; margin: 0 6px; color: var(--text-3); }
+/* Load into a lane, on a card that waits for one: the one thing in a card's meta row that's pressed. */
+.rail .rail-list .c-meta > .c-load { color: var(--accent); font-weight: 500; cursor: pointer; }
+.rail .rail-list .c-meta > .c-load:hover { text-decoration: underline; }
 /* In Up next, what a card waits for is a line of its own */
 .rail .rail-list .q-meta > :is(.q-wait, .q-dep) { flex-basis: 100%; }
 .rail .q-meta > :is(.q-wait, .q-dep)::before { content: none; }

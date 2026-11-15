@@ -1,7 +1,8 @@
 # A feature's own agent (README.md "Feature threads", and LEAD.md, which the agent reads). The conductor sorts what
 # the user sends, does small fixes, and merges into main. A feature the user approves is built by an agent of its own,
-# in a lane it keeps for the feature's life: the user talks to it directly, in the feature's own thread (thread.ps1),
-# and what they ask of its tasks goes to it, not through the conductor. A card can be given one too: the app offers
+# in a lane it keeps for the feature's life (or, in a game whose agents borrow lanes, a checkout of its own: loans.ps1):
+# the user talks to it directly, in the feature's own thread (thread.ps1), and what they ask of its tasks goes to it,
+# not through the conductor. A card can be given one too: the app offers
 # the third time it's sent back. "A lead" below is that agent, and its thread's id is the plan's or the card's.
 #
 # A lead is tracked, opened, watched and stopped exactly as the conductor is (conductor.ps1): the same code, with its
@@ -38,21 +39,63 @@ function Get-LeadLane($t, $tasks) {
 	0
 }
 
+# The branch a lead's own checkout is on: the one its work is on already, else one named for it. A name some other
+# work took first gets this one's id.
+function Get-LeadBranch($t) {
+	if ($t.branch) { return "$($t.branch)" }
+	$slug = ("$($t.title)".ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
+	if ($slug.Length -gt 40) { $slug = $slug.Substring(0, 40).Trim('-') }
+	if (-not $slug) { $slug = 'work' }
+	$name = "$(if ($t.kind -eq 'plan') { 'feature' } else { 'agent' })/$slug"
+	if ((Resolve-Commit "refs/heads/$name") -or (Resolve-Commit "refs/remotes/origin/$name")) { $name += "-$($t.id.ToLower())" }
+	$name
+}
+
 # What a lead is told when it's opened: what it is, where to read how, and to watch for what the user sends. No
-# double quotes: they don't survive some agents' wrappers (agents.ps1).
+# double quotes: they don't survive some agents' wrappers (agents.ps1). $lane 0: it works in a checkout of its own,
+# and borrows a lane to test (loans.ps1).
 function Get-LeadPrompt($t, [int]$lane) {
 	$tools = Get-ToolsPath
 	$what = if ($t.kind -eq 'plan') { "the feature $($t.id) ($($t.title))" } else { "the task $($t.id) ($($t.title))" }
 	$cut = @(Get-CutOff | ForEach-Object { $_.id })
+	$here = if ($lane) { 'this lane' } else { 'this checkout' }
 	$head = if ($t.leadOpened) {
 		"You are the agent for $what in this game, picking it up again: your last session ended. " +
-		$(if ($cut.Count) { "$($cut -join ', ') $(if ($cut.Count -eq 1) { 'is' } else { 'are' }) still marked Working: check this lane (its branch, its commits, anything uncommitted) and carry on from there. " } else { '' })
-	} elseif ($t.kind -eq 'plan') {
+		$(if ($cut.Count) { "$($cut -join ', ') $(if ($cut.Count -eq 1) { 'is' } else { 'are' }) still marked Working: check $here (its branch, its commits, anything uncommitted) and carry on from there. " } else { '' })
+	} elseif ($t.kind -eq 'plan' -and $lane) {
 		"You are the agent for $what in this game. The user approved its plan: you build it yourself, step by step, in this lane (lane $lane), and they talk to you directly in Rocco. "
-	} else {
+	} elseif ($t.kind -eq 'plan') {
+		"You are the agent for $what in this game. The user approved its plan: you build it yourself, step by step, in this checkout of your own (on $($t.branch)), borrowing a lane each time you test, and they talk to you directly in Rocco. "
+	} elseif ($lane) {
 		"You now have $what to yourself: the user gave it an agent of its own, to work it through with them directly. This is its lane (lane $lane)$(if ($t.branch) { ", and its work so far is on $($t.branch)" }). "
+	} else {
+		"You now have $what to yourself: the user gave it an agent of its own, to work it through with them directly. This is its checkout, on $($t.branch): you borrow a lane each time you test. "
 	}
 	"$head Read $tools\LEAD.md first, then run $tools\rocco.ps1 show $($t.id) and $tools\rocco.ps1 list -Pending."
+}
+
+# A lead in a game whose agents borrow lanes: it works in a checkout of its own, made here (work\<its branch>), and
+# needs no lane to start. As many agents at work as this PC runs at once: it waits for one to finish.
+function Start-LeadInWork($t) {
+	$id = "$($t.id)"
+	$dir = Get-WorkDir $t
+	if (-not $dir -or -not (Test-Path -LiteralPath $dir)) {
+		$waiting = if ((Get-AgentsAtWork @(Get-Tasks)) -ge (Get-AgentsLimit)) { 'As many agents are at work as this PC runs at once: its agent starts when one finishes' } else { '' }
+		$t = Read-Task $id
+		if (-not $waiting) { try { $dir = Add-Work $t (Get-LeadBranch $t) '' } catch { $waiting = "Its agent's checkout couldn't be made: $($_.Exception.Message)" } }
+		Set-Field $t 'waiting' $waiting
+		Save-Task $t
+		if ($waiting) { return '' }
+	}
+	if ($env:ROCCO_NO_CONDUCTOR -or (Get-Conductor).state -ne 'none') { return '' }
+	$agent = Get-Agent
+	if (-not $agent.installed) { return '' }
+	Open-Conductor (Get-LeadPrompt $t 0) $dir "$($t.title) ($id)" | Out-Null
+	$t = Read-Task $id
+	Set-Field $t 'leadOpened' (Now)
+	if ($t.waiting -match 'agent') { Set-Field $t 'waiting' '' }
+	Save-Task $t
+	$agent.name
 }
 
 # Opens a thread's agent if it should be running and isn't. First it's given its lane, which it keeps. Returns the
@@ -61,6 +104,7 @@ function Get-LeadPrompt($t, [int]$lane) {
 function Start-Lead([string]$id) {
 	$t = Get-Task $id
 	if (-not $t.lead -or $t.status -in 'done', 'removed' -or $t.pending -eq 'handoff') { return '' }
+	if (Test-SharedLanes) { return Start-LeadInWork $t }
 	$lane = Get-LeadLane $t @(Get-Tasks)
 	$dir = Join-Path $Root "lanes\lane$lane"
 	$waiting = if (-not [int](Get-Lanes).count) { 'This PC opens no lanes yet. Open some (Lanes, in the sidebar), and its agent starts' }

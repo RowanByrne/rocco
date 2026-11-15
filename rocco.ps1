@@ -38,6 +38,13 @@
 #   rocco.ps1 set T-020 -Summary "..." -Steps "...|4|standard"   a revised feature plan: new summary and steps
 #   rocco.ps1 set T-012 -ForLane       every lane is busy: it waits in Up next, and wait hands it back ([lane]) the
 #                                      moment one is free. new takes -ForLane too. Starting it ends the wait
+#   rocco.ps1 work T-012 -Branch agent/x [-Base feature/y]   a game whose agents borrow lanes (LANES.md "Lending a
+#                                      lane"): the task's own checkout, <Game>\work\agent-x on that branch (from -Base, a
+#                                      feature's branch, else from main). Prints its folder: the agent works only there
+#   rocco.ps1 borrow T-012 [-Timeout 480]   a lane to test in: the place then holds the checkout's latest commit. With
+#                                      every lane busy it waits in line. Prints the lane, its place, and what to check
+#   rocco.ps1 sync T-012               the lane it has, switched to the checkout's latest commit (after more commits)
+#   rocco.ps1 return T-012             done testing: the lane is free for the next task
 #   rocco.ps1 result T-012 -Pass|-Fail -Text "12 of 12 tests pass" [-File console.txt]   what the worker ran and how it
 #                                      went, on the card: the line, and the output (the tests' report, Studio's console)
 #   rocco.ps1 log T-012 -Text "..." [-Who conductor]
@@ -59,6 +66,8 @@ param(
 	[string]$Project, [string]$Spec, [int]$Timeout = 0, [int]$Count = -1,
 	[string]$From, # new, plan: the user's message (C-1a2b3c) the card is made from
 	[switch]$Pass, [switch]$Fail, [string]$File,
+	[string]$Base,    # work: the branch a new checkout starts from (a feature's, for one of its pieces)
+	[switch]$User,    # borrow: for the user's own testing (the app's Load into a lane): never waits, takes no one's lane
 	[Alias('Thread')] [string]$ThreadId, # -Thread T-020: the thread a command is about, a feature's (or a card's) with an agent of its own (LEAD.md)
 	[switch]$Answer,  # reply: the note was only a question, and this answers it (no card is kept)
 	[switch]$Done,    # reply: the note was an errand (nothing to test), done now, and this says what was done (no card is kept)
@@ -70,8 +79,8 @@ $AppDir = $PSScriptRoot
 # Kept before the parts load: they keep the thread in use under the same name (core.ps1 Use-Thread), and start with none.
 $named = $ThreadId
 # An agent's command loads only what the board needs: it runs many of these, and each starts PowerShell afresh.
-$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
-	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes' }
+$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'loans', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
+	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'loans' }
 foreach ($part in $parts) { . (Join-Path $AppDir "server\$part.ps1") }
 
 # A feature's own agent runs in a window that names its thread (ROCCO_THREAD, conductor.ps1 Open-Conductor), so
@@ -112,8 +121,9 @@ function Format-Tasks($rows) {
 		if ($t.kind -eq 'plan') { $extra += 'PLAN' }
 		if ($t.held) { $extra += $(if ($t.pending -eq 'stop') { 'the user paused it: stop its worker' } else { 'paused by the user: leave it until they resume it' }) }
 		if ($t.wantLane -or $t.wantTier) { $extra += "the user wants $(Format-Wanted $t)" }
-		if ($t.pending -eq 'lane') { $extra += "lane $($t.freeLane) is free: set $($t.id) -Status working -Lane $($t.freeLane)" }
-		elseif (Test-WaitsForLane $t) { $extra += 'waiting for a free lane' }
+		if ($t.pending -eq 'lane' -and -not [int]$t.freeLane) { $extra += "an agent is free: start it (work $($t.id) -Branch ..., then set $($t.id) -Status working)" }
+		elseif ($t.pending -eq 'lane') { $extra += "lane $($t.freeLane) is free: set $($t.id) -Status working -Lane $($t.freeLane)" }
+		elseif (Test-WaitsForLane $t) { $extra += $(if (Test-SharedLanes) { 'waiting for a free agent' } else { 'waiting for a free lane' }) }
 		if ($t.kind -eq 'question') { $extra += 'QUESTION: answer with reply' }
 		if ($t.plan) { $extra += "in $($t.plan)" }
 		if (@(Get-List $t.after).Count) { $extra += "after $((Get-List $t.after) -join ',')" }
@@ -343,7 +353,7 @@ switch ($Command) {
 		if ($t.kind -eq 'plan') { $head += '  feature plan' }
 		if ($t.kind -eq 'question') { $head += '  question from the user' }
 		if ($t.type) { $head += "  $($t.type)" }
-		if ($t.lane) { $head += "  lane $($t.lane)" }
+		if ($t.lane) { $head += "  lane $($t.lane)$(if (Get-WorkDir $t) { ' (on loan)' })" }
 		if ($t.branch) { $head += "  $($t.branch)" }
 		$head += "  attempt $($t.attempt)"
 		if ($t.pending) { $head += "  waiting on the conductor: $($t.pending)" }
@@ -351,6 +361,7 @@ switch ($Command) {
 		"Title:      $($t.title)"
 		if ($t.note -and $t.note -ne $t.title) { "Note:       $($t.note)" }
 		if ($t.plan) { "Plan:       $($t.plan)" }
+		if (Get-WorkDir $t) { "Checkout:   $(Get-WorkDir $t)$(if (Test-NeedsLane $t) { '  (ready for the user to test, with no lane holding it: borrow -User loads it into one)' })" }
 		if (@(Get-List $t.after).Count) { "After:      $((Get-List $t.after) -join ', ')" }
 		foreach ($s in Get-List $t.shots) { "Screenshot: $(Join-Path $dir $s)" }
 		if ($t.step) { "Step:       $($t.step)" }
@@ -390,18 +401,26 @@ switch ($Command) {
 		if (Test-WaitsForLane $t) {
 			$free = @(Get-LaneReady @(Get-Tasks) | Where-Object { $_.id -eq $t.id })
 			''
-			if ($free.Count) { "Lane $($free[0].freeLane) is free: set $($t.id) -Status working -Lane $($free[0].freeLane) -Step `"...`", and give the worker its id." }
+			if ($free.Count -and -not [int]$free[0].freeLane) { "An agent is free: work $($t.id) -Branch agent/<slug>, set $($t.id) -Status working -Step `"...`", and give the worker its id and its checkout." }
+			elseif ($free.Count) { "Lane $($free[0].freeLane) is free: set $($t.id) -Status working -Lane $($free[0].freeLane) -Step `"...`", and give the worker its id." }
+			elseif (Test-SharedLanes) { 'As many agents are at work as this PC runs at once: wait hands it back ([lane]) the moment one finishes.' }
 			else { 'Every lane is busy: wait hands it back ([lane]) the moment one is free.' }
 		}
-		# Every lane busy for a task you're about to start.
-		if ($t.status -eq 'queued' -and $t.pending -in 'plan', 'reopen' -and -not @(Get-FreeLanes @(Get-Tasks)).Count) { ''; "Every lane is busy. To start it when one frees: set $($t.id) -ForLane (wait hands it back as [lane])." }
+		# Nothing to start a task in, for one you're about to start: every lane busy, or (where agents borrow lanes) as
+		# many agents at work as this PC runs at once.
+		if ($t.status -eq 'queued' -and $t.pending -in 'plan', 'reopen') {
+			if (Test-SharedLanes) { if ((Get-AgentsAtWork @(Get-Tasks)) -ge (Get-AgentsLimit)) { ''; "As many agents are at work as this PC runs at once ($(Get-AgentsLimit)). To start it when one finishes: set $($t.id) -ForLane (wait hands it back as [lane])." } }
+			elseif (-not @(Get-FreeLanes @(Get-Tasks)).Count) { ''; "Every lane is busy. To start it when one frees: set $($t.id) -ForLane (wait hands it back as [lane])." }
+		}
 		# A feature plan is never worked as a card: its steps are tasks, which the plan's chip counts.
 		if ($t.kind -eq 'plan' -and $t.lead) {
 			# Built by an agent of its own (LEAD.md). To that agent: how. To anyone else: hands off.
 			''
-			if ($script:ThreadId -eq $t.id) {
+			if ($script:ThreadId -eq $t.id -and (Get-WorkDir $t)) {
+				"You are building this, a step at a time, in your own checkout, $(Get-WorkDir $t), on $($t.branch). For each step in turn: new -Title `"<step>`" -Plan $($t.id), then work <its id> -Branch $($t.branch) (the same checkout) and set <its id> -Status working -Step `"...`", build it, borrow <its id> to test it in a lane, record what you ran (result), and set it ready with -Where lane. A step that can be built apart from the one you're on can go to a helper in a checkout of its own: work <its id> -Branch agent/<piece> -Base $($t.branch). $(if ($t.pending -eq 'approved') { "Then clear $($t.id)." })"
+			} elseif ($script:ThreadId -eq $t.id) {
 				"You are building this, a step at a time, in lane $($t.lane). For each step in turn: new -Title `"<step>`" -Plan $($t.id), then set <its id> -Status working -Lane $($t.lane) -Branch <the feature's branch> -Step `"...`", build it, record what you ran (result), and set it ready with -Where lane. $(if ($t.pending -eq 'approved') { "Then clear $($t.id)." })"
-			} else { "This feature has an agent of its own, in lane $($t.lane): it makes and works its tasks, and the user talks to it in the feature's thread. It isn't yours, except to merge a step the user has approved." }
+			} else { "This feature has an agent of its own, $(if (Get-WorkDir $t) { "in its own checkout ($($t.branch))" } else { "in lane $($t.lane)" }): it makes and works its tasks, and the user talks to it in the feature's thread. It isn't yours, except to merge a step the user has approved." }
 		} elseif ($t.kind -eq 'plan') {
 			$perStep = "a task per step, new -Title `"<step>`" -Plan $($t.id) [-After T-0xx], and give each worker its step's id"
 			$hint = if ($t.status -eq 'inbox' -and $t.pending -eq 'revise') { "The user asked for changes (the latest 'you' line), and they're watching the plan's card while you make them. Change it now: set $($t.id) -Summary `"...`" -Steps ... (only what they asked). Then say what you changed in a sentence, reply $($t.id) -Text `"...`" (it shows on the card and in the chat), and clear $($t.id). It waits for their OK again." }
@@ -536,7 +555,7 @@ switch ($Command) {
 		# Where to test it is checked against git: an agent with an old picture can't send the user to the wrong place.
 		$testing = $t.status -eq 'ready' -and ($Status -eq 'ready' -or $PSBoundParameters.ContainsKey('Where') -or $PSBoundParameters.ContainsKey('Branch'))
 		$markingDone = $Status -eq 'done' -and $before -ne 'done'
-		if (($testing -or $markingDone) -and $t.branch -and $t.lane -and (Test-RequiresLaneApproval)) {
+		if (($testing -or $markingDone) -and $t.branch -and ($t.lane -or (Get-WorkDir $t)) -and (Test-RequiresLaneApproval)) {
 			if ($NothingToTest -or $markingDone) { throw "$($t.id) needs the user's approval in its lane. Set it ready with test instructions and wait for the user to approve it on the Workboard." }
 			if ($Status -eq 'ready' -and -not $PSBoundParameters.ContainsKey('Where')) { Set-Field $t 'where' 'lane' }
 			if ($t.where -ne 'lane') { throw "$($t.id) needs the user's approval in its lane. Use -Where lane and merge only after approval." }
@@ -553,6 +572,13 @@ switch ($Command) {
 			if ($t.where -eq 'lane') { Set-Field $t 'pending' 'merge' }
 		}
 		Save-Task $t
+		# Ready for the user to test on its branch, from a checkout of its own: a lane holds it for them (the one its
+		# agent tested in, now on its latest commit, else a free one), or its card offers to load it when one is free.
+		$loan = if ($Status -eq 'ready' -and $t.status -eq 'ready' -and $t.where -eq 'lane' -and (Get-WorkDir $t)) { Invoke-Borrow $t.id 'user' 0 }
+		# Merged, and in Main to try: its own checkout has nothing left to do.
+		$tidied = if ($Status -eq 'ready' -and $t.status -in 'ready', 'done' -and $t.where -eq 'main' -and (Get-WorkDir $t) -and (Get-BranchPlace $t) -eq 'main') {
+			$t = Read-Task $t.id; Remove-Work $t; Save-Task $t
+		}
 		# A step task approved, taken back or deleted: its plan follows. One just linked to a plan puts it under way.
 		if ($Plan) { Open-Plan $Plan }
 		if ($t.status -ne $before) { Sync-Plan $t.plan }
@@ -568,6 +594,8 @@ switch ($Command) {
 			}
 		}
 		"$($t.id) $($t.status)"
+		if ($loan) { if ($loan.lane) { "The user tests it in lane $($loan.lane), which holds its latest commit." } else { $loan.text } }
+		if ($tidied) { $tidied }
 		if ($selfApproved) {
 			"Nothing for the user to test, so it approved itself.$(if ($t.pending -eq 'merge') { ' The conductor merges its branch.' })$(if ($t.plan) { " Go on to $($t.plan)'s next step." })"
 		}
@@ -579,6 +607,24 @@ switch ($Command) {
 			"No check on the card for this attempt. Whatever you ran (tests, a playtest) shows there with: result $($t.id) -Pass -Text `"12 of 12 tests pass`" [-File <the tests' output or Studio's console, as a text file>]"
 		}
 	}
+
+	# A game whose agents borrow lanes (loans.ps1; the template's LANES.md "Lending a lane"). work: the task's own
+	# checkout. borrow, sync, return: a lane to test it in, by commit.
+	'work' {
+		if (-not $Branch) { throw 'work needs -Branch: the task''s branch, like agent/trade-window.' }
+		$t = Read-Task $Id
+		if ($t.status -eq 'removed') { throw ($DeletedText -f $t.id) }
+		if ($t.kind -eq 'plan') { throw ($PlanNotWorked -f $t.id) }
+		$dir = Add-Work $t $Branch $Base
+		Save-Task $t
+		"$($t.id) works in $dir, on $Branch. Edit and commit only there; a lane to test in: borrow $($t.id)."
+	}
+	'borrow' {
+		if (-not $Id) { throw 'borrow needs the task: borrow T-012.' }
+		(Invoke-Borrow $Id $(if ($User) { 'user' } else { 'agent' }) $(if ($Timeout -gt 0) { $Timeout } else { 480 })).text
+	}
+	'sync' { Invoke-Sync $Id }
+	'return' { Invoke-Return $Id }
 
 	# What the worker ran and how it went, on the card: the user sees the tests' result and Studio's console there.
 	'result' {
@@ -642,8 +688,8 @@ switch ($Command) {
 		if ($Id -match '^C-') { Find-ThreadItem $Id | Out-Null; Add-Thread 'handled' @{ to = $Id } | Out-Null; break }
 		$t = Read-Task $Id
 		switch ($t.pending) {
-			'merge' { Add-Event "Merged into Main: $($t.title)" $t.id }
-			'cancel' { Add-Event "Stopped deleted work: $($t.title)" $t.id }
+			'merge' { Add-Event "Merged into Main: $($t.title)" $t.id; $tidy = $true }
+			'cancel' { Add-Event "Stopped deleted work: $($t.title)" $t.id; $tidy = $true }
 			'stop' { Add-Event "Paused: $($t.title)" $t.id }
 			'handoff' { Set-Field $t 'waiting' 'Opening its own agent' }
 			# A plan changed as asked: if nothing was said about it since, the card and the chat still get an answer.
@@ -654,7 +700,10 @@ switch ($Command) {
 		}
 		Set-Field $t 'pending' ''
 		Set-Field $t 'followups' 0
+		# Merged, or dropped: its own checkout has nothing left to do (loans.ps1). Its lane went back as it was saved.
+		$gone = if ($tidy) { Remove-Work $t }
 		Save-Task $t
+		if ($gone) { $gone }
 	}
 
 	# The conductor's status line in Rocco, and a step in its history.
@@ -716,7 +765,7 @@ switch ($Command) {
 		}
 	}
 
-	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, doing, say, reply, set, result, log, clear, wait or lanes." }
+	default { throw "Unknown command '$Command'. Use serve, list, show, new, suggest, plan, ask, doing, say, reply, set, work, borrow, sync, return, result, log, clear, wait or lanes." }
 }
-} finally { Unlock-Tasks }
+} finally { Unlock-Lanes; Unlock-Tasks }
 foreach ($line in $script:SplitNote) { $line }

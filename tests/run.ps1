@@ -98,7 +98,7 @@ try {
 
 	# Rocco's own functions, for the tests that call one directly.
 	$AppDir = $App; $Command = 'test'; $Project = 'Game'; $Port = 34860
-	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
+	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'loans', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
 	$ErrorActionPreference = 'Stop'
 
 	Write-Host "Rocco tests in $Temp"
@@ -982,12 +982,222 @@ try {
 		Assert ($null -eq (Get-SessionUsage (Join-Path $Temp 'console.txt'))) 'a file outside the agent''s own folder is never read'
 	}
 
+	Write-Host 'Shared lanes'
+
+	# A game whose agents borrow lanes: its LANES.md says so, and it syncs a folder, so a lane has a fingerprint. Lanes
+	# 4 and 5 are real checkouts, "served" (something listens on their Lync ports) and "open in Studio" (their places'
+	# locks are held): all Rocco looks at before it lends one. Lanes 1 to 3 are bare folders, which it never lends.
+	$script:LoanFixtures = @()
+	function Start-LoanGame {
+		if ($script:LoanFixtures.Count) { return }
+		[IO.File]::WriteAllText((Join-Path $Repo 'docs\workflow\LANES.md'), "# Lanes`n`n## Lending a lane`n`nThe template's.`n", $Utf8)
+		[IO.File]::WriteAllText((Join-Path $Repo 'default.project.json'), '{ "name": "Game", "port": 34900, "tree": { "ServerStorage": { "$path": "src/ServerStorage" } } }', $Utf8)
+		New-Item -ItemType Directory -Force (Join-Path $Repo 'src\ServerStorage\Kit'), (Join-Path $Game 'places') | Out-Null
+		[IO.File]::WriteAllText((Join-Path $Repo 'src\ServerStorage\Kit\init.luau'), "return {}`n", $Utf8)
+		[IO.File]::WriteAllText((Join-Path $Repo 'src\ServerStorage\Kit\Part.luau'), "return 1`n", $Utf8)
+		[IO.File]::WriteAllText((Join-Path $Repo 'src\ServerStorage\Plain.luau'), "return 0`r`n", $Utf8)
+		RepoGit add -A; RepoGit commit --quiet -m 'Lanes are lent, and a folder is synced'
+		foreach ($n in 4, 5) {
+			RepoGit worktree add --detach (Join-Path $Game "lanes\lane$n") main | Out-Null
+			$listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, (34900 + $n)); $listener.Start()
+			$lock = [IO.File]::Open((Join-Path $Game "places\TG-Lane$n.rbxl.lock"), 'OpenOrCreate', 'ReadWrite', 'None')
+			$script:LoanFixtures += $listener, $lock
+		}
+	}
+	function WorkGit([string]$dir) { $ErrorActionPreference = 'Continue'; git.exe -C $dir @args 2>$null }
+	function WorkCommit([string]$dir, [string]$message) { WorkGit $dir add -A; WorkGit $dir commit --quiet -m $message }
+	# A task at work in a checkout of its own.
+	function New-LoanTask([string]$title, [string]$branch) {
+		$id = @(Rocco new -Title $title)[-1]
+		Rocco work $id -Branch $branch | Out-Null
+		Rocco set $id -Status working -Step Coding | Out-Null
+		$id
+	}
+
+	Test 'a task gets a checkout of its own' {
+		Start-LoanGame
+		$id = @(Rocco new -Title 'Borrowed lane')[-1]
+		$said = (Rocco work $id -Branch agent/loan-a) -join "`n"
+		$dir = Join-Path $Game 'work\agent-loan-a'
+		Assert (Test-Path (Join-Path $dir 'src\ServerStorage\Kit\init.luau')) 'its checkout is there, with the game in it'
+		Assert-Match $said ([regex]::Escape($dir)) 'work says where it is'
+		Assert-Equal (WorkGit $dir symbolic-ref --short HEAD) 'agent/loan-a' 'on its branch'
+		$t = Read-TaskJson $id
+		Assert-Equal $t.work 'agent-loan-a' 'the task knows its checkout'
+		Assert-Equal $t.branch 'agent/loan-a' 'and its branch'
+		Rocco work $id -Branch agent/loan-a | Out-Null
+		Assert-Throws { Rocco work $id -Branch 'agent//x' } "isn't a branch name" 'a name git would misread'
+		Assert-Throws { Rocco borrow $id } 'being worked on' 'a lane is lent to a task at work'
+		$script:LoanA = $id
+	}
+
+	Test 'a lane is lent by commit, says what to check, and is returned' {
+		Start-LoanGame
+		$id = $script:LoanA
+		$dir = Join-Path $Game 'work\agent-loan-a'
+		Rocco set $id -Status working -Step Coding | Out-Null
+		# The task deletes a folder that is itself a script: what a plain switch would leave behind in the place.
+		Remove-Item -LiteralPath (Join-Path $dir 'src\ServerStorage\Kit') -Recurse -Force
+		[IO.File]::WriteAllText((Join-Path $dir 'src\ServerStorage\New.luau'), "return 2`n", $Utf8)
+		WorkCommit $dir 'Drop the kit'
+		[IO.File]::WriteAllText((Join-Path $dir 'src\ServerStorage\Loose.luau'), "return 3`n", $Utf8)
+		$said = (Rocco borrow $id) -join "`n"
+		$t = Read-TaskJson $id
+		Assert ([int]$t.lane -in 4, 5) "it has a lane that can be lent (lane $($t.lane))"
+		Assert-Equal $t.laneFor 'agent' 'for its agent'
+		$lane = Join-Path $Game "lanes\lane$($t.lane)"
+		Assert-Equal (WorkGit $lane rev-parse HEAD) (WorkGit $dir rev-parse HEAD) 'the lane is on the checkout''s commit'
+		Assert (-not (Test-Path (Join-Path $lane 'src\ServerStorage\Kit'))) 'the folder is gone from the lane'
+		Assert-Equal "$(WorkGit $lane status --porcelain)" '' 'and the lane is clean'
+		Assert-Match $said "TG-Lane$($t.lane)" 'borrow names the place'
+		Assert-Match $said 'scripts=2 digest=\d+' 'and what the place should hold'
+		Assert-Match $said 'Not in the lane: 1 file' 'and what isn''t committed'
+		Assert-Match ([IO.File]::ReadAllText((Join-Path $Game 'rocco\lane-check.luau'), $Utf8)) 'add\("ServerStorage"\)' 'the checker looks where this game syncs'
+		Use-Project $Game
+		Assert-Match $said ([regex]::Escape((Get-SourceFingerprint $lane))) 'which is the lane''s own fingerprint'
+		# Line ends don't count (Studio keeps one kind): repo\ wrote Plain.luau with CRLF, and git may check it out either way.
+		$other = Join-Path $Game "lanes\lane$(9 - [int]$t.lane)"
+		Assert-Equal (Get-SourceFingerprint $other) (Get-SourceFingerprint $Repo) 'the lane still on main matches repo\, whatever its line ends'
+		Assert ((Get-SourceFingerprint $lane) -ne (Get-SourceFingerprint $Repo)) 'and a fingerprint differs when the scripts do'
+		WorkCommit $dir 'The loose one'
+		Assert-Match ((Rocco sync $id) -join "`n") 'scripts=3' 'sync brings the new commit'
+		Assert-Equal (WorkGit $lane rev-parse HEAD) (WorkGit $dir rev-parse HEAD) 'the lane follows'
+		Assert-Match ((Rocco return $id) -join ' ') 'returned lane' 'return says so'
+		Assert (-not (Read-TaskJson $id).lane) 'the lane is free again'
+		Assert-Throws { Rocco sync $id } 'no lane just now' 'sync needs a loan'
+	}
+
+	Test 'the user tests in a lane, which gives way to work that waits' {
+		Start-LoanGame
+		$a = $script:LoanA
+		Rocco borrow $a | Out-Null
+		$said = (Rocco set $a -Status ready -Where lane -Summary 'The kit is gone.' -Test 'Look for it') -join "`n"
+		$ta = Read-TaskJson $a
+		Assert ([int]$ta.lane -in 4, 5) 'ready in a lane keeps the lane its agent tested in'
+		Assert-Equal $ta.laneFor 'user' 'for the user now'
+		Assert-Match $said "tests it in lane $($ta.lane)" 'set says where they test'
+		$b = New-LoanTask 'Second borrower' 'agent/loan-b'
+		[IO.File]::WriteAllText((Join-Path $Game 'work\agent-loan-b\src\ServerStorage\Second.luau'), "return 'b'`n", $Utf8)
+		WorkCommit (Join-Path $Game 'work\agent-loan-b') 'The second'
+		Rocco borrow $b | Out-Null
+		$tb = Read-TaskJson $b
+		Assert ([int]$tb.lane -in 4, 5 -and [int]$tb.lane -ne [int]$ta.lane) 'the next task gets the other lane'
+		# Every lane taken, one of them by the user's testing: that one gives way.
+		$c = New-LoanTask 'Third borrower' 'agent/loan-c'
+		Rocco borrow $c | Out-Null
+		Assert-Equal (Read-TaskJson $c).lane $ta.lane 'work that waits takes the lane the user''s testing held'
+		$ta = Read-TaskJson $a
+		Assert (-not $ta.lane) 'which leaves that card without one'
+		Assert-Match (@($ta.log)[-1].text) 'Load into a lane' 'and says so on it'
+		Assert-Match ((Rocco show $a) -join "`n") 'no lane holding it' 'show says it waits for one'
+		Assert-Match ((Rocco borrow $a -User) -join ' ') 'Load into a lane' 'the user''s own loan takes no one''s lane'
+		# Every lane taken by agents: the next one waits its turn, and keeps its place.
+		$d = New-LoanTask 'Fourth borrower' 'agent/loan-d'
+		Assert-Throws { Rocco borrow $d -Timeout 1 } 'kept its place in line' 'with every lane at work'
+		Rocco return $c | Out-Null
+		Rocco borrow $a -User | Out-Null
+		$ta = Read-TaskJson $a
+		Assert ([int]$ta.lane -in 4, 5) 'a lane came free, and the card is loaded into it'
+		# A lane kept for the user's testing isn't taken.
+		$settings = Read-RoccoSettings
+		try {
+			$kept = Read-RoccoSettings; Set-Field $kept 'keepLane' $true; Save-RoccoSettings $kept
+			Assert-Throws { Rocco borrow $c -Timeout 1 } 'kept its place in line' 'the user keeps a lane'
+		} finally { Save-RoccoSettings $settings }
+		# Approved: it holds its lane while its merge is checked, and lets go, checkout and all, once that's cleared.
+		Use-Project $Game
+		Invoke-TaskAction $a 'approve' ''
+		$ta = Read-TaskJson $a
+		Assert-Equal $ta.pending 'merge' 'approved in its lane, it waits on its merge'
+		Assert ([int]$ta.lane -in 4, 5) 'still holding the lane'
+		$said = (Rocco clear $a) -join "`n"
+		$ta = Read-TaskJson $a
+		Assert (-not $ta.lane) 'merged and cleared, the lane is free'
+		Assert-Match $said 'agent-loan-a is gone' 'clear says its checkout went'
+		Assert (-not (Test-Path (Join-Path $Game 'work\agent-loan-a'))) 'and it did'
+		Assert ("$(RepoGit rev-parse --verify -q refs/heads/agent/loan-a)" -ne '') 'its branch stays for the conductor'
+		# Sent back: the lane goes back by itself.
+		Rocco set $b -Status ready -Where lane -Summary 'The second.' -Test 'Try it' | Out-Null
+		Assert ([int](Read-TaskJson $b).lane -gt 0) 'ready in its lane'
+		Invoke-TaskAction $b 'reopen' 'not yet'
+		Assert (-not (Read-TaskJson $b).lane) 'sent back, it holds no lane'
+		$script:LoanC = $c
+		$script:LoanD = $d
+	}
+
+	Test 'only so many agents work at once' {
+		Start-LoanGame
+		Use-Project $Game
+		$settings = Read-RoccoSettings
+		try {
+			$atWork = Get-AgentsAtWork @(Get-Tasks)
+			Assert ($atWork -gt 0) 'some are at work'
+			$limited = Read-RoccoSettings; Set-Field $limited 'agentsAtOnce' $atWork; Save-RoccoSettings $limited
+			$e = @(Rocco new -Title 'One too many')[-1]
+			Assert-Throws { Rocco work $e -Branch agent/loan-e } "this PC's limit" 'a checkout past the limit'
+			Rocco set $e -ForLane | Out-Null
+			Assert (((Rocco list -Pending) -join "`n") -notmatch [regex]::Escape($e)) 'parked, it waits on nobody'
+			Assert-Match ((Rocco show $e) -join "`n") 'As many agents are at work' 'show says why it waits'
+			Rocco set $script:LoanD -Status queued | Out-Null
+			Assert-Match ((Rocco list -Pending) -join "`n") "$e\s.*\[lane\].*an agent is free" 'one finishes, and it is handed back'
+		} finally { Save-RoccoSettings $settings }
+	}
+
+	Test 'merged and in Main to try, a card lets its checkout go' {
+		Start-LoanGame
+		$c = $script:LoanC
+		$dir = Join-Path $Game 'work\agent-loan-c'
+		Assert (Test-Path $dir) 'its checkout is there while it works'
+		# Its branch holds nothing main doesn't, which is how a merged one looks.
+		$said = (Rocco set $c -Status ready -Where main -Summary 'The third.' -Test 'Try it') -join "`n"
+		Assert-Match $said 'agent-loan-c is gone' 'set says its checkout went'
+		Assert (-not (Test-Path $dir)) 'and it did'
+		Assert-Equal "$((Read-TaskJson $c).work)" '' 'the card no longer names one'
+	}
+
+	Test 'a feature''s own agent works in a checkout, and needs no lane' {
+		Start-LoanGame
+		Use-Project $Game
+		$p = New-Task 'Trading Post!' 'Trade cars' 'queued' 'plan' 'feature'
+		Set-Field $p 'lead' $true
+		Save-Task $p
+		try { Use-Thread $p.id; Start-Lead $p.id | Out-Null; $prompt = Get-LeadPrompt (Get-Task $p.id) 0 } finally { Use-Thread ''; Unlock-Tasks }
+		$t = Read-TaskJson $p.id
+		Assert-Equal $t.branch 'feature/trading-post' 'its branch is named for the feature'
+		Assert-Equal $t.work 'feature-trading-post' 'and its checkout for the branch'
+		Assert (Test-Path (Join-Path $Game 'work\feature-trading-post\.git')) 'which is made'
+		Assert (-not $t.lane) 'it holds no lane'
+		Assert-Match $prompt 'checkout of your own \(on feature/trading-post\), borrowing a lane' 'its agent is told how it works'
+		# A piece of the feature starts from the feature's branch.
+		$piece = @(Rocco new -Title 'Trade window' -Plan $p.id)[-1]
+		Rocco work $piece -Branch agent/trade-window -Base feature/trading-post | Out-Null
+		$from = WorkGit (Join-Path $Game 'work\agent-trade-window') merge-base HEAD feature/trading-post
+		Assert-Equal $from (WorkGit $Repo rev-parse feature/trading-post) 'a piece branches from its feature'
+	}
+
+	Test 'lent-lane settings are kept, and checked' {
+		Use-Project $Game
+		$settings = Read-RoccoSettings
+		try {
+			$a = Set-LaneSettings ([pscustomobject]@{ agentsAtOnce = 3 })
+			Assert-Equal $a.agentsAtOnce 3 'agents at once'
+			Assert-Equal (Get-AgentsLimit) 3 'is the limit'
+			$a = Set-LaneSettings ([pscustomobject]@{ keepLane = $true })
+			Assert ($a.keepLane -and $a.agentsAtOnce -eq 3) 'keeping a lane leaves the other as it was'
+			Assert-Throws { Set-LaneSettings ([pscustomobject]@{ agentsAtOnce = 99 }) } 'Agents at once' 'a number out of range'
+			Set-LaneSettings ([pscustomobject]@{ agentsAtOnce = 0 }) | Out-Null
+			Assert ((Get-AgentsLimit) -gt 3) 'back to two per lane'
+		} finally { Save-RoccoSettings $settings }
+	}
+
 	Test 'a network git call is given up on' {
 		$r = Invoke-GitNet $Repo @('ls-remote', '--heads', 'http://10.255.255.1/nothing.git') 3 $false
 		Assert (-not $r.ok) 'it failed'
 	}
 } finally {
 	Stop-Server
+	# The stand-ins for a lane's Lync and its open place.
+	foreach ($f in $script:LoanFixtures) { try { if ($f -is [Net.Sockets.TcpListener]) { $f.Stop() } else { $f.Close() } } catch { } }
 	Remove-Item Env:ROCCO_HOME, Env:ROCCO_NO_CONDUCTOR -ErrorAction SilentlyContinue
 	# The link to Rocco's own files goes first, by itself, and the folder is only deleted once it's gone: deleting a
 	# folder with the link still in it could reach through it into the real files.

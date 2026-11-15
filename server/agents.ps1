@@ -54,6 +54,10 @@ function Get-Agent {
 			effort = $effort; takesEffort = [bool]$Agents[$id].effort; efforts = @($Agents[$id].efforts | Where-Object { $_ })
 			# Whether a feature the user approves gets an agent of its own (leads.ps1): on unless turned off here.
 			leads = -not ($settings.PSObject.Properties['leads'] -and $settings.leads -eq $false)
+			# Lent lanes (loans.ps1): how many agents work at once (0: two per lane), and whether the user's own
+			# testing always keeps a lane.
+			agentsAtOnce = $(if ($settings.PSObject.Properties['agentsAtOnce']) { [int]$settings.agentsAtOnce } else { 0 })
+			keepLane = [bool]($settings.PSObject.Properties['keepLane'] -and $settings.keepLane)
 			agents = @($Agents.Keys | ForEach-Object { [pscustomobject]@{ id = $_; name = $Agents[$_].name; short = $Agents[$_].short; installed = ($installed -contains $_) } })
 		} }
 	}

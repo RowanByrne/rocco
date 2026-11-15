@@ -78,7 +78,10 @@ function Get-Lanes {
 	# mine: this PC's row, $null when it has none yet (lanes.ps1 asks how many). studio: the lanes open in Studio, $null
 	# when that can't be told (lanes.ps1 Get-OpenPlaces).
 	$places = Get-OpenPlaces $count
-	[pscustomobject]@{ count = $count; open = $served; studio = $(if ($places.known) { @($places.open) } else { $null }); main = [bool]($base -and $listening.Contains($base)); mine = $mine; jobs = @(Get-LaneJobs) }
+	# shared: this game's agents borrow lanes (loans.ps1), and agents: how many of them this PC works at once.
+	$shared = Test-SharedLanes
+	$agents = if ($shared) { $s = Read-RoccoSettings; if ($s.PSObject.Properties['agentsAtOnce'] -and [int]$s.agentsAtOnce -gt 0) { [int]$s.agentsAtOnce } else { 2 * [Math]::Max(1, $count) } } else { 0 }
+	[pscustomobject]@{ count = $count; open = $served; studio = $(if ($places.known) { @($places.open) } else { $null }); main = [bool]($base -and $listening.Contains($base)); mine = $mine; jobs = @(Get-LaneJobs); shared = $shared; agents = $agents }
 }
 
 $script:MainCache = @{}

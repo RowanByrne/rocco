@@ -43,13 +43,26 @@ function agents() {
   return html`<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span><span class="sp"></span><button class="mini" data-accounts>Your accounts</button></div>${
     a.agents.map(x => html`<button class="set-row agent-row${x.id === a.id ? ' on' : ''}" data-agent=${x.id} role="radio" aria-checked=${x.id === a.id ? 'true' : 'false'}><span class="radio"></span><span class="set-text"><span class="set-title">${x.name}</span><span class="set-sub">${x.installed ? 'Installed' : 'Not installed on this PC (Connections)'}</span></span></button>`)
   }${model(a)}${effort(a)}${
-    row('Features get an agent of their own', `A feature you approve is built by its own ${a.short} session, in a lane it keeps, and you talk to it on its own tab above the chat. Off: the conductor builds it with its workers, and everything goes through the conductor.`,
+    row('Features get an agent of their own', `A feature you approve is built by its own ${a.short} session, ${state.meta.lanes?.shared ? 'in its own copy of the game' : 'in a lane it keeps'}, and you talk to it on its own tab above the chat. Off: the conductor builds it with its workers, and everything goes through the conductor.`,
       html`<button class="switch" role="switch" aria-checked=${a.leads !== false ? 'true' : 'false'} data-leads aria-label="Features get an agent of their own"><span></span></button>`)
-  }<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
+  }${lanes(a)}<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
 }
 
 // The model the conductor is opened on, for an agent that takes one on its command line (server/agents.ps1): one from
 // its list, or any name it accepts, typed. It applies to the next conductor Rocco opens.
+// A game whose agents borrow lanes (server/loans.ps1): how many agents this PC works at once, and whether the user's
+// own testing always keeps a lane. Shown where the open game works that way.
+function lanes(a) {
+  const l = /** @type {any} */ (state.meta.lanes) || {};
+  if (!l.shared) return nothing;
+  const auto = 2 * Math.max(1, l.count || 0);
+  return html`${row('Agents at once', `How many tasks are built at the same time on this PC. Each has its own copy of the game and borrows a lane only to test, so this isn't held to your ${l.count || 0} lanes. More is faster and uses more of your plan.`,
+    html`<select class="input set-select" data-agents-at-once aria-label="Agents at once"><option value="0" ?selected=${!a.agentsAtOnce}>Two per lane (${auto})</option>${
+      Array.from({ length: 16 }, (_, i) => i + 1).map(n => html`<option value=${n} ?selected=${a.agentsAtOnce === n}>${n}</option>`)}</select>`)}${
+    row('Keep a lane for my testing', 'A card you are testing in a lane normally gives way when work is waiting to test, and its card offers Load into a lane to put it back. On: your testing always keeps one lane.',
+      html`<button class="switch" role="switch" aria-checked=${a.keepLane ? 'true' : 'false'} data-keep-lane aria-label="Keep a lane for my testing"><span></span></button>`)}`;
+}
+
 const OTHER = '(other)';
 let typingModel = false;
 function model(a) {
@@ -126,6 +139,17 @@ export function initSettings() {
       });
       return;
     }
+    // Lent lanes: whether the user's own testing always keeps one (server/loans.ps1).
+    const keep = e.target.closest('[data-keep-lane]');
+    if (keep) {
+      const turnOn = keep.getAttribute('aria-checked') !== 'true';
+      once('keep-lane', async () => {
+        try { state.agent = await api.setLaneSettings({ keepLane: turnOn }); toast(turnOn ? 'Your testing always keeps a lane' : 'Your testing gives way to work that waits'); }
+        catch (err) { toast(`Couldn't change it: ${err.message}`, 'var(--red)'); }
+        renderSettings();
+      });
+      return;
+    }
     const sw = e.target.closest('.switch');
     if (sw) {
       const key = sw.dataset.setting, on = sw.getAttribute('aria-checked') !== 'true';
@@ -157,6 +181,12 @@ export function initSettings() {
       if (e.target.value === OTHER) { typingModel = true; renderSettings(); body.querySelector('[data-model-name]')?.focus(); }
       else setModel(e.target.value);
     } else if ('modelName' in e.target.dataset && e.target.value.trim()) setModel(e.target.value.trim());
+    else if ('agentsAtOnce' in e.target.dataset) once('agents-at-once', async () => {
+      const n = Number(e.target.value) || 0;
+      try { state.agent = await api.setLaneSettings({ agentsAtOnce: n }); toast(n ? `Up to ${n} agent${n === 1 ? '' : 's'} work at once on this PC` : 'Two agents per lane work at once on this PC'); }
+      catch (err) { toast(`Couldn't change it: ${err.message}`, 'var(--red)'); }
+      renderSettings();
+    });
     else if ('effort' in e.target.dataset) once('effort', async () => {
       try { await chooseEffort(e.target.value); toast(e.target.value ? `The next conductor opens at ${effortName(e.target.value).toLowerCase()} effort` : `The next conductor opens at ${state.agent.short}'s default effort`); }
       catch (err) { toast(`Couldn't set the effort: ${err.message}`, 'var(--red)'); }

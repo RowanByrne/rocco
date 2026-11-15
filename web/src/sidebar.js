@@ -19,8 +19,16 @@ import { refresh } from './sync.js';
 import { showUsage } from './views/usage.js';
 
 // A lane is busy while a worker is in it, or while it holds a branch: stuck, or a feature waiting for the user or the conductor.
+// A task with a checkout of its own (t.work) has its lane on loan (server/loans.ps1): while its agent tests, while the
+// user tests it, and while its merge is checked.
 function laneState(n) {
-  const t = state.tasks.find(t => t.lane === n && (t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && (t.status === 'ready' || t.status === 'queued'))));
+  const lent = state.tasks.find(t => t.lane === n && t.work && (t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && t.status === 'ready') || t.pending === 'merge'));
+  if (lent) {
+    if (lent.pending === 'merge') return ['held', `Lane ${n}: checking ${lent.title} before it merges`];
+    if (lent.status === 'ready') return ['held', `Lane ${n}: ${lent.title}, for you to test`];
+    return [lent.status, `Lane ${n}: ${lent.title}, being tested by its agent`];
+  }
+  const t = state.tasks.find(t => t.lane === n && !t.work && (t.status === 'working' || t.status === 'stuck' || (t.where === 'lane' && (t.status === 'ready' || t.status === 'queued'))));
   // A feature's own agent (or a card's) keeps its lane for as long as it's being built (server/leads.ps1).
   const lead = state.tasks.find(t => t.lead && t.lane === n && !['done', 'removed'].includes(t.status));
   if (lead && !(t && t.status === 'stuck')) return ['working', `Lane ${n}: ${lead.title}, with its own agent`];

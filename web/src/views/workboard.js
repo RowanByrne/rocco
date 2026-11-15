@@ -32,7 +32,11 @@ const NAMES = { ready: 'To test', stuck: 'Needs you', working: 'Working', queued
 const COLOR = { ready: 'var(--green)', stuck: 'var(--amber)', working: 'var(--blue)', queued: 'var(--gray)', inbox: 'var(--claude)', done: 'var(--green)', removed: 'var(--gray)' };
 const TYPES = { bug: 'Bug', tweak: 'Tweak', idea: 'Idea', fix: 'Fix', feature: 'Feature', question: 'Question' };
 const SKIP = 'skip'; // "Let Rocco decide", as a pick no option's label can be
-const place = t => t.where === 'lane' ? 'Lane ' + t.lane : 'Main';
+const place = t => t.where !== 'lane' ? 'Main' : t.lane ? 'Lane ' + t.lane : 'No lane yet';
+// A card to test on its branch that no lane holds just now (server/loans.ps1): every lane was busy when it turned
+// ready, or its lane went to work that was waiting to test. Load into a lane puts it in a free one.
+const needsLane = t => !!t.work && !t.lane && t.status === 'ready' && t.where === 'lane';
+const loadButton = (t, cls = 'btn-sm') => needsLane(t) ? html`<button class=${cls} data-load=${t.id} title="Put it in a free lane, to test there. Studio is already open, so it takes a few seconds">Load into a lane</button>` : nothing;
 const isPlan = t => t.kind === 'plan';
 const isQuestion = t => t.kind === 'question';
 // On a feature's tab, the rail is that feature's: its plan and its steps. On the conductor's, everything.
@@ -149,7 +153,7 @@ function card(t) {
   const tries = t.attempt > 1 ? html`<span class="note-meta" title="Attempt ${t.attempt}">${icon.retry}${t.attempt}</span>` : nothing;
   let info = nothing, right = nothing, extra = nothing, bar = nothing;
   if (t.status === 'ready') {
-    info = html`<span class="tag ${t.where === 'lane' ? 't-lane' : 't-main'}"><i></i>${place(t)}</span>${tries}`;
+    info = html`<span class="tag ${t.where === 'lane' ? 't-lane' : 't-main'}"><i></i>${place(t)}</span>${tries}${loadButton(t, 'c-load')}`;
     right = html`<button class="chk${fold ? ' on' : ''}" role="checkbox" aria-checked=${fold ? 'true' : 'false'} data-approve=${t.id} aria-label="Tested, approve" title="Tested, approve">${icon.check}</button>`;
   } else if (t.status === 'stuck') {
     info = tries;
@@ -289,6 +293,8 @@ const trySteps = steps => steps.length > 1 ? html`<ul>${steps.map(s => html`<li>
 // A task parked for a lane (rocco.ps1 set -ForLane): whether one is free now, counted as the sidebar counts them.
 function waitText(t) {
   if (t.waitingFor !== 'lane') return t.waiting;
+  // Where agents borrow lanes, a task waits for an agent, not a lane (server/loans.ps1).
+  if (state.meta.lanes?.shared) return `Waiting for a free agent: ${state.meta.lanes.agents} work at once on this PC`;
   const count = state.meta.lanes?.count || 0;
   const held = new Set(state.tasks.filter(x => x.lane && (x.status === 'working' || x.status === 'stuck' || (x.where === 'lane' && (x.status === 'ready' || x.status === 'queued'))
     || (x.lead && x.status !== 'done' && x.status !== 'removed'))).map(x => x.lane));
@@ -307,7 +313,7 @@ function whereLine(t) {
   if (isPlan(t)) return t.status === 'inbox' ? (t.pending === 'revise' ? 'Feature plan · Rocco is changing it' : 'Feature plan · waiting for your OK') : `Feature · ${planCount(t).done} of ${planCount(t).total} done`;
   if (isQuestion(t)) return t.status === 'ready' ? 'Answered' : t.status === 'done' ? `Got it at ${hhmm(t.doneAt)}` : 'Waiting for an answer';
   switch (t.status) {
-    case 'ready': return `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
+    case 'ready': return needsLane(t) ? 'Waiting for a lane to test in · Load into a lane puts it in a free one' : `Test in ${place(t)}${t.where === 'lane' ? ' · approving merges it into Main' : ''}`;
     case 'stuck': return ['Needs your answer', t.lane ? `lane ${t.lane}` : ''].filter(Boolean).join(' · ');
     case 'working': return `${t.lane ? `Lane ${t.lane}` : 'The conductor'} · ${minsSince(t.startedAt)}m${typeof t.progress === 'number' ? ` · ${t.progress}%` : ''}`;
     case 'queued': return t.held ? 'Paused' : waitText(t) || 'Queued';
@@ -343,7 +349,7 @@ function sheetTop(t) {
     t.summary ? html`<div class="s-sum${lit}">${prose(t.summary)}</div>` : nothing}${
     isPlan(t) ? html`<div class=${lit}>${planSteps(t)}</div>${t.spec ? html`<div class="row s-spec">${specButton(t)}</div>` : nothing}${
       kids.length ? html`<div class="sec-h">Tasks</div>${kids.map(k => html`<div class="s-row" data-id=${k.id}><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${k.title}</span><span class="at">${NAMES[k.status] || ''}</span></div>`)}` : nothing}` : nothing}${
-    t.status === 'ready' && t.test ? html`<div class="s-try"><small>Try</small>${trySteps(stepsOf(t))}${approveButton(t)}</div>` : t.status === 'ready' ? approveButton(t) : nothing}${
+    t.status === 'ready' && t.test ? html`<div class="s-try"><small>Try</small>${trySteps(stepsOf(t))}${loadButton(t)}${approveButton(t)}</div>` : t.status === 'ready' ? html`${loadButton(t)}${approveButton(t)}` : nothing}${
     t.status === 'stuck' ? sheetQuestions(t) : nothing}`;
 }
 
@@ -638,6 +644,12 @@ function approve(id) {
 }
 
 const queueIt = id => attempt('queue it', async () => { await act(id, 'queue'); undoable(id, 'Added to Up next', 'var(--violet)'); }, id);
+// Load into a lane: a free lane takes the card's latest commit, and the card then says which.
+const loadLane = id => attempt('load it into a lane', async () => {
+  const r = await api.loadLane(id);
+  toast(r.lane ? `Loaded into lane ${r.lane}: test it there` : 'Every lane is busy just now. Try again when one frees up', r.lane ? 'var(--green)' : 'var(--amber)');
+  await refresh();
+}, id);
 const gotIt = id => attempt('close it', async () => { await act(id, 'approve'); undoable(id, 'Got it', 'var(--claude)'); }, id);
 const askMore = (id, text) => attempt('ask it', async () => {
   await act(id, 'reopen', text);
@@ -828,6 +840,7 @@ export function initWorkboard() {
     else if (hit('[data-pick]')) pick(card, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-resend]')) sendAnswers(card, unsent.get(card) || '');
     else if (hit('[data-back]')) { draft.set(`answers:${card}`, picksOf(card).slice(0, -1)); renderWorkboard(); }
+    else if (hit('[data-load]')) loadLane(hit('[data-load]').dataset.load);
     else if (hit('[data-approve]')) approve(hit('[data-approve]').dataset.approve);
     else if (hit('[data-queue]')) queueIt(hit('[data-queue]').dataset.queue);
     else if (hit('[data-dismiss]')) dismiss(hit('[data-dismiss]').dataset.dismiss);
@@ -900,6 +913,7 @@ export function initWorkboard() {
     else if (hit('[data-plan-spec]')) { closeSheet(); showDoc(hit('[data-plan-spec]').dataset.planSpec); }
     else if (hit('[data-pick]')) pick(id, +hit('[data-pick]').dataset.q, hit('[data-pick]').dataset.pick);
     else if (hit('[data-answer]')) sendAnswers(id, text());
+    else if (hit('[data-load]')) loadLane(hit('[data-load]').dataset.load);
     else if (hit('[data-approve-open]')) { closeSheet(); setTimeout(() => approve(id), 250); }
     else if (hit('[data-send="reopen"]')) sendBack(id);
     else if (hit('[data-reply-attach]')) $('#replyInput').click();

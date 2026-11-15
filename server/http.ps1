@@ -202,6 +202,11 @@ function Invoke-Request($ctx) {
 	}
 	# Whether a feature the user approves gets an agent of its own (Settings, leads.ps1).
 	if ($path -eq '/api/agent/leads') { Send-Json $ctx (Set-LeadsOn ([bool](Read-Json $req).on)); return }
+	# Lent lanes (Settings, loans.ps1): how many agents work at once, and whether the user's testing keeps a lane.
+	if ($path -eq '/api/agent/lanes') {
+		try { Send-Json $ctx (Set-LaneSettings (Read-Json $req)) } catch { Send-Text $ctx 400 $_.Exception.Message }
+		return
+	}
 	# A background job the user gave up on (a new project, opening lanes): stopped, with whatever it started.
 	if ($path -match '^/api/jobs/(\w+)/cancel$') {
 		try { Send-Json $ctx (Stop-ScriptJob $Matches[1]) } catch { Send-Text $ctx 400 $_.Exception.Message }
@@ -402,6 +407,17 @@ function Invoke-Request($ctx) {
 		Set-Field $t 'shots' (@(@($t.shots) | Where-Object { $_ }) + $name)
 		Save-Task $t
 		Send-Json $ctx @{ name = $name }; return
+	}
+	# Load into a lane (a card to test on its branch, with no lane holding it: loans.ps1). A free lane is switched to
+	# its latest commit, which takes a few seconds; with none free it says so. { lane, text }.
+	if ($path -match '^/api/tasks/(T-\d+)/load$') {
+		try {
+			$t = Get-Task $Matches[1]
+			if (-not (Test-NeedsLane $t)) { throw "$($t.id) isn't waiting for a lane." }
+			$r = Invoke-Borrow $t.id 'user' 0
+			Send-Json $ctx ([pscustomobject]@{ lane = [int]$r.lane; text = (@($r.text) -join ' ') })
+		} catch { Send-Text $ctx 400 $_.Exception.Message } finally { Unlock-Lanes; Unlock-Tasks }
+		return
 	}
 	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise|pause|resume|restart|assign|promote|make-task)$') {
 		$id, $action = $Matches[1], $Matches[2]

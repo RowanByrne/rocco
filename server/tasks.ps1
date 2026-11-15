@@ -104,19 +104,29 @@ function Test-WaitsForLane($t) { $t.status -eq 'queued' -and $t.PSObject.Propert
 
 # This PC's lanes that no task holds, as the sidebar sees them: none at work or stuck in it, or held for testing there.
 function Get-FreeLanes($tasks) {
-	# A feature's own agent keeps its lane for the feature's life, between steps too (leads.ps1).
-	$held = @($tasks | Where-Object { $_.lane -and ($_.status -in 'working', 'stuck' -or ($_.where -eq 'lane' -and $_.status -in 'ready', 'queued') -or ($_.lead -and $_.status -notin 'done', 'removed')) } | ForEach-Object { [int]$_.lane })
+	$held = @($tasks | Where-Object { $_.lane } | Where-Object {
+		# A task with a checkout of its own has its lane on loan (loans.ps1): only while it tests, is tested or merges.
+		if (Get-WorkDir $_) { Test-HoldsLoan $_ }
+		# A feature's own agent keeps its lane for the feature's life, between steps too (leads.ps1).
+		else { $_.status -in 'working', 'stuck' -or ($_.where -eq 'lane' -and $_.status -in 'ready', 'queued') -or ($_.lead -and $_.status -notin 'done', 'removed') }
+	} | ForEach-Object { [int]$_.lane })
 	$count = [int](Get-Lanes).count
 	@(if ($count) { 1..$count | Where-Object { $_ -notin $held } })
 }
 
-# Parked tasks whose lane is free: one per free lane, in Up next order, each given its lane (not saved).
+# Parked tasks that can start: one per free lane, in Up next order, each given its lane (not saved). In a game whose
+# agents borrow lanes (loans.ps1) a task waits for an agent to be free, not a lane: one per place under this PC's
+# limit, with no lane named.
 function Get-LaneReady($tasks) {
 	$byId = @{}; foreach ($x in $tasks) { $byId[$x.id] = $x }
 	$parked = @($tasks | Where-Object { (Test-WaitsForLane $_) -and -not $_.pending -and -not $_.held -and
 		-not @(Get-List $_.after | Where-Object { $byId[$_] -and $byId[$_].status -notin 'done', 'removed' }).Count } |
 		Sort-Object { if ($_.order) { [int]$_.order } else { 9999 } }, id)
 	if (-not $parked.Count) { return @() }
+	if (Test-SharedLanes) {
+		$room = [Math]::Max(0, (Get-AgentsLimit) - (Get-AgentsAtWork $tasks))
+		return @(for ($i = 0; $i -lt [Math]::Min($room, $parked.Count); $i++) { Set-Field $parked[$i] 'pending' 'lane'; Set-Field $parked[$i] 'freeLane' 0; $parked[$i] })
+	}
 	$free = @(Get-FreeLanes $tasks)
 	@(for ($i = 0; $i -lt [Math]::Min($free.Count, $parked.Count); $i++) { Set-Field $parked[$i] 'pending' 'lane'; Set-Field $parked[$i] 'freeLane' $free[$i]; $parked[$i] })
 }
@@ -207,6 +217,7 @@ function Save-Task($t) {
 	if (-not (Test-Path -LiteralPath $dir)) { $dir = Join-Path $ArchiveDir $t.id }
 	Lock-Task $dir
 	try {
+		Clear-EndedLoan $t # a lane on loan goes back when its task stops testing (loans.ps1)
 		Set-Field $t 'updated' (Now)
 		$file = Join-Path $dir 'task.json'
 		$new = "$file.new"

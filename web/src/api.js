@@ -112,6 +112,10 @@ export const api = {
   restartConductor: (thread = '') => DEMO ? demo.restartConductor(thread) : post(withProject('/api/conductor/restart', inThread(thread))),
   // Whether a feature the user approves gets an agent of its own, on this PC (Settings).
   setLeads: on => DEMO ? demo.setLeads(on) : post(withProject('/api/agent/leads'), { on }),
+  // Lent lanes, on this PC (Settings): { agentsAtOnce } (0: two per lane) or { keepLane }. Returns the agent.
+  setLaneSettings: body => DEMO ? demo.setLaneSettings(body) : post(withProject('/api/agent/lanes'), body),
+  // A card to test on its branch, with no lane holding it, into a free lane: { lane, text } (lane 0: none is free).
+  loadLane: id => DEMO ? demo.loadLane(id) : post(withProject(`/api/tasks/${id}/load`)),
   job: id => DEMO ? demo.job(id) : getJson(`/api/jobs/${id}`),
   // Stops a background job (a new project, opening lanes) and whatever it started.
   cancelJob: id => DEMO ? demo.cancelJob(id) : post(`/api/jobs/${id}/cancel`),

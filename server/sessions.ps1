@@ -96,12 +96,14 @@ function Read-Shared([string]$path, [long]$from = 0, [long]$max = 0) {
 	} finally { $fs.Close() }
 }
 
-# Every session file that could be a task's: the conductor's workers, and sessions started in a lane.
+# Every session file that could be a task's: the conductor's workers, and sessions started in a lane or in a task's
+# own checkout (work\, loans.ps1).
 function Get-SessionFiles {
 	$files = @()
 	$repo = Get-AgentProjectDir $RepoDir
 	if (Test-Path -LiteralPath $repo) { $files += @(Get-ChildItem -LiteralPath $repo -Directory | ForEach-Object { Get-ChildItem -LiteralPath (Join-Path $_.FullName 'subagents') -Filter 'agent-*.jsonl' -File -ErrorAction SilentlyContinue }) }
-	foreach ($lane in @(Get-ChildItem (Join-Path $Root 'lanes') -Directory -Filter 'lane*' -ErrorAction SilentlyContinue)) {
+	$checkouts = @(Get-ChildItem (Join-Path $Root 'lanes') -Directory -Filter 'lane*' -ErrorAction SilentlyContinue) + @(Get-ChildItem (Join-Path $Root 'work') -Directory -ErrorAction SilentlyContinue)
+	foreach ($lane in $checkouts) {
 		$dir = Get-AgentProjectDir $lane.FullName
 		if (-not (Test-Path -LiteralPath $dir)) { continue }
 		# A session started in the lane (a feature's own agent, leads.ps1), and the helpers that session started.

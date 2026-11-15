@@ -176,7 +176,15 @@ function Start-ProjectLync {
 	foreach ($c in $checkouts | Where-Object { (Test-Path $_.dir) -and -not $listening.Contains($_.port) }) {
 		Write-Output "$($c.name): starting Lync on port $($c.port)"
 		Start-Lync $c.dir $c.log
+		# One at a time: every Lync writes the copy's own lync-config.json as it starts, and two starting together have
+		# left one reading it half-written ("Unexpected end of JSON input", and that lane never served). So the next
+		# waits until this one is serving, or five seconds.
+		for ($i = 0; $i -lt 20; $i++) {
+			Start-Sleep -Milliseconds 250
+			if (@([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object { $_.Port -eq $c.port }).Count) { break }
+		}
 	}
+	$script:ListenCache = $null
 }
 
 # The Lync servers this RoDev folder's copy runs: this project's (listening on its port base and the 19 above it), or
