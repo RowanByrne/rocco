@@ -52,7 +52,6 @@ function Get-Agent {
 			id = $id; name = $Agents[$id].name; short = $Agents[$id].short; installed = ($installed -contains $id); chosen = [bool]$chosen
 			model = $model; takesModel = [bool]$Agents[$id].model; models = @($Agents[$id].models | Where-Object { $_ })
 			effort = $effort; takesEffort = [bool]$Agents[$id].effort; efforts = @($Agents[$id].efforts | Where-Object { $_ })
-			codexConductorFullAccess = ($settings.codexConductorFullAccess -is [bool] -and $settings.codexConductorFullAccess)
 			# Whether a feature the user approves gets an agent of its own (leads.ps1): on unless turned off here.
 			leads = -not ($settings.PSObject.Properties['leads'] -and $settings.leads -eq $false)
 			agents = @($Agents.Keys | ForEach-Object { [pscustomobject]@{ id = $_; name = $Agents[$_].name; short = $Agents[$_].short; installed = ($installed -contains $_) } })
@@ -65,13 +64,6 @@ function Save-RoccoSettings($settings) {
 	New-Item -ItemType Directory -Force (Split-Path $SettingsFile) | Out-Null
 	[IO.File]::WriteAllText($SettingsFile, (ConvertTo-Json -InputObject $settings -Depth 5), $Utf8)
 	$script:AgentCache = $null
-}
-
-function Set-CodexConductorFullAccess([bool]$on) {
-	$settings = Read-RoccoSettings
-	$settings | Add-Member -Force -NotePropertyName codexConductorFullAccess -NotePropertyValue $on
-	Save-RoccoSettings $settings
-	Get-Agent
 }
 
 function Set-Agent([string]$id) {
@@ -120,7 +112,7 @@ function Set-AgentEffort([string]$effort) {
 # or Claude Code takes it for a sub-session and doesn't save its transcript.
 $AgentWindowScript = @'
 $start = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_START)) | ConvertFrom-Json
-Remove-Item Env:ROCCO_START, Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION, Env:ROCCO_THREAD -ErrorAction SilentlyContinue
+Remove-Item Env:ROCCO_START, Env:CLAUDECODE, Env:CLAUDE_CODE_CHILD_SESSION, Env:ROCCO_THREAD, Env:ROCCO_CODEX_BOARD, Env:ROCCO_CODEX_DIR -ErrorAction SilentlyContinue
 foreach ($p in $start.set.PSObject.Properties) { if ("$($p.Value)") { Set-Item "Env:$($p.Name)" "$($p.Value)" } }
 $Host.UI.RawUI.WindowTitle = $start.title
 Set-Location -LiteralPath $start.dir
@@ -128,8 +120,8 @@ $arguments = @($start.arguments)
 if ($start.agent -eq 'codex' -and $env:TERM -eq 'dumb') {
 	Remove-Item Env:TERM -ErrorAction SilentlyContinue
 }
-# The desktop app can supply a CLI executable without the CLI's daemon package.
-if ($start.desktopCodex -and ((& $start.exe --help | Out-String) -match '(?m)^\s+--no-daemon\b')) {
+# The desktop app can supply a CLI without its daemon. The board hook also needs this window's project environment.
+if (($start.desktopCodex -or $start.set.ROCCO_CODEX_BOARD) -and ((& $start.exe --help | Out-String) -match '(?m)^\s+--no-daemon\b')) {
 	$arguments = @('--no-daemon') + $arguments
 }
 & $start.exe @arguments

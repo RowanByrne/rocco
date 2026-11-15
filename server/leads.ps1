@@ -52,7 +52,7 @@ function Get-LeadPrompt($t, [int]$lane) {
 	} else {
 		"You now have $what to yourself: the user gave it an agent of its own, to work it through with them directly. This is its lane (lane $lane)$(if ($t.branch) { ", and its work so far is on $($t.branch)" }). "
 	}
-	"$head Read $tools\LEAD.md first, then run $tools\rocco.ps1 show $($t.id) and $tools\rocco.ps1 list -Pending. $(Get-WatchText)"
+	"$head Read $tools\LEAD.md first, then run $tools\rocco.ps1 show $($t.id) and $tools\rocco.ps1 list -Pending."
 }
 
 # Opens a thread's agent if it should be running and isn't. First it's given its lane, which it keeps. Returns the

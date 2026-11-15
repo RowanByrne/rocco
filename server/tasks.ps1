@@ -63,6 +63,8 @@ function Set-Status($t, [string]$status) {
 
 # ---- Where to test a task: what git says, not what an agent remembers ----
 
+function Test-RequiresLaneApproval { (Get-ProjectField 'Game code review') -eq 'Lane first' }
+
 # 'main' once the Main place has a task's branch (its commits are in repo\'s HEAD, which Lync serves to Main), 'branch'
 # while they aren't, '' when it has no branch or git can't tell. A branch that's gone counts as in main when a merge
 # naming it is (merged branches are deleted).

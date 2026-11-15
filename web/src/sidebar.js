@@ -136,9 +136,7 @@ export function renderSidebar() {
 
 // ---- The plan's usage limits, above the lanes ----
 
-// The 5-hour and weekly limits, as an agent Rocco opened last heard them from Claude Code (server/sessions.ps1
-// Save-Limits). Each fills toward its limit, amber from 80% and red from 95%, with when it resets. A window past its
-// reset starts again at 0, so it's left out; with neither, the box is hidden.
+// The selected agent's usage limits. Each fills toward its limit, amber from 80% and red from 95%.
 const clock = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 function resetText(at) {
   const d = new Date(at * 1000), now = new Date();
@@ -146,19 +144,33 @@ function resetText(at) {
   return `Resets ${d.toLocaleDateString([], { weekday: 'short' })} ${clock(d)}`;
 }
 
-function limitRow(name, w) {
+function limitName(minutes, fallback) {
+  if (!minutes) return fallback;
+  const day = 24 * 60;
+  if (minutes === 7 * day) return 'Weekly';
+  if (minutes % day === 0) return `${minutes / day}-day`;
+  if (minutes % 60 === 0) return `${minutes / 60}-hour`;
+  return `${minutes}-minute`;
+}
+
+function limitRow(fallback, w) {
   if (!w || w.resets * 1000 <= Date.now()) return nothing;
+  const name = limitName(w.minutes, fallback);
   const used = Math.max(0, Math.min(100, w.used)), tone = used >= 95 ? 'red' : used >= 80 ? 'amber' : 'blue';
   return html`<div class="lim" title="${name}: ${Math.round(w.used)}% used. ${resetText(w.resets)}"><div class="lim-head"><span class="lim-name">${name}</span><span class="lim-reset">${resetText(w.resets)}</span><b>${Math.round(w.used)}%</b></div><div class="lim-bar"><i class="t-${tone}" style="width:${used}%"></i></div></div>`;
 }
 
 function renderLimits() {
-  const l = /** @type {any} */ (state.meta.limits), box = $('#limits');
-  const rows = l ? [limitRow('5-hour', l.five), limitRow('Weekly', l.week)].filter(r => r !== nothing) : [];
+  const limits = /** @type {any} */ (state.meta.limits), box = $('#limits');
+  const rows = limits ? [
+    limitRow('5-hour', limits.five),
+    limitRow('Weekly', limits.week),
+    ...(limits.other || []).map(window => limitRow('Usage', window)),
+  ].filter(row => row !== nothing) : [];
   box.hidden = !rows.length;
   if (!rows.length) { render(nothing, box); return; }
-  const old = Date.now() - Date.parse(l.at) > 10 * 60e3;
-  render(html`<div class="stat"><span>Usage limits</span><b title="When an agent Rocco opened last said them">${old ? agoText(l.at) : 'Live'}</b></div>${rows}`, box);
+  const old = Date.now() - Date.parse(limits.at) > 10 * 60e3;
+  render(html`<div class="stat"><span>Usage limits</span><b title="When these limits were last read">${old ? agoText(limits.at) : 'Live'}</b></div>${rows}`, box);
 }
 
 // ---- Navigation: categories fold, and categories and the tabs in them drag into the user's order. Kept in this browser. ----

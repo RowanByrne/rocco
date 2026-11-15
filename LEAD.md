@@ -9,6 +9,7 @@ Rocco's commands are `..\..\..\_tools\rocco\rocco.ps1` from your lane (`README.m
 - **You build it yourself.** You are not a manager: you read the code, write it, run it and test it, in this lane, on one branch for the whole feature (`feature/<name>`). When the user says "make the accept button green", you are the one who wrote the window, so you change it.
 - **One lane, kept for the feature's life.** It's yours between steps too. Its place in Studio is where the user tests each step. Never touch Main: it's theirs.
 - **The conductor merges.** You never merge into `main` or push it. When the user approves a step, the conductor merges your branch. Pull `main` into your branch when it has moved (`git merge origin/main`), so the next merge is clean.
+- **Talking to the conductor:** `rocco.ps1 tell -Text "..."`, in plain sentences ("T-211 is ready to merge from agent/retired-road-progress"). It reaches the conductor as a message from you, never as the user's, and the user's chat shows only a line that it was sent. Never write to the conductor through Rocco's HTTP API (`/api/conductor/message` is the user's note box), and never relay the user's words as if they were yours. Tell it only what it has to act on: a merge, a lane, a file to claim. Progress and test results go on your cards (`set`, `result`, `log`), not to the conductor.
 - **Helpers are for separable work only:** a step the plan marks as independent of the one you're on, a wide search, a test or playtest run, a review of your own work before you call it ready. What a helper builds comes back to you, to bring into the feature's branch.
 
 ## Starting
@@ -34,7 +35,7 @@ When the user approves the last step, or it approves itself, the feature is done
 - **They read you in the feature's thread.** With Claude Code, what you say at the end of a turn shows there by itself, and so do your questions (AskUserQuestion) and permission prompts. Any other agent: `rocco.ps1 say -Text "..."` and `rocco.ps1 ask -Question "..." -Options "A","B"`.
 - **A decision is a question.** When the plan leaves something open that the user would want a say in (how it looks, what a player can do, a price, a name), ask, with the options. Rocco keeps each question and its answer in the feature's list of decisions, so the path stays readable later. Add the ones that matter to `docs/game/DECISIONS.md` too.
 - **Keep it short and plain:** what's done, what you need from them. No file paths or test tallies unless they ask.
-- **Between jobs, watch for what they send:** run `rocco.ps1 wait` as a background command. It returns the moment something waits on you, and you start it again once you've handled what it listed. Rocco won't let a turn end with nothing watching.
+- **Between jobs, watch for what they send.** If Rocco enabled a Codex Stop hook when it opened you, the hook listens at the end of the turn and continues it when the user sends something. In Claude Code, run `rocco.ps1 wait` with `run_in_background`. In Codex without the hook, run `rocco.ps1 wait -Timeout 540` with `exec_command` and keep the turn open, polling any returned session ID with `write_stdin` until the command exits. For any other agent, run `rocco.ps1 wait -Timeout 540` and wait for it to exit. When using `wait`, handle what it lists and start the next wait, including after a timeout.
 
 ## What waits on you
 
@@ -43,7 +44,7 @@ When the user approves the last step, or it approves itself, the feature is done
 | | The user | You |
 |---|---|---|
 | `[approved]` | Approved the plan | Start the first step, then `clear <the feature's id>` |
-| `C-… [message]` | Wrote to you in the thread | Act on it, then `clear C-…`. One from Rocco itself (`show` says so) means the user clicked Fix lanes: your lane went down and is being opened again, so check its place is open and syncing, redo what failed while it was down, then `clear C-…` |
+| `C-… [message]` | Wrote to you in the thread (`show` says when it's the conductor, with `tell`, not the user) | Act on it, then `clear C-…`. One from Rocco itself (`show` says so) means the user clicked Fix lanes: your lane went down and is being opened again, so check its place is open and syncing, redo what failed while it was down, then `clear C-…` |
 | `C-… [answer]` | Answered a question of yours | Carry on with it, then `clear C-…` |
 | `[reopen]` | Tested a step: not right yet | Their words are the last `you` line in `show`. Fix it, on the same task (`set -Status working`) |
 | `[followup]` | Added something to a step while you worked | Fold it in, then `clear` |

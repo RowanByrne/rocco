@@ -30,9 +30,11 @@ const MIC = lineIcon('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M
 let drafts = []; // screenshots going with the next note: { file, url }
 let type = '';
 let voiceTimer = null;
+let growFrame = null;
 
 const text = () => $('#noteText');
 const hint = id => keyFor(id) ? ` (${keyFor(id)})` : '';
+const nativeSizing = CSS.supports('field-sizing', 'content');
 
 function renderDrafts() { render(shotThumbs(drafts), $('#drafts')); }
 
@@ -69,10 +71,20 @@ function attach(file) {
 }
 
 function grow() {
+  if (nativeSizing) return;
   const box = text();
   box.style.height = 'auto';
   // Empty, it's one line: there's nothing to measure (a placeholder that wraps would be measured instead).
   if (box.value) box.style.height = box.scrollHeight + 'px';
+}
+
+function scheduleGrow() {
+  // Let input update the draft without forcing layout, and measure once for all edits in this frame.
+  if (nativeSizing || growFrame !== null) return;
+  growFrame = requestAnimationFrame(() => {
+    growFrame = null;
+    grow();
+  });
 }
 
 // Words that didn't send go back in the box, ahead of anything typed since.
@@ -146,7 +158,10 @@ export function initComposer() {
   renderComposerTools();
   text().value = draft.get('note');
   grow();
-  text().addEventListener('input', () => { draft.set('note', text().value); grow(); });
+  text().addEventListener('input', () => {
+    draft.set('note', text().value);
+    scheduleGrow();
+  });
   text().addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); addNote(); } });
   form.addEventListener('submit', e => { e.preventDefault(); addNote(); });
   form.addEventListener('click', async e => {
@@ -174,8 +189,8 @@ export function initComposer() {
   form.addEventListener('drop', e => { e.preventDefault(); form.classList.remove('drag'); [...e.dataTransfer.files].forEach(attach); });
 
   // Measured again once the page has its size, and whenever that changes: what's typed wraps differently.
-  requestAnimationFrame(grow);
-  addEventListener('resize', grow);
+  scheduleGrow();
+  addEventListener('resize', scheduleGrow);
   on('view', grow);
   on('capture', renderComposerTools);
   on('settings', renderComposerTools);

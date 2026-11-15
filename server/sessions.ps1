@@ -235,17 +235,16 @@ function Send-SessionText($ctx, $t, [string]$key, [long]$from) {
 	Send $ctx 200 'application/x-ndjson; charset=utf-8' ([byte[]]$bytes)
 }
 
-# ---- The plan's usage limits ----
+# ---- The selected agent's usage limits ----
 
 # Claude Code hands its status line the account's 5-hour and weekly limits (rate_limits: a Claude subscription's, not
-# an API key's). The status line of an agent Rocco opens posts them here (conductor.ps1 Write-ConductorHooks), and the
-# sidebar shows them above the lanes. They're the account's, not a project's, and kept in Rocco's own folder, so a
-# restart still has the last ones.
-$script:Limits = $null
-$script:LimitsWritten = @{ at = [datetime]::MinValue; what = '' }
-function Get-LimitsPath { Join-Path $RoccoHome 'limits.json' }
+# an API key's). Keep the existing limits.json as Claude's cache. Its status line can still post while another
+# agent is selected, and always gets a reply based on Claude's own limits.
+$script:ClaudeLimits = $null
+$script:ClaudeLimitsWritten = @{ at = [datetime]::MinValue; what = '' }
+$ClaudeLimitsPath = Join-Path $RoccoHome 'limits.json'
 
-function ConvertTo-LimitWindow($w) {
+function ConvertFrom-ClaudeLimitWindow($w) {
 	if ($null -eq $w -or $null -eq $w.used_percentage) { return $null }
 	[pscustomobject]@{ used = [Math]::Round([double]$w.used_percentage, 1); resets = [long]$w.resets_at }
 }
@@ -254,31 +253,113 @@ function ConvertTo-LimitWindow($w) {
 function Save-Limits($in) {
 	$r = $in.rate_limits
 	if ($r) {
-		$script:Limits = [pscustomobject]@{ five = (ConvertTo-LimitWindow $r.five_hour); week = (ConvertTo-LimitWindow $r.seven_day); at = (Get-Date).ToString('o') }
+		$script:ClaudeLimits = [pscustomobject]@{ five = (ConvertFrom-ClaudeLimitWindow $r.five_hour); week = (ConvertFrom-ClaudeLimitWindow $r.seven_day); at = (Get-Date).ToString('o') }
 		# To disk when a number moves, or once a minute for its time: the status line runs after every message.
-		$what = ConvertTo-Json -Compress @($script:Limits.five, $script:Limits.week)
-		if ($what -ne $script:LimitsWritten.what -or ((Get-Date) - $script:LimitsWritten.at).TotalSeconds -ge 60) {
-			$script:LimitsWritten = @{ at = Get-Date; what = $what }
-			try { New-Item -ItemType Directory -Force $RoccoHome | Out-Null; [IO.File]::WriteAllText((Get-LimitsPath), (ConvertTo-Json -Compress $script:Limits), $Utf8) } catch { }
+		$what = ConvertTo-Json -Compress @($script:ClaudeLimits.five, $script:ClaudeLimits.week)
+		if ($what -ne $script:ClaudeLimitsWritten.what -or ((Get-Date) - $script:ClaudeLimitsWritten.at).TotalSeconds -ge 60) {
+			$script:ClaudeLimitsWritten = @{ at = Get-Date; what = $what }
+			try { New-Item -ItemType Directory -Force $RoccoHome | Out-Null; [IO.File]::WriteAllText($ClaudeLimitsPath, (ConvertTo-Json -Compress $script:ClaudeLimits), $Utf8) } catch { }
 		}
 	}
-	$l = Get-Limits
+	$l = Get-Limits 'claude'
 	if (-not $l) { return '' }
 	$dot = " $([char]0x00B7) "
 	(@(if ($l.five) { "5h $([Math]::Round($l.five.used))%" }; if ($l.week) { "week $([Math]::Round($l.week.used))%" }) -join $dot)
 }
 
-# The last limits heard, with any window whose reset has passed left out (it starts again at 0). null with none.
-function Get-Limits {
-	if (-not $script:Limits) {
-		$path = Get-LimitsPath
-		if (Test-Path $path) { try { $script:Limits = [IO.File]::ReadAllText($path, $Utf8) | ConvertFrom-Json } catch { } }
+# Codex reads its account limits over app-server's stdio protocol, using its existing sign-in. Run the short-lived
+# query off the HTTP thread, so even a slow startup or network timeout does not hold up the board.
+$CodexLimitsQuery = {
+	param([string]$exe)
+	$ErrorActionPreference = 'Stop'
+	$info = if ($exe -like '*.exe') { New-Object Diagnostics.ProcessStartInfo $exe, 'app-server' }
+		else { New-Object Diagnostics.ProcessStartInfo 'cmd.exe', "/d /s /c `"`"$exe`" app-server`"" }
+	$info.UseShellExecute = $false
+	$info.CreateNoWindow = $true
+	$info.RedirectStandardInput = $true
+	$info.RedirectStandardOutput = $true
+	$info.RedirectStandardError = $true
+	$process = $null
+	$timer = [Diagnostics.Stopwatch]::StartNew()
+	function Read-Reply([int]$id) {
+		while ($timer.ElapsedMilliseconds -lt 8000) {
+			$line = $process.StandardOutput.ReadLineAsync()
+			if (-not $line.Wait([Math]::Max(0, 8000 - [int]$timer.ElapsedMilliseconds)) -or $null -eq $line.Result) { return }
+			try { $reply = $line.Result | ConvertFrom-Json } catch { continue }
+			if ($reply.id -eq $id -and -not $reply.method) { return $reply.result }
+		}
 	}
-	$l = $script:Limits
+	try {
+		$process = [Diagnostics.Process]::Start($info)
+		$stderr = $process.StandardError.ReadToEndAsync()
+		$process.StandardInput.WriteLine('{"method":"initialize","id":1,"params":{"clientInfo":{"name":"rocco","title":"Rocco","version":"1.0.0"}}}')
+		if (-not (Read-Reply 1)) { return }
+		$process.StandardInput.WriteLine('{"method":"initialized"}')
+		$process.StandardInput.WriteLine('{"method":"account/rateLimits/read","id":2}')
+		Read-Reply 2
+	} catch { }
+	finally {
+		if ($process) {
+			try { $process.StandardInput.Close() } catch { }
+			if (-not $process.WaitForExit(300)) { try { & taskkill.exe /T /F /PID $process.Id 2>$null | Out-Null } catch { } }
+			$process.Dispose()
+		}
+	}
+}
+
+function ConvertFrom-CodexLimits($result) {
+	$limits = $result.rateLimitsByLimitId.codex
+	if (-not $limits) { $limits = $result.rateLimits }
+	if ($limits.limitId -and $limits.limitId -ne 'codex') { return $null }
+	# A weekly-only plan can report its weekly window as primary. Use duration for both rows.
+	$windows = @(foreach ($w in $limits.primary, $limits.secondary) {
+		if ($null -ne $w.usedPercent -and $w.resetsAt) {
+			[pscustomobject]@{ used = [Math]::Round([double]$w.usedPercent, 1); resets = [long]$w.resetsAt; minutes = [int]$w.windowDurationMins }
+		}
+	})
+	[pscustomobject]@{
+		agent = 'codex'; at = (Get-Date).ToString('o')
+		five = $windows | Where-Object minutes -eq 300 | Select-Object -First 1
+		week = $windows | Where-Object minutes -eq 10080 | Select-Object -First 1
+		other = @($windows | Where-Object minutes -NotIn 300, 10080)
+	}
+}
+
+$script:CodexLimitsJob = $null
+$script:CodexLimitsAt = [datetime]::MinValue
+$script:CodexLimits = $null
+function Get-CodexLimits {
+	if ($script:CodexLimitsJob -and $script:CodexLimitsJob.State -in 'Completed', 'Failed', 'Stopped') {
+		$result = Receive-Job $script:CodexLimitsJob -ErrorAction SilentlyContinue | Select-Object -Last 1
+		Remove-Job $script:CodexLimitsJob -Force
+		$script:CodexLimitsJob = $null
+		# A failed fetch leaves the last reading available until its windows reset.
+		if ($result) { $script:CodexLimits = ConvertFrom-CodexLimits $result }
+	}
+	if (-not $script:CodexLimitsJob -and ((Get-Date) - $script:CodexLimitsAt).TotalSeconds -ge 60) {
+		$script:CodexLimitsAt = Get-Date
+		$exe = Get-AgentCommand 'codex'
+		if ($exe) { $script:CodexLimitsJob = Start-Job -ScriptBlock $CodexLimitsQuery -ArgumentList $exe -ErrorAction SilentlyContinue }
+	}
+	$script:CodexLimits
+}
+
+# The last limits for the requested agent, omitting reset windows. An unsupported agent has no meter.
+function Get-Limits([string]$agent) {
+	$l = switch ($agent) {
+		'claude' {
+			if (-not $script:ClaudeLimits -and (Test-Path -LiteralPath $ClaudeLimitsPath)) {
+				try { $script:ClaudeLimits = [IO.File]::ReadAllText($ClaudeLimitsPath, $Utf8) | ConvertFrom-Json } catch { }
+			}
+			$script:ClaudeLimits
+		}
+		'codex' { Get-CodexLimits }
+	}
 	if (-not $l) { return $null }
 	$now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 	$five = if ($l.five -and $l.five.resets -gt $now) { $l.five } else { $null }
 	$week = if ($l.week -and $l.week.resets -gt $now) { $l.week } else { $null }
-	if (-not $five -and -not $week) { return $null }
-	[pscustomobject]@{ five = $five; week = $week; at = $l.at }
+	$other = @($l.other | Where-Object { $_.resets -gt $now })
+	if (-not $five -and -not $week -and -not $other.Count) { return $null }
+	[pscustomobject]@{ agent = $agent; five = $five; week = $week; other = $other; at = $l.at }
 }

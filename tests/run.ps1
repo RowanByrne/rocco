@@ -98,7 +98,7 @@ try {
 
 	# Rocco's own functions, for the tests that call one directly.
 	$AppDir = $App; $Command = 'test'; $Project = 'Game'; $Port = 34860
-	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
+	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
 	$ErrorActionPreference = 'Stop'
 
 	Write-Host "Rocco tests in $Temp"
@@ -413,6 +413,23 @@ try {
 		Assert-Throws { Api "/api/tasks/$id/promote" @{} } 'already has an agent' 'twice'
 	}
 
+	Test 'lane review prevents skipping the user approval for a branch' {
+		$projectDoc = Join-Path $Repo 'docs\game\PROJECT.md'
+		$original = [IO.File]::ReadAllText($projectDoc, $Utf8)
+		try {
+			[IO.File]::WriteAllText($projectDoc, $original.Replace('| Phase | Production |', "| Phase | Production |`n| Game code review | Lane first |"), $Utf8)
+			$id = @(Rocco new -Title 'Game code requiring review')[0]
+			Rocco set $id -Status working -Lane 2 -Branch agent/lane-review | Out-Null
+			Assert-Throws { Rocco set $id -Status ready -Where main -Test 'Try the change' } 'approval in its lane' 'Main cannot be the initial review place'
+			Assert-Throws { Rocco set $id -Status ready -NothingToTest } 'approval in its lane' 'a branch cannot approve itself'
+			Assert-Throws { Rocco set $id -Status done } 'approval in its lane' 'a branch cannot be marked approved from the CLI'
+			Rocco set $id -Status ready -Test 'Try the change' | Out-Null
+			Assert-Equal (Read-TaskJson $id).where 'lane' 'ready defaults to its lane'
+			Api "/api/tasks/$id/approve" @{} | Out-Null
+			Assert-Equal (Read-TaskJson $id).pending 'merge' 'the user approval asks for the merge'
+		} finally { [IO.File]::WriteAllText($projectDoc, $original, $Utf8) }
+	}
+
 	Test 'a message carries no card: one is made from it only for work, with its screenshot' {
 		$before = @(Get-ChildItem (Join-Path $Game 'rocco\tasks') -Directory).Count
 		Assert-Throws { Api '/api/conductor/picture' ([byte[]](1, 2, 3)) 'text/plain' } 'HTTP 415' 'not a picture'
@@ -462,16 +479,6 @@ try {
 		Assert-Equal (Api '/api/agent').effort 'high' 'still high after a refused change'
 		Api '/api/agent/effort' @{ effort = '' } | Out-Null
 		Api '/api/agent/model' @{ model = '' } | Out-Null
-	}
-
-	Test 'the Codex conductor full access setting accepts only a boolean' {
-		$path = '/api/agent/codex-conductor-full-access'
-		Assert-Equal (Api '/api/agent').codexConductorFullAccess $false 'defaults off'
-		try {
-			Assert-Equal (Api $path @{ on = $true }).codexConductorFullAccess $true 'saved on'
-			Assert-Throws { Api $path @{ on = 'false' } } 'HTTP 400' 'rejects a string'
-			Assert-Equal (Api '/api/agent').codexConductorFullAccess $true 'keeps the selection'
-		} finally { Api $path @{ on = $false } | Out-Null }
 	}
 
 	Test 'an errand is done and said, with nothing to approve' {
@@ -551,6 +558,80 @@ try {
 		Assert-Equal ($problems -join '; ') '' 'fields missing'
 	}
 
+	Test 'tell: a feature agent and the conductor write to each other, never as the user' {
+		$plan = @(Rocco plan -Title 'Biomes' -Summary 'Fields and cliffs.' -Steps 'Shared terrain|2|standard')[0]
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		try {
+			Assert ([bool](Read-TaskJson $plan).lead) 'the feature has an agent of its own'
+			$sent = @(Rocco tell -Text 'T-211 is ready to merge.' -Thread $plan)[0]
+			$id = ($sent -split ' ')[0]
+			Assert-Match $sent '^C-[0-9a-f]{6} sent to the conductor\.' 'the feature agent hears it went'
+			$e = Get-Content (Join-Path $Game 'rocco\conductor\thread.jsonl') | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.id -eq $id }
+			Assert-Equal "$($e.who) $($e.kind) $($e.from)" "agent message $plan" 'it lands in the conductor''s thread from that agent'
+			Assert-Match ((Rocco list -Pending) -join "`n") "$id\s+\[message\]\s+from the $plan agent, not the user: T-211 is ready" 'wait and list name the agent, not the user'
+			Assert-Match ((Rocco show $id) -join "`n") "message from the $plan agent, not the user" 'show names the agent'
+			Rocco clear $id | Out-Null
+			$back = @(Rocco tell $plan -Text 'Merged; pull main.')[0]
+			Assert-Match $back "sent to the $plan agent" 'the conductor tells the feature agent'
+			Assert-Match ((Rocco list -Pending -Thread $plan) -join "`n") 'from the conductor: Merged; pull main' 'the feature agent''s wait has it'
+			Rocco clear ($back -split ' ')[0] -Thread $plan | Out-Null
+			Assert-Throws { Rocco tell -Text 'hello' } 'tells a feature' 'the conductor names whom it tells'
+			Assert-Throws { Rocco tell T-001 -Text 'x' -Thread $plan } 'tells only the conductor' 'a feature agent tells only the conductor'
+		} finally { Rocco set $plan -Status removed | Out-Null }
+	}
+
+	Test 'the Codex Stop hook waits for a feature answer and continues the same thread' {
+		$plan = @(Rocco plan -Title 'Settings design' -Summary 'Choose a style.' -Steps 'Compare concepts|1|standard')[0]
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		Rocco clear $plan -Thread $plan | Out-Null
+		$step = @(Rocco new -Title 'Compare concepts' -Plan $plan -Thread $plan)[0]
+		Rocco ask $step -Question 'Which settings style?' -Options 'Smoked glass,Pale frost' -Thread $plan | Out-Null
+		$other = Api '/api/conductor/message' @{ text = 'This belongs to the main conductor.' }
+		$inputFile = Join-Path $Temp 'codex-stop-in.json'
+		$outputFile = Join-Path $Temp 'codex-stop-out.json'
+		$errorFile = Join-Path $Temp 'codex-stop-error.txt'
+		$agentFile = Join-Path $Game "rocco\threads\$plan\agent.json"
+		[IO.File]::WriteAllText($inputFile, (ConvertTo-Json -Compress @{
+			session_id = [guid]::NewGuid().ToString(); turn_id = [guid]::NewGuid().ToString(); hook_event_name = 'Stop'
+			stop_hook_active = $false; last_assistant_message = 'Which settings style?'; cwd = $Repo
+		}), $Utf8)
+		$exe = Join-Path $App 'rocco.ps1'
+		$launchArgs = '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$exe`"", 'hook', 'codex-stop', '-Project', 'Game', '-Thread', $plan, '-Timeout', '20'
+		$watch = Start-Process powershell.exe -ArgumentList $launchArgs -WindowStyle Hidden -PassThru -RedirectStandardInput $inputFile -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+		$null = $watch.Handle # without a handle, Start-Process leaves ExitCode empty
+		try {
+			for ($i = 0; $i -lt 60 -and -not $watch.HasExited -and -not (Test-Path $agentFile); $i++) { Start-Sleep -Milliseconds 100 }
+			# Read the hook's errors only once it has exited: while it runs, its redirect holds the file.
+			if ($watch.HasExited) { throw "the Stop hook exited while waiting: $([IO.File]::ReadAllText($errorFile))" }
+			Assert (Test-Path $agentFile) 'the feature is listening before the user answers'
+			Api "/api/tasks/$step/answer" @{ text = 'Smoked glass' } | Out-Null
+			$undoUntil = ([datetime](Read-TaskJson $step).undo.at).AddSeconds($UndoSeconds)
+			Assert ($watch.WaitForExit(14000)) 'the Stop hook received the answer'
+			Assert-Equal $watch.ExitCode 0 'the hook command succeeded'
+			Assert ($watch.ExitTime -ge $undoUntil) 'the hook honored the Undo window'
+			$result = [IO.File]::ReadAllText($outputFile, $Utf8) | ConvertFrom-Json
+			Assert-Equal $result.decision 'block' 'Codex continues after trying to stop'
+			Assert-Match $result.reason "$step\s.*\[answer\]" 'the feature agent receives its pending step answer'
+			Assert ($result.reason -notmatch 'This belongs to the main conductor') 'the hook stays in the feature thread'
+			Assert-Equal (Read-TaskJson $step).log[-1].text 'Smoked glass' 'the answer stays on the task for the feature agent'
+			Rocco clear $step -Thread $plan | Out-Null
+			$ask = (@(Rocco ask -Question 'How dark?' -Thread $plan)[0] -split ' ')[0]
+			Api "/api/conductor/answer?t=$plan" @{ id = $ask; answers = @('Charcoal'); text = 'Charcoal' } | Out-Null
+			$watch = Start-Process powershell.exe -ArgumentList $launchArgs -WindowStyle Hidden -PassThru -RedirectStandardInput $inputFile -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+		$null = $watch.Handle # without a handle, Start-Process leaves ExitCode empty
+			Assert ($watch.WaitForExit(5000)) 'the Stop hook sees a reply already pending from the feature chat'
+			Assert-Equal $watch.ExitCode 0 'the reply hook command succeeded'
+			$result = [IO.File]::ReadAllText($outputFile, $Utf8) | ConvertFrom-Json
+			Assert-Equal $result.decision 'block' 'a feature chat reply also continues the session'
+			Assert-Match $result.reason '\[answer\]\s+How dark\? -> Charcoal' 'the feature chat reply reaches its agent'
+		} finally {
+			if (-not $watch.HasExited) { Stop-Process -Id $watch.Id -Force }
+			Rocco clear $other.id | Out-Null
+			Rocco set $step -Status removed | Out-Null
+			Rocco set $plan -Status removed | Out-Null
+		}
+	}
+
 	Test 'the conductor''s hooks: only the user''s own words count as typed' {
 		$post = { param($event, $body) Api "/api/conductor/hook?e=$event" $body | Out-Null }
 		& $post 'prompt' @{ prompt = '<agent-message from="a1">[Subagent hand-back] report</agent-message>' }
@@ -572,18 +653,34 @@ try {
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -eq 'Merged the lap timer.' }).Count 1 'the next turn''s message is kept'
 	}
 
-	Test 'the plan''s limits from a status line show on the board, until they reset' {
+	Test 'the plan''s limits from a status line follow the selected agent until they reset' {
+		$previous = (Api '/api/agent').id
 		$soon = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
-		$line = Api '/api/limits' @{ model = @{ id = 'x' }; rate_limits = @{ five_hour = @{ used_percentage = 89.4; resets_at = $soon }; seven_day = @{ used_percentage = 69; resets_at = $soon + 86400 } } }
-		Assert-Equal "$line" "5h 89% $([char]0x00B7) week 69%" 'the status line says them'
-		$l = (Api '/api/state').limits
-		Assert-Equal "$($l.five.used) $($l.week.used)" '89.4 69' 'the board has them'
-		# Without them (an API key), what was last heard stays.
-		Api '/api/limits' @{ model = @{ id = 'x' } } | Out-Null
-		Assert-Equal "$((Api '/api/state').limits.five.used)" '89.4' 'a status line without them changes nothing'
-		Api '/api/limits' @{ rate_limits = @{ five_hour = @{ used_percentage = 10; resets_at = 1 }; seven_day = @{ used_percentage = 70; resets_at = $soon } } } | Out-Null
-		$l = (Api '/api/state').limits
-		Assert-Equal "$($null -eq $l.five) $($l.week.used)" 'True 70' 'a window that has reset is left out'
+		$legacy = @{ five = $null; week = @{ used = 17; resets = $soon }; at = (Now) }
+		[IO.File]::WriteAllText((Join-Path $RoccoHome 'limits.json'), (ConvertTo-Json -InputObject $legacy -Depth 3), $Utf8)
+		try {
+			Api '/api/agent' @{ id = 'claude' } | Out-Null
+			$l = (Api '/api/state').limits
+			Assert-Equal "$($l.agent) $($l.week.used)" 'claude 17' 'the legacy cache belongs to Claude'
+			$line = Api '/api/limits' @{ model = @{ id = 'x' }; rate_limits = @{ five_hour = @{ used_percentage = 89.4; resets_at = $soon }; seven_day = @{ used_percentage = 69; resets_at = $soon + 86400 } } }
+			Assert-Equal "$line" "5h 89% $([char]0x00B7) week 69%" 'the status line says them'
+			$l = (Api '/api/state').limits
+			Assert-Equal "$($l.agent) $($l.five.used) $($l.week.used)" 'claude 89.4 69' 'the board has them'
+			Api '/api/limits' @{ model = @{ id = 'x' } } | Out-Null
+			Assert-Equal "$((Api '/api/state').limits.five.used)" '89.4' 'a status line without limits keeps the last update'
+
+			Api '/api/agent' @{ id = 'gemini' } | Out-Null
+			Assert ($null -eq (Api '/api/state').limits) 'switching agents clears Claude limits from the board'
+			$line = Api '/api/limits' @{ rate_limits = @{ five_hour = @{ used_percentage = 10; resets_at = 1 }; seven_day = @{ used_percentage = 70; resets_at = $soon } } }
+			Assert-Equal "$line" 'week 70%' 'an open Claude window keeps its own status line'
+			Assert ($null -eq (Api '/api/state').limits) 'a late Claude update stays off the board'
+
+			Api '/api/agent' @{ id = 'claude' } | Out-Null
+			$l = (Api '/api/state').limits
+			Assert-Equal "$($l.agent) $($null -eq $l.five) $($l.week.used)" 'claude True 70' 'switching back restores the latest unexpired limits'
+		} finally {
+			Api '/api/agent' @{ id = $previous } | Out-Null
+		}
 	}
 
 	Test 'a dialog only its window can answer is said, until it moves on' {
@@ -593,6 +690,16 @@ try {
 		$me = Get-Process -Id $PID
 		[IO.File]::WriteAllText($file, (ConvertTo-Json @{ agent = 'Claude Code'; pid = $PID; started = $me.StartTime.ToString('o'); at = (Get-Date).ToString('o') }), $Utf8)
 		try {
+			Add-Activity 'Checking the current repair'
+			$firstNote = Api '/api/conductor/message' @{ text = 'First note' }
+			$before = (Api '/api/state').conductor
+			$note = Api '/api/conductor/message' @{ text = 'Also look at the tyre marks' }
+			$after = (Api '/api/state').conductor
+			Assert-Equal $after.doing 'Checking the current repair' 'a new message keeps the current action'
+			Assert ([bool]$before.doingAt) 'the action has its own timestamp'
+			Assert-Equal $after.doingAt $before.doingAt 'an incoming message does not reset its timer'
+			Rocco clear $firstNote.id | Out-Null
+			Rocco clear $note.id | Out-Null
 			$ask = { Start-Sleep -Milliseconds 3100; (Api '/api/state').conductor.windowAsk } # past the state's 3s cache
 			Api '/api/conductor/hook?e=notify' @{ notification_type = 'idle_prompt'; message = 'Claude is waiting for your input' } | Out-Null
 			Assert-Equal "$(& $ask)" '' 'an idle prompt is nothing to answer'
@@ -611,35 +718,108 @@ try {
 		Assert-Equal @($rows | Where-Object { $_.agent -eq 'abc123' -and $_.task -eq 'T-001' }).Count 1 'the pairing is on record'
 	}
 
+	Test 'the conductor chat pages keep their boundary as new messages arrive' {
+		$path = '/api/conductor/thread?t=T-990'
+		Use-Thread 'T-990'
+		try {
+			$file = Get-ThreadFile
+			$activityFile = Get-ActivityFile
+			$start = (Get-Date).AddMinutes(-5)
+			$rows = @(foreach ($n in 1..120) {
+				$seconds = if ($n -eq 70) { 71 } else { $n }
+				$row = @{ id = 'C-{0:x6}' -f $n; kind = 'said'; who = 'conductor'; at = $start.AddSeconds($seconds).ToString('o'); text = "Message $n" }
+				if ($n -eq 10 -or $n -eq 12) {
+					$row.kind = 'asked'; $row.questions = @(@{ text = "Question $n" })
+				} elseif ($n -eq 20) { $row.kind = 'message'; $row.who = 'you' }
+				ConvertTo-Json -Compress -InputObject $row
+			})
+			New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+			[IO.File]::WriteAllText($file, ($rows -join "`n") + "`n", $Utf8)
+			$steps = @(1..160 | ForEach-Object { ConvertTo-Json -Compress -InputObject @{ at = $start.AddSeconds(75).AddMilliseconds($_).ToString('o'); text = "Step $_" } })
+			[IO.File]::WriteAllText($activityFile, ($steps -join "`n") + "`n", $Utf8)
+			$at = $start.AddSeconds(121).ToString('o')
+			Add-Line $file @{ id = 'C-0000a1'; kind = 'made'; to = 'C-000014'; task = 'T-001'; at = $at }
+			Add-Line $file @{ id = 'C-0000a2'; kind = 'answered'; to = 'C-00000c'; answers = @('Yes'); at = $at }
+			Add-Line $file @{ id = 'C-0000a3'; kind = 'made'; to = 'C-0000ff'; task = 'T-001'; at = $at }
+			$latest = Api $path
+			Assert-Equal "$($latest.items.Count) $($latest.items[0].text) $($latest.items[-1].text)" '50 Message 71 Message 120' 'the latest page is bounded and skips orphaned metadata'
+			Assert-Equal $latest.steps.Count 150 'steps are bounded too'
+			Assert-Equal $latest.steps[0].text 'Step 11' 'the page keeps the most recent steps'
+			Assert-Equal "$($latest.decisions[0].q) $($latest.decisions[0].a)" 'Question 12 Yes' 'the feature keeps older decisions available'
+			Assert-Equal $latest.why.'C-00000a' 'Message 9' 'an older open question keeps its reason'
+			Assert-Equal $latest.whyIds.'C-00000a' 'C-000009' 'the reason names the chat row'
+			Assert (Api "$path&stamp=$($latest.stamp)").same 'polling an unchanged history is cheap'
+
+			Add-Line $file @{ id = 'C-000079'; kind = 'said'; who = 'conductor'; at = $at; text = 'Message 121' }
+			$older = Api "$path&before=$($latest.before)"
+			Assert-Equal "$($older.items.Count) $($older.items[0].text) $($older.items[-1].text)" '50 Message 21 Message 70' 'an append cannot move an older page boundary'
+			$first = Api "$path&before=$($older.before)"
+			Assert (-not $first.before) 'the oldest page has no cursor'
+			Assert-Equal @($first.items | Where-Object kind -eq 'made').Count 1 'an older message keeps the card made from it later'
+			Assert-Equal @($first.items | Where-Object kind -eq 'answered').Count 1 'an older question keeps its answer'
+			Assert-Equal (Api $path).items[-1].text 'Message 121' 'new messages still arrive in the latest page'
+			Edit-Lines $file { param($lines) $lines | Select-Object -Skip 1 }
+			Assert-Equal (Api "$path&before=$($latest.before)").items[-1].text 'Message 70' 'a trim keeps the boundary between messages with the same time'
+			Assert-Throws { Api "$path&before=broken" } '^HTTP 400:' 'an invalid cursor gets a client error'
+		} finally { Use-Thread '' }
+	}
+
 	Stop-Server
 	Write-Host 'Pieces'
 
-	Test 'the Codex conductor gets full access before its first prompt only when enabled' {
+	Test 'Codex plan limits use the account bucket and each window duration' {
+		$soon = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+		$weekly = @{ usedPercent = 7; windowDurationMins = 10080; resetsAt = $soon }
+		$daily = @{ usedPercent = 23; windowDurationMins = 1440; resetsAt = $soon }
+		$five = @{ usedPercent = 52; windowDurationMins = 300; resetsAt = $soon }
+		$result = @{
+			rateLimits = @{ limitId = 'codex'; primary = $five; secondary = $daily }
+			rateLimitsByLimitId = @{
+				codex = @{ limitId = 'codex'; primary = $weekly; secondary = $null }
+				other = @{ limitId = 'other'; primary = $five; secondary = $null }
+			}
+		}
+		$l = ConvertFrom-CodexLimits (ConvertTo-Json -InputObject $result -Depth 6 | ConvertFrom-Json)
+		Assert-Equal "$($l.agent) $($null -eq $l.five) $($l.week.used) $(@($l.other).Count)" 'codex True 7 0' 'the weekly primary window comes from the Codex account bucket'
+		Assert-Equal $l.week.resets $soon 'keeps the reset time'
+
+		$result.Remove('rateLimitsByLimitId')
+		$l = ConvertFrom-CodexLimits (ConvertTo-Json -InputObject $result -Depth 6 | ConvertFrom-Json)
+		Assert-Equal "$($l.five.used) $($null -eq $l.week) $($l.other[0].used) $($l.other[0].minutes)" '52 True 23 1440' 'an older response keeps both its standard and custom windows'
+	}
+
+	Test 'Codex conductors and leads start with their own permissions, and the Stop hook where there is one' {
 		$settings = Read-RoccoSettings
 		$launch = @{}
 		function Find-AgentExe([string]$id) { "C:\fake\$id.exe" }
+		function Get-CodexWatchArguments { if ($launch.hookAvailable) { '-c', 'fake-stop-hook' } }
 		function Start-Process {
 			$data = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ROCCO_START)) | ConvertFrom-Json
 			$launch.arguments = $data.arguments -join '|'
+			$launch.set = $data.set
 			[pscustomobject]@{ Id = 0 }
 		}
 		function Save-Conductor {}
 		function Add-Event {}
 		try {
 			Set-Agent 'codex' | Out-Null
-			Set-CodexConductorFullAccess $false | Out-Null
 			Open-Conductor 'Watch the board' | Out-Null
-			Assert-Equal $launch.arguments 'Watch the board' 'default launch'
-			Set-CodexConductorFullAccess $true | Out-Null
-			Open-Conductor 'Watch the board' | Out-Null
-			Assert-Equal $launch.arguments '--sandbox|danger-full-access|--ask-for-approval|never|Watch the board' 'full access applies before the prompt'
+			Assert ($launch.arguments -notmatch '--sandbox|--ask-for-approval|--approve-for-me|danger-full-access') 'the conductor starts with the user''s own Codex permissions'
+			Assert-Match $launch.arguments 'write_stdin' 'an unsupported Codex launch asks the agent to poll'
 			Use-Thread 'T-900'
-			Open-Conductor 'Build this feature' | Out-Null
-			Assert-Equal $launch.arguments 'Build this feature' 'feature agent keeps its own permissions'
+			$launch.hookAvailable = $true
+			$lane = Join-Path $Game 'lanes\lane1'
+			Open-Conductor 'Build this feature' $lane | Out-Null
+			Assert-Match $launch.arguments '^-c\|fake-stop-hook\|Build this feature' 'the lead gets the Stop hook before the prompt, and no permission flags'
+			Assert-Match $launch.arguments 'Stop hook' 'the prompt tells the lead it can use its hook'
+			Assert ($launch.arguments -notmatch 'write_stdin') 'a hooked agent can end its turn'
+			Assert-Equal $launch.set.ROCCO_THREAD 'T-900' 'the lead watches its own thread'
+			Assert-Equal $launch.set.ROCCO_CODEX_BOARD (Join-Path $App 'rocco.ps1') 'the hook runs this board'
+			Assert-Equal $launch.set.ROCCO_CODEX_DIR $lane 'the hook starts from the feature lane'
 			Use-Thread ''
 			Set-Agent 'gemini' | Out-Null
 			Open-Conductor 'Watch the board' | Out-Null
-			Assert-Equal $launch.arguments '-i|Watch the board' 'other agents keep their launch arguments'
+			Assert-Match $launch.arguments '^-i\|Watch the board\b' 'other agents keep their launch arguments'
 		} finally {
 			Use-Thread ''
 			Save-RoccoSettings $settings
@@ -697,6 +877,22 @@ try {
 		Assert-Equal $kept.Count 2 'the old line is gone'
 		Add-Line $file ([ordered]@{ id = 'C-000004'; at = $newAt })
 		Assert-Equal @([IO.File]::ReadAllLines($file)).Count 3 'a line appended after still lands whole'
+	}
+
+	Test 'the watch prompt keeps a Codex turn open to receive answers' {
+		function Get-Agent { @{ id = 'codex' } }
+		Use-Thread ''
+		$watch = Get-WatchText
+		Assert-Match $watch '\.\.\\\.\.\\_tools\\rocco\\rocco\.ps1 wait -Timeout 540 with exec_command' 'the conductor watches from the game repo'
+		Assert-Match $watch 'poll it with write_stdin until the command exits\. Keep the turn open' 'Codex collects the result inside the turn'
+		Assert-Match $watch 'start the next wait, including after a timeout' 'the wait is started again'
+		Use-Thread 'T-001'
+		try {
+			$watch = Get-WatchText
+			Assert-Match $watch '\.\.\\\.\.\\\.\.\\_tools\\rocco\\rocco\.ps1 wait -Timeout 540' 'the feature agent watches from its lane'
+			Assert-Match $watch 'poll it with write_stdin until the command exits' 'the feature agent collects the result too'
+		} finally { Use-Thread '' }
+		Assert-Match (Get-WaitCommand) 'run_in_background, with no -Timeout' 'the Claude Code stop hook still starts a background wait'
 	}
 
 	Test 'the conductor''s hook settings are valid, whichever kind this PC gets' {

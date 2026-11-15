@@ -12,10 +12,13 @@ const POLL_MS = 2500;
 let lastJson = '';
 let lastRest = '';
 let loaded = false;
+let generation = 0;
 
 export async function load() {
+  const requested = generation;
   try {
     const text = await api.state();
+    if (requested !== generation) return;
     setOnline(true);
     if (text === lastJson) { setProblem(''); return; }
     // leads: the threads with an agent of their own, each with its agent's state. Like the conductor's, it changes
@@ -29,17 +32,18 @@ export async function load() {
     emit('conductor');
     setProblem('');
   } catch (e) {
+    if (requested !== generation) return;
     if (e.offline) { setOnline(false); return; }
     setOnline(true);
     setProblem(e.message || 'It answered with something Rocco can\'t read');
   }
 }
 
-// After the user changes something: load now, even if the text looks the same.
-export function refresh() { lastJson = ''; lastRest = ''; return load(); }
+// After the user changes something: discard earlier requests and load now, even if the text looks the same.
+export function refresh() { generation++; lastJson = ''; lastRest = ''; return load(); }
 
 // A different project: forget the old one, so its changes don't toast.
-export function reset() { lastJson = ''; lastRest = ''; loaded = false; state.others = []; state.extra.clear(); }
+export function reset() { generation++; lastJson = ''; lastRest = ''; loaded = false; state.others = []; state.extra.clear(); }
 
 export function start() {
   load();

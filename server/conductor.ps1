@@ -32,6 +32,9 @@ function Test-ProcessAlive([int]$id, [string]$started) { $id -and (Get-ProcessSt
 
 # The agent a command runs under: the first agent program above this process (agent, shell, PowerShell, this).
 function Find-AgentAbove([int]$id) {
+	# A test run (ROCCO_NO_CONDUCTOR) has no agent of its own above it: what's up there is whoever started the tests,
+	# perhaps the user's own agent session, and recording it would let a test's Stop or close end that session.
+	if ($env:ROCCO_NO_CONDUCTOR) { return 0 }
 	for ($i = 0; $i -lt 6 -and $id; $i++) {
 		$p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
 		if (-not $p) { break }
@@ -66,7 +69,7 @@ function Get-Conductor {
 	if ($hit -and ((Get-Date) - $hit.Read).TotalSeconds -lt 3) { return $hit.Value }
 	$c = Read-Conductor
 	$thread = Get-ConductorThread
-	$value = [pscustomobject]@{ state = 'none'; agent = ''; doing = ''; open = $thread.open; elsewhere = $thread.elsewhere; last = $thread.last; stamp = $thread.stamp }
+	$value = [pscustomobject]@{ state = 'none'; agent = ''; doing = ''; doingAt = ''; open = $thread.open; elsewhere = $thread.elsewhere; last = $thread.last; stamp = $thread.stamp }
 	if ($c) {
 		# Opened by Rocco a moment ago: its agent may not have started yet.
 		if (-not $c.pid -and $c.window -and (Test-ProcessAlive $c.window $c.windowStarted)) {
@@ -80,7 +83,10 @@ function Get-Conductor {
 		$ask = $script:WindowAsk[(Get-ThreadKey)]
 		if ($ask -and $value.state -ne 'none') { $value | Add-Member -NotePropertyName windowAsk -NotePropertyValue ([pscustomobject]@{ id = $ask.id; text = $ask.text; at = $ask.at }) }
 		# Its latest step, while it's working and the step is recent.
-		if ($value.state -eq 'busy' -and $thread.step -and ((Get-Date) - [datetime]$thread.step.at).TotalMinutes -lt 3) { $value.doing = $thread.step.text }
+		if ($value.state -eq 'busy' -and $thread.step -and ((Get-Date) - [datetime]$thread.step.at).TotalMinutes -lt 3) {
+			$value.doing = $thread.step.text
+			$value.doingAt = $thread.step.at
+		}
 		# Opened with Rocco's hooks, and not a word from them since: it's asking something in its own window, before any
 		# hook runs (the first time an agent opens in a folder, it asks whether the user trusts it).
 		if ($value.state -eq 'busy' -and $c.PSObject.Properties['hooks'] -and $c.hooks -and $c.opened) {
@@ -118,22 +124,30 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	$agent = Get-Agent
 	if (-not $agent.installed) { throw "$($agent.name) isn't installed on this PC (Connections)." }
 	$extra = @()
+	if (-not $dir) { $dir = $RepoDir }
+	$set = @{ ROCCO_THREAD = "$($script:ThreadId)" }
+	$codexWatch = @()
 	$hooks = [bool]$Agents[$agent.id].hooks
 	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
-	# The first turn starts with the launch prompt, so apply the user's opt-in before sending that prompt.
-	if ($agent.id -eq 'codex' -and -not $script:ThreadId -and $agent.codexConductorFullAccess) {
-		$extra += '--sandbox', 'danger-full-access', '--ask-for-approval', 'never'
+	# Codex: Rocco's Stop hook watches the board at the end of each turn, where its version supports one (codex-watch.ps1).
+	if ($agent.id -eq 'codex') {
+		$codexWatch = @(Get-CodexWatchArguments $dir)
+		if ($codexWatch.Count) {
+			$extra += $codexWatch
+			$set.ROCCO_CODEX_BOARD = Join-Path $AppDir 'rocco.ps1'
+			$set.ROCCO_CODEX_DIR = $dir
+		}
 	}
+	$prompt = "$prompt $(Get-WatchText ([bool]$codexWatch.Count))"
 	# The model the user picked for the conductor in Settings, for an agent that takes one on its command line.
 	if ($agent.model -and $Agents[$agent.id].model) { $extra += $Agents[$agent.id].model, $agent.model }
 	# And how hard it thinks.
 	$effort = if ($agent.effort -and $Agents[$agent.id].effort) { $agent.effort } else { '' }
 	if ($effort) { $extra += $Agents[$agent.id].effort, $effort }
-	if (-not $dir) { $dir = $RepoDir }
 	if (-not $as) { $as = "conductor on $(Split-Path $Root -Leaf)" }
 	# Its window inherits Rocco's PATH: with anything installed since Rocco started (FFmpeg from Connections, say).
 	Update-EnvPath
-	$window = Start-AgentWindow $dir $prompt "$($agent.name), $as" $extra @{ ROCCO_THREAD = "$($script:ThreadId)" }
+	$window = Start-AgentWindow $dir $prompt "$($agent.name), $as" $extra $set
 	Save-Conductor ([pscustomobject]@{ agent = $agent.name; window = $window.Id; windowStarted = (Get-ProcessStart $window.Id); pid = 0; started = ''; waiting = $false; at = (Now)
 		hooks = $hooks; opened = (Now); model = "$($agent.model)"; effort = $effort; transcript = ''; session = '' })
 	$on = @($(if ($agent.model -and $Agents[$agent.id].model) { $agent.model }), $effort) | Where-Object { $_ }
@@ -316,12 +330,21 @@ function Show-ConductorWindow {
 # so this works whatever template release the game is on.
 # Where Rocco is from where the agent runs: the conductor in repo\, a feature's own agent in its lane.
 function Get-ToolsPath { if ($script:ThreadId) { '..\..\..\_tools\rocco' } else { '..\..\_tools\rocco' } }
-function Get-WaitCommand {
-	"$(Get-ToolsPath)\rocco.ps1 wait as a background command (with Claude Code: run_in_background, and no -Timeout; an agent without background commands: -Timeout 540): it returns, and wakes you, the moment something new waits on you. Start it again each time it returns, once you have handled what it listed"
+function Get-WaitCommand([string]$agent = 'claude') {
+	$wait = "$(Get-ToolsPath)\rocco.ps1 wait"
+	if ($agent -eq 'claude') {
+		return "$wait as a background command (run_in_background, with no -Timeout). Handle what it lists when it returns, then start it again"
+	}
+	if ($agent -eq 'codex') {
+		return "$wait -Timeout 540 with exec_command. If it returns a session ID, poll it with write_stdin until the command exits. Keep the turn open while waiting. Handle what it lists and start the next wait, including after a timeout"
+	}
+	"$wait -Timeout 540 and wait for it to exit. Handle what it lists and start the next wait, including after a timeout"
 }
-function Get-WatchText {
-	if ($script:ThreadId) { "Then keep watching for what the user sends you: run $(Get-WaitCommand) ($(Get-ToolsPath)\LEAD.md)." }
-	else { "Then keep watching the Workboard: run $(Get-WaitCommand) (..\..\_tools\rocco\README.md, Commands)." }
+function Get-WatchText([bool]$codexHook = $false) {
+	if ($codexHook) { return 'After handling what is pending, finish your turn. The Rocco Stop hook watches this Workboard thread and continues your turn when something waits on you.' }
+	$wait = Get-WaitCommand (Get-Agent).id
+	if ($script:ThreadId) { "Then keep watching for what the user sends you. Run $wait. See $(Get-ToolsPath)\LEAD.md." }
+	else { "Then keep watching the Workboard. Run $wait. See ..\..\_tools\rocco\README.md, Commands." }
 }
 
 # Tasks left Working with nothing running them: a conductor that stopped mid-round (its window closed, the PC
@@ -348,10 +371,11 @@ function Request-Conductor {
 	$prompt = if ($cut.Count) {
 		"Your conductor session for this game stopped mid-round, and its workers with it: $(($cut | ForEach-Object { $_.id }) -join ', ') are still Working on the Workboard. " +
 		'Check each one''s lane (its branch, commits and uncommitted work), make sure its place is open and syncing (..\..\_tools\rocco\rocco.ps1 lanes opens whatever isn''t), and carry them on (docs/workflow/CONDUCTOR.md). ' +
-		"Handle anything else waiting on you too (rocco.ps1 list -Pending). $(Get-WatchText)"
-	} else { "You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending). $(Get-WatchText)" }
+		'Handle anything else waiting on you too (rocco.ps1 list -Pending).'
+	} else { 'You are the conductor for this game (docs/workflow/CONDUCTOR.md). Handle what waits on you on the Workboard (..\..\_tools\rocco\rocco.ps1 list -Pending).' }
 	# What Rocco itself adds to the conductor's job, whatever the game's template says (README.md "Sorting").
-	$prompt += ' Sort each new note first, as ..\..\_tools\rocco\README.md "Sorting" says: answer a question, just do an errand (nothing to test, no card kept), do a small fix, or post a plan for a feature. A feature the user approves is built by an agent of its own, which Rocco opens: its tasks never wait on you, except to be merged.'
+	$prompt += ' Sort each new note first, as ..\..\_tools\rocco\README.md "Sorting" says. Answer questions, handle errands, assign fixes, and plan features. A feature the user approves may get its own agent in a lane. Follow any game-specific workflow in docs/game/PROJECT.md when deciding how to delegate and when to merge.'
+	if (Test-RequiresLaneApproval) { $prompt += ' Every game code fix goes to a worker in a lane at the task''s tier, including small fixes. Put the checked result up for the user to try in that lane. Merge only when the user approves that card.' }
 	try { Open-Conductor $prompt | Out-Null; $agent.name } catch { '' }
 }
 

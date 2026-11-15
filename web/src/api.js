@@ -81,7 +81,6 @@ export const api = {
   setAgentModel: model => DEMO ? demo.setAgentModel(model) : post(withProject('/api/agent/model'), { model }),
   // How hard it thinks ('' for the agent's own default): low, medium, high, xhigh or max.
   setAgentEffort: effort => DEMO ? demo.setAgentEffort(effort) : post(withProject('/api/agent/effort'), { effort }),
-  setCodexConductorFullAccess: on => DEMO ? demo.setCodexConductorFullAccess(on) : post(withProject('/api/agent/codex-conductor-full-access'), { on }),
   // The user's own accounts on this PC: each agent's sign-in, Codex for images, GitHub, and the linked keys (server/accounts.ps1).
   accounts: refresh => DEMO ? demo.accounts() : getJson(`/api/accounts${refresh ? '?refresh=1' : ''}`),
   // Onboarding (server/onboarding.ps1). A game being made isn't the open project yet, so these name theirs.
@@ -98,9 +97,9 @@ export const api = {
   openLanes: (project, count = null) => DEMO ? demo.openLanes(project, count) : post(`/api/lanes?p=${encodeURIComponent(project || state.project)}`, { count }),
   // The user's agent as this project's conductor, when none is running (server/conductor.ps1): { agent }.
   openConductor: () => DEMO ? demo.openConductor() : post(withProject('/api/conductor')),
-  // A thread (server/thread.ps1): its history (only if it changed since stamp), and the user's side of it. thread:
-  // '' for the conductor's (the main chat), or the id of a feature or card with an agent of its own (server/leads.ps1).
-  conductorThread: (stamp, thread = '') => DEMO ? demo.conductorThread(stamp, thread) : getJson(withProject('/api/conductor/thread', (stamp ? `&stamp=${encodeURIComponent(stamp)}` : '') + inThread(thread))),
+  // The latest chat page (only if it changed since stamp), or the older page identified by its cursor.
+  conductorThread: (stamp, thread = '', before = '') => DEMO ? demo.conductorThread(stamp, thread, before) : getJson(withProject('/api/conductor/thread', inThread(thread) +
+    (before ? `&before=${encodeURIComponent(before)}` : stamp ? `&stamp=${encodeURIComponent(stamp)}` : ''))),
   conductorAnswer: (id, answers, text, thread = '') => DEMO ? demo.conductorAnswer(id, answers, text, thread) : post(withProject('/api/conductor/answer', inThread(thread)), { id, answers, text }),
   conductorPermission: (id, allow, thread = '') => DEMO ? demo.conductorPermission(id, allow, thread) : post(withProject('/api/conductor/permission', inThread(thread)), { id, allow }),
   // A message, with no card (an agent makes one only for work that comes of it). type: fix, question or feature, or ''

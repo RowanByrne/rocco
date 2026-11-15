@@ -27,7 +27,7 @@
   "thread": {
     "path": "/api/conductor/thread",
     "demo": "conductorThread",
-    "fields": { ".": ["stamp", "items", "steps"] }
+      "fields": { ".": ["stamp", "before", "items", "steps", "decisions", "why", "whyIds"] }
   },
   "history": {
     "path": "/api/history",

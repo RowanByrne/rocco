@@ -22,13 +22,12 @@ import { prose, proseLine } from '../prose.js';
 import { pics, picOption, openPicsFrom, sentShots, sentRow } from '../ui/pics.js';
 
 let active = '';             // the thread shown: '' for the conductor's, else the id of a feature or card with its own agent
-const threads = new Map();   // thread -> { history: { stamp, items, steps }, loading, loadError, since }
+const threads = new Map();   // thread -> current history, paging state and pending sends
 let mode = null;             // what the note box sends when it isn't a note: { kind: 'reply', to } or { kind: 'card', task }
 let decisionsOpen = false;   // a feature thread's decisions are listed
 const unfolded = new Set();  // step groups and runs of check-ins the user opened, by their first line
 const expanded = new Set();  // long messages the user opened in full
 const seen = new Set();      // open questions and requests already announced
-const whyOf = new Map();     // an open question -> what the agent said just before asking it (historyView)
 const answering = new Set(); // questions whose answers are on their way
 const stays = new Map();     // what an agent waits on, announced while its thread wasn't shown -> { thread, close }: its toast
 const deciding = new Set();  // permission requests whose answer is on its way
@@ -87,7 +86,11 @@ const opened = () => (conductor().open || []);
 const openAsks = () => opened().filter(e => e.kind === 'asked');
 const openPermissions = () => opened().filter(e => e.kind === 'permission');
 // outbox: what the user sent in it that the thread doesn't have yet (sendMessage).
-const view = (id = active) => { let v = threads.get(id); if (!v) threads.set(id, v = { history: null, loading: false, loadError: '', since: '', outbox: [] }); return v; };
+const view = (id = active) => {
+  let v = threads.get(id);
+  if (!v) threads.set(id, v = { history: null, loading: false, loadError: '', since: '', outbox: [], older: null, pages: [], pageRequest: null, pageError: '' });
+  return v;
+};
 // A picture on one of this thread's questions.
 const fileOf = rel => api.conductorFile(rel, active);
 
@@ -264,7 +267,7 @@ function askCard(ask) {
   const pictured = (q.options || []).some(o => o.image);
   return html`<div class="c-ask${ask.expired ? ' late' : ''}" data-ask-card=${ask.id}><div class="c-ask-head"><span class="c-who">Rocco asks</span>${q.header ? html`<span class="c-tag">${q.header}</span>` : nothing}${
     ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${proseLine(q.text)}</div>${
-    whyOf.get(ask.id) && !i ? html`<details class="c-why"><summary>Why Rocco asks</summary><div class="prose">${prose(whyOf.get(ask.id))}</div></details>` : nothing}<div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(fileOf))}${
+    view().history?.why?.[ask.id] && !i ? html`<details class="c-why"><summary>Why Rocco asks</summary><div class="prose">${prose(view().history.why[ask.id])}</div></details>` : nothing}<div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(fileOf))}${
     q.options?.length ? html`<div class="opts${pictured ? ' with-pics' : ''}">${q.options.map(opt)}</div>` : nothing
   }</div><div class="c-reply"><textarea data-c-input=${ask.id} rows="1" placeholder=${q.options?.length ? (q.multi ? 'Tick some, or type your answer' : 'Or type your answer') : 'Type your answer'} aria-label="Your answer to Rocco" .value=${live(typedOf(ask.id))}></textarea><button type="button" class="send round" data-c-send=${ask.id} title="Send your answer" aria-label="Send your answer">${SEND_ICON}</button></div><div class="ask-foot">${
     q.multi ? html`<button class="btn-sm go" data-c-multi=${ask.id} ?disabled=${!ticked.length}>Send these</button>` : nothing
@@ -338,6 +341,7 @@ export function openThread(id) {
   if (id && !leadOf(id)) id = '';
   if (id === active) return;
   markSeen(active);
+  clearHistoryPage(view());
   active = id;
   // Its questions are on the page now: their toasts have said what they had to.
   for (const [key, s] of stays) if (s.thread === id) { s.close(); stays.delete(key); }
@@ -367,7 +371,9 @@ function stepsOf(plan) {
 
 // Questions asked and answered in this thread: the feature's decisions.
 const decisions = () => {
-  const items = view().history?.items || [];
+  const history = view().history;
+  if (history?.decisions) return history.decisions;
+  const items = history?.items || [];
   return items.filter(e => e.kind === 'asked').flatMap(e => {
     const reply = items.find(x => x.kind === 'answered' && x.to === e.id);
     return reply ? e.questions.map((q, i) => ({ at: reply.at, q: q.text, a: reply.answers?.[i] ?? '' })) : [];
@@ -506,7 +512,7 @@ function taskChip(id, title = '', typed = '') {
 // "Reply" on a line about a card: what's typed next goes to that card (sent back if it's waiting to be tested).
 const replyTo = id => { const t = byId(id); return t && !['done', 'removed', 'inbox'].includes(t.status) && t.kind !== 'plan' ? html`<button class="linkish h-reply" data-reply-card=${id}>Reply</button>` : nothing; };
 
-function row(e, all, prev = '') {
+function row(e, related, prev = '') {
   const at = html`<span class="h-at">${hhmm(e.at)}</span>`;
   const task = e.task || undefined; // a row about a task opens it
   switch (e.kind) {
@@ -518,8 +524,10 @@ function row(e, all, prev = '') {
     case 'message': {
       // Rocco's own word to the agent (Fix lanes): a line, in the words meant for the user.
       if (e.who === 'rocco') return html`<div class="h-event"><span class="h-dot"></span><span class="h-line">${e.line || e.text}</span>${at}</div>`;
+      // One agent to another (rocco.ps1 tell): a line, with the words on hover. Never the user's side of the chat.
+      if (e.who === 'agent') return html`<div class="h-event" title=${e.text || ''}><span class="h-dot"></span><span class="h-line">${e.line || 'Agents talking'}</span>${at}</div>`;
       // A message is just a message: a card shows under it only once the agent makes one from it (rocco.ps1 new -From).
-      const made = all.filter(x => x.kind === 'made' && x.to === e.id);
+      const made = related.get('made') || [];
       return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${KIND[e.type] ? html`<span>${KIND[e.type]}</span>` : nothing}${
         made.map(x => taskChip(x.task, x.title, e.text))}${at}`, (e.shots || []).map(fileOf));
     }
@@ -532,7 +540,7 @@ function row(e, all, prev = '') {
       return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span>${e.title || ''}</span>`}${at}</div></div>`;
     }
     case 'asked': {
-      const reply = all.find(x => x.kind === 'answered' && x.to === e.id);
+      const reply = related.get('answered')?.[0];
       // Still open: it's asked under the chat, with its own answer box. Here, just a line that says so.
       if (!reply) return html`<div class="h-event asking"><span class="h-dot"></span><span class="h-line">Waiting for your answer below</span>${at}</div>`;
       return html`<div class="h-msg them"><div class="h-body"><div class="h-head"><span class="h-act ask">Asked</span>${at}</div>${e.questions.map((q, i) => {
@@ -542,7 +550,7 @@ function row(e, all, prev = '') {
       })}</div></div>`;
     }
     case 'permission': {
-      const d = all.find(x => x.kind === 'decided' && x.to === e.id), gone = all.find(x => x.kind === 'expired' && x.to === e.id);
+      const d = related.get('decided')?.[0], gone = related.get('expired')?.[0];
       const verdict = d ? (d.allow ? 'Allowed' : 'Denied') : gone ? 'Asked in its window' : 'Waiting for your OK';
       return html`<div class="h-event perm"><span class="h-dot"></span><span class="h-line">${e.worker ? 'A worker' : 'Rocco'} asked to: ${e.text}</span><span class="h-verdict v-${d ? (d.allow ? 'yes' : 'no') : 'wait'}">${verdict}</span>${at}</div>`;
     }
@@ -601,40 +609,58 @@ function stepGroup(group) {
     open ? html`<ul>${group.map(s => html`<li><span class="h-at">${hhmm(s.at)}</span>${s.text}</li>`)}</ul>` : nothing}</div>`;
 }
 
+function historyNav(v, history) {
+  if (!history.before && !v.older && !v.pageError) return nothing;
+  return html`<div class="h-history-nav${v.older ? ' browsing' : ''}" role="group" aria-label="Chat history">
+    ${history.before ? html`<button type="button" class="btn-sm" data-older-history ?disabled=${!!v.pageRequest}>Older messages</button>` : nothing}
+    ${v.pages.length > 1 ? html`<button type="button" class="btn-sm" data-newer-history ?disabled=${!!v.pageRequest}>Newer messages</button>` : nothing}
+    ${v.older ? html`<button type="button" class="btn-sm" data-latest-history>Back to latest</button>` : nothing}
+    ${v.pageRequest || v.pageError ? html`<span role="status">${v.pageRequest ? 'Loading…' : v.pageError}</span>` : nothing}
+  </div>`;
+}
+
+const relationshipKinds = new Set(['answered', 'decided', 'expired', 'made']);
+const noRelationships = new Map();
+
 function historyView() {
-  const v = view(), history = v.history;
+  const v = view(), history = v.older || v.history;
   const failed = v.loadError ? html`<div class="load-error">${icon.alert}<span>Couldn't load the chat: ${v.loadError}</span><button class="btn-sm" data-history-retry>Retry</button></div>` : nothing;
   if (!history) return v.loadError ? failed : html`<div class="h-empty"><span class="spin"></span>Loading</div>`;
   // What was sent and is in the thread now is drawn from the thread; the rest is still on its way, at the end.
-  v.outbox = v.outbox.filter(o => !arrived(o, history.items));
-  const sending = v.outbox.map(o => yours(o.text, html`${o.kind === 'sent' ? html`<span>${SAID[o.act]}</span>${taskChip(o.task, o.title)}` : KIND[o.type] ? html`<span>${KIND[o.type]}</span>` : nothing}<span class="h-sending">${o.done ? 'Sent' : 'Sending'}</span>`, o.shots || []));
-  // 'made': which card came of a message, shown under it.
-  const items = history.items.filter(e => !['answered', 'decided', 'expired', 'handled', 'made'].includes(e.kind));
+  if (v.history) v.outbox = v.outbox.filter(o => !arrived(o, v.history.items));
+  const sending = v.older ? [] : v.outbox.map(o => yours(o.text, html`${o.kind === 'sent' ? html`<span>${SAID[o.act]}</span>${taskChip(o.task, o.title)}` : KIND[o.type] ? html`<span>${KIND[o.type]}</span>` : nothing}<span class="h-sending">${o.done ? 'Sent' : 'Sending'}</span>`, o.shots || []));
+  const nav = historyNav(v, history);
+  // Index the lines that annotate another row once per page, rather than scanning for them on each row.
+  const related = new Map();
+  const items = history.items.filter(e => {
+    if (e.kind === 'handled') return false;
+    if (!relationshipKinds.has(e.kind)) return true;
+    let byKind = related.get(e.to);
+    if (!byKind) related.set(e.to, byKind = new Map());
+    let entries = byKind.get(e.kind);
+    if (!entries) byKind.set(e.kind, entries = []);
+    entries.push(e);
+    return false;
+  });
   if (!items.length && !history.steps.length && !sending.length) {
-    return html`<div class="h-empty">${active ? "Nothing here yet. What this feature's agent does and says shows here, and what you type goes straight to it."
+    return html`${nav}<div class="h-empty">${v.older ? 'No messages remain on this page.' : active ? "Nothing here yet. What this feature's agent does and says shows here, and what you type goes straight to it."
       : 'Tell Rocco what you noticed, ask it something, or describe a feature. What it does and says shows here, with a line for each card as it moves.'}</div>${failed}`;
   }
   // What the agent said just before a question that's still open is that question's reasons: it goes with the
   // question, under the chat ("Why"), so the chat doesn't say it twice. Once it's answered, the chat has it again.
-  const answeredTo = new Set(history.items.filter(x => x.kind === 'answered').map(x => x.to));
-  const hidden = new Set();
-  whyOf.clear();
-  items.forEach((e, i) => {
-    if (e.kind !== 'asked' || answeredTo.has(e.id)) return;
-    const before = items.slice(0, i).reverse().find(x => !isIdle(x));
-    if (before?.kind === 'said' && Date.parse(e.at) - Date.parse(before.at) < 10 * 60e3) { hidden.add(before.id); whyOf.set(e.id, before.text); }
-  });
+  const hidden = new Set(Object.values(v.history?.whyIds || {}));
   // A card that came from something you typed shows where it is under your message, so "Started: ..." about it
   // says nothing new. The lines that need you (ready to test, an answer) stay.
   const yoursTasks = new Set([...items.filter(e => e.kind === 'sent' && (e.act === 'note' || e.act === 'question') && e.task).map(e => e.task),
     ...history.items.filter(e => e.kind === 'made').map(e => e.task)]);
   for (const e of items) if (e.kind === 'event' && e.task && yoursTasks.has(e.task) && /^Started\b/.test(e.text || '')) hidden.add(e.id);
-  const rows = [...items.filter(e => !hidden.has(e.id)).map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const rows = [...items.filter(e => !hidden.has(e.id)).map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))];
+  rows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const out = [];
   let prev = ''; // the card the last line was about: a message about it right after doesn't name it again
   let group = [], day = '', idle = null; // idle: the run of check-ins being read, and the steps since its last one
-  let marked = !v.since || !rows.some(r => String(r.at) <= v.since); // "new" is marked once, and never above everything
-  const flushSteps = () => { if (group.length) { out.push(stepGroup(group)); group = []; } };
+  let marked = !!v.older || !v.since || !rows.some(r => String(r.at) <= v.since); // "new" is marked once, and never above everything
+  const flushSteps = () => { if (group.length) { out.push({ key: `steps:${group[0].at}`, body: stepGroup(group) }); group = []; } };
   // Check-ins with nothing new are Rocco's own bookkeeping: they aren't shown, nor the steps between them.
   const flushIdle = () => {
     if (!idle) return;
@@ -647,14 +673,14 @@ function historyView() {
       flushIdle();
       flushSteps();
       day = d;
-      out.push(html`<div class="h-day"><span>${d === new Date().toDateString() ? 'Today' : new Date(r.at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>`);
+      out.push({ key: `day:${d}`, body: html`<div class="h-day"><span>${d === new Date().toDateString() ? 'Today' : new Date(r.at).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>` });
     }
     // The first thing from the agent since the thread was last looked at.
     if (!marked && String(r.at) > v.since && r.e && r.e.who !== 'you' && !isIdle(r.e)) {
       flushIdle();
       flushSteps();
       marked = true;
-      out.push(html`<div class="h-new" id="chatNew"><span>New since you were last here</span></div>`);
+      out.push({ key: 'new', body: html`<div class="h-new" id="chatNew"><span>New since you were last here</span></div>` });
     }
     if (r.s) { (idle ? idle.after : group).push(r.s); continue; }
     if (isIdle(r.e)) {
@@ -664,33 +690,27 @@ function historyView() {
     }
     flushIdle();
     flushSteps();
-    out.push(row(r.e, history.items, prev));
+    out.push({ key: r.e.id, body: row(r.e, related.get(r.e.id) || noRelationships, prev) });
     prev = r.e.task || '';
   }
   flushIdle();
   // The steps it's still taking are the live line's while it works: they fold into the chat once it's done.
-  if (conductor().state !== 'busy') flushSteps();
+  if (v.older || conductor().state !== 'busy') flushSteps();
   // At the end: what you just sent, then what the agent is doing now, kept current every second (liveView).
-  return html`${out}${sending}${failed}<div class="h-live" id="chatLive"></div>`;
+  return html`${nav}${repeat(out, r => r.key, r => r.body)}${sending}${v.older ? nothing : html`${failed}<div class="h-live" id="chatLive"></div>`}`;
 }
 
-// ---- What it's doing right now, at the end of the chat ----
-// "··· Reading CarEntry.luau, editing CarEntry.luau, using Studio … 1m 27s": while the agent is at work, its last few
-// steps in a few words, and how long it has been at it since it last said something or you last wrote.
-
-const lower = s => s ? s[0].toLowerCase() + s.slice(1) : s;
+// ---- What it's doing right now, at the end of the live chat ----
 const took = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
 function liveView() {
   const c = conductor(), history = view().history;
   if (c.state !== 'busy' || !history || openAsks().length || openPermissions().length) return nothing;
-  // Since the last thing said, by either of you.
-  const since = history.items.filter(e => e.who === 'you' || e.kind === 'said').reduce((a, e) => (String(e.at) > a ? String(e.at) : a), '');
-  const steps = history.steps.filter(s => String(s.at) > since);
-  const names = [...new Set(steps.map(s => s.text).filter(Boolean).reverse())].slice(0, 3).reverse();
-  if (!names.length && c.doing) names.push(c.doing);
-  const from = Date.parse(steps[0]?.at || since) || Date.now();
-  return html`<span class="live-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="live-text">${names.length ? names.map((n, i) => i ? lower(n) : n).join(', ') : 'Working'} …</span><span class="live-time">${took(Date.now() - from)}</span>`;
+  // The clock belongs to the displayed action. New chat messages never start it over.
+  const step = history.steps.at(-1);
+  const from = c.doing && Date.parse(c.doingAt || (step?.text === c.doing ? step.at : ''));
+  return html`<span class="live-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="live-text">${c.doing || 'Working'} …</span>${
+    from ? html`<span class="live-time">${took(Date.now() - from)}</span>` : nothing}`;
 }
 
 function renderLive() {
@@ -704,19 +724,56 @@ function renderLive() {
 
 let lastState = ''; // the agent's state at the last draw (renderConductor)
 let toEnd = false; // the next draw ends at the chat's end, whatever was scrolled (the user just sent something)
-function stickToEnd() { toEnd = true; renderHistory(); }
+function clearHistoryPage(v) {
+  v.older = null;
+  v.pages = [];
+  v.pageRequest = null;
+  v.pageError = '';
+}
+
+function stickToEnd() { clearHistoryPage(view()); toEnd = true; renderHistory(); }
 
 // fresh: the thread was just opened. It starts at what's new, or at its end.
 function renderHistory(fresh = false) {
-  const list = $('#condList');
-  const atEnd = toEnd || fresh || list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+  const list = $('#condList'), v = view();
+  const atEnd = !v.older && (toEnd || fresh || list.scrollHeight - list.scrollTop - list.clientHeight < 60);
   toEnd = false;
+  const history = v.history;
   render(historyView(), list);
   renderLive();
-  const mark = fresh && list.querySelector('#chatNew');
+  const mark = fresh && !v.older && list.querySelector('#chatNew');
   if (mark) mark.scrollIntoView({ block: 'start' });
   else if (atEnd) list.scrollTop = list.scrollHeight;
-  if (view().history) markSeen(active);
+  if (history && !v.older) markSeen(active);
+}
+
+// Keep one older page and a trail of cursors. Going back through the trail reloads that page from disk.
+async function loadHistoryPage(v, pages) {
+  if (v.pageRequest) return;
+  const thread = active, request = {};
+  const list = $('#condList'), focus = document.activeElement, restoreFocus = list.contains(focus);
+  v.pageRequest = request;
+  v.pageError = '';
+  renderHistory();
+  const current = () => active === thread && threads.get(thread) === v && v.pageRequest === request;
+  try {
+    const page = await api.conductorThread('', thread, pages.at(-1));
+    if (!current()) return;
+    v.older = page;
+    v.pages = pages;
+    v.pageRequest = null;
+    renderHistory();
+    list.scrollTop = 0;
+    if (restoreFocus && (document.activeElement === focus || document.activeElement === document.body)) {
+      const control = list.querySelector('[data-older-history], [data-newer-history], [data-latest-history]');
+      (control || list).focus({ preventScroll: true });
+    }
+  } catch (e) {
+    if (!current()) return;
+    v.pageRequest = null;
+    v.pageError = `Couldn't load chat history: ${e.message}`;
+    renderHistory();
+  }
 }
 
 async function loadHistory() {
@@ -728,9 +785,13 @@ async function loadHistory() {
     const hadError = !!v.loadError, wasEmpty = !v.history;
     v.loadError = '';
     if (!r.same) v.history = r;
-    if (id === active && (!r.same || hadError)) { renderHistory(wasEmpty); renderHead(); renderAsks(); }
+    if (id === active && threads.get(id) === v && (!r.same || hadError)) {
+      if (!v.older) renderHistory(wasEmpty);
+      renderHead();
+      renderAsks();
+    }
   } catch (e) {
-    if (v.loadError !== e.message) { v.loadError = e.message; if (id === active) renderHistory(); }
+    if (v.loadError !== e.message) { v.loadError = e.message; if (id === active && threads.get(id) === v && !v.older) renderHistory(); }
   }
   v.loading = false;
 }
@@ -796,7 +857,9 @@ function renderAll() {
 
 export function renderConductor() {
   // A thread whose feature is finished or deleted is gone: back to the conductor's.
-  if (active && !leadOf(active) && 'stamp' in (state.meta.conductor || {})) { active = ''; view().since = seenAt(''); emit('thread'); }
+  if (active && !leadOf(active) && 'stamp' in (state.meta.conductor || {})) {
+    clearHistoryPage(view()); active = ''; view().since = seenAt(''); renderHistory(true); emit('thread');
+  }
   // A question that's gone (answered elsewhere) leaves nothing behind. Not before its state has loaded, or what was
   // being typed when the page reloaded would go too.
   if ('stamp' in (state.meta.conductor || {})) {
@@ -810,7 +873,7 @@ export function renderConductor() {
   const v = view();
   if (v.history?.stamp !== conductor().stamp || v.loadError || !v.history) loadHistory();
   // It stopped or started working: its last steps move between the live line and the chat.
-  else if (lastState !== conductor().state) renderHistory();
+  else if (!v.older && lastState !== conductor().state) renderHistory();
   lastState = conductor().state;
 }
 
@@ -907,7 +970,16 @@ export function initConductor() {
   });
   $('#condList').addEventListener('click', e => {
     const hit = s => e.target.closest(s);
-    if (hit('[data-pic-src]')) openPicsFrom(hit('[data-pic-src]'), null);
+    if (hit('[data-older-history]')) {
+      const v = view(), before = (v.older || v.history)?.before;
+      if (before) loadHistoryPage(v, [...v.pages, before]);
+    } else if (hit('[data-newer-history]')) {
+      const v = view();
+      if (v.pages.length > 1) loadHistoryPage(v, v.pages.slice(0, -1));
+    } else if (hit('[data-latest-history]')) {
+      stickToEnd();
+      $('#condList').focus({ preventScroll: true });
+    } else if (hit('[data-pic-src]')) openPicsFrom(hit('[data-pic-src]'), null);
     else if (hit('[data-steps]')) {
       const key = hit('[data-steps]').dataset.steps;
       if (unfolded.has(key)) unfolded.delete(key); else unfolded.add(key);
@@ -929,7 +1001,7 @@ export function initConductor() {
   const list = $('#condList');
   let pinned = true;
   list.addEventListener('scroll', () => { pinned = list.scrollHeight - list.scrollTop - list.clientHeight < 60; }, { passive: true });
-  new ResizeObserver(() => { if (pinned) list.scrollTop = list.scrollHeight; }).observe(list);
+  new ResizeObserver(() => { if (pinned && !view().older) list.scrollTop = list.scrollHeight; }).observe(list);
   // Looked at again after being away: what came in meanwhile is marked, once.
   document.addEventListener('visibilitychange', () => { if (document.hidden) view().since = new Date().toISOString(); else renderHistory(); });
 }

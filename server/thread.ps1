@@ -259,13 +259,80 @@ function Limit-Thread {
 
 # ---- What the history shows ----
 
-# The thread and steps of the last few days, and a stamp that changes when either does.
-function Get-ConductorHistory {
+# Show a page of messages and the most recent tool steps in that interval. The cursor names the boundary message
+# by time and ID, so appends and the weekly trim do not move it. Messages sharing a time keep their file order.
+$HistoryPageSize = 50
+$HistoryStepLimit = 150
+function Get-ConductorHistory([string]$before = '') {
 	Limit-Thread
-	$since = (Get-Date).AddDays(-7)
-	$items = @(Get-Thread | Where-Object { $_.kind -ne 'handled' -and [datetime]$_.at -gt $since } | Select-Object -Last 400)
-	$steps = @(Get-Activity | Where-Object { [datetime]$_.at -gt $since } | Select-Object -Last 2000)
-	[pscustomobject]@{ stamp = (Get-HistoryStamp); items = $items; steps = $steps }
+	# Capture before reading so an append between the two reads can't be skipped on the next poll.
+	$stamp = Get-HistoryStamp
+	$since = [DateTimeOffset]::Now.AddDays(-7).UtcTicks
+	$rows = @(Get-Thread)
+	$upper = [long]::MaxValue
+	$upperId = ''; $upperIndex = 0
+	if ($before) {
+		$time, $upperId = $before -split '\.', 2
+		$upper = [long]$time
+	}
+	$related = @{}
+	for ($index = 0; $index -lt $rows.Count; $index++) {
+		$row = $rows[$index]
+		if ($upperId -and $row.id -eq $upperId -and $upper -eq ([DateTimeOffset]$row.at).UtcTicks) { $upperIndex = $index }
+		if ($row.kind -in 'made', 'answered', 'decided', 'expired' -and $row.to) {
+			if (-not $related.ContainsKey($row.to)) { $related[$row.to] = [Collections.Generic.List[object]]::new() }
+			$related[$row.to].Add($row)
+		}
+	}
+	$messages = [Collections.Generic.SortedList[string,object]]::new([StringComparer]::Ordinal)
+	$why = @{}; $whyIds = @{}
+	$decisions = [Collections.Generic.List[object]]::new()
+	$previous = $null
+	for ($index = 0; $index -lt $rows.Count; $index++) {
+		$row = $rows[$index]
+		if ($row.kind -in 'made', 'answered', 'decided', 'expired', 'handled') { continue }
+		try { $at = ([DateTimeOffset]$row.at).UtcTicks } catch { continue }
+		if (-not $before) {
+			if ($row.kind -eq 'asked') {
+				$answer = $related[$row.id] | Where-Object kind -eq 'answered' | Select-Object -First 1
+				if ($answer -and $script:ThreadId -and ([DateTimeOffset]$answer.at).UtcTicks -gt $since) {
+					for ($question = 0; $question -lt $row.questions.Count; $question++) {
+						$decisions.Add([pscustomobject]@{ at = $answer.at; q = $row.questions[$question].text; a = @($answer.answers)[$question] })
+					}
+				} elseif (-not $answer -and $previous.kind -eq 'said' -and $at - $previousAt -lt [TimeSpan]::FromMinutes(10).Ticks) {
+					$why[$row.id] = $previous.text
+					$whyIds[$row.id] = $previous.id
+				}
+			}
+			# The chat folds away check-ins such as 'Still watching the board.' (conductor.js).
+			if ($row.kind -ne 'said' -or ([string]$row.text).Trim() -notmatch '^(still |back to )?(watching|listening|waiting|standing by)\b[^\n]{0,70}$') {
+				$previous = $row
+				$previousAt = $at
+			}
+		}
+		if ($at -le $since -or $at -gt $upper -or ($at -eq $upper -and $index -ge $upperIndex)) { continue }
+		$key = '{0:D19}.{1:D10}' -f $at, $index
+		$messages.Add($key, $row)
+		# Keep one extra row to tell whether there's more to load.
+		if ($messages.Count -gt $HistoryPageSize + 1) { $messages.RemoveAt(0) }
+	}
+
+	$start = [Math]::Max(0, $messages.Count - $HistoryPageSize)
+	$cursor = if ($start -gt 0) { $messages.Keys[$start].Substring(0, 19) + '.' + $messages.Values[$start].id } else { $null }
+	$items = @(for ($index = $start; $index -lt $messages.Count; $index++) {
+		$row = $messages.Values[$index]
+		$row
+		if ($row.id -and $related.ContainsKey($row.id)) { $related[$row.id] }
+	})
+	$lower = if ($cursor) { [long]$cursor.Substring(0, 19) } else { $since }
+	$steps = @(foreach ($step in (Get-Activity)) {
+		try { $at = ([DateTimeOffset]$step.at).UtcTicks } catch { continue }
+		if ($at -ge $lower -and $at -lt $upper) { $step }
+	})
+	[pscustomobject]@{
+		stamp = $stamp; before = $cursor; items = $items; steps = @($steps | Select-Object -Last $HistoryStepLimit)
+		decisions = @($decisions.ToArray()); why = $why; whyIds = $whyIds
+	}
 }
 
 function Get-HistoryStamp {
@@ -298,12 +365,16 @@ function Format-ThreadItem($e, $s) {
 	$one = { param($t) $t = (([string]$t) -replace '\s+', ' ').Trim(); if ($t.Length -gt 160) { $t.Substring(0, 157) + '...' } else { $t } }
 	if ($e.kind -eq 'message') {
 		$n = @($e.shots | Where-Object { $_ }).Count
+		if ($e.who -eq 'agent') { return '{0}  [message]  from {1}: {2}' -f $e.id, (Get-AgentSender $e), (& $one $e.text) }
 		return '{0}  [message]  {1}{2}{3}' -f $e.id, $(if ($e.type) { "($(Get-MessageKind $e.type)) " }), (& $one $e.text), $(if ($n) { " (+$n screenshot$(if ($n -gt 1) { 's' }))" })
 	}
 	$q = $s.asked[$e.to]
 	$question = if ($q) { (@($q.questions) | ForEach-Object { $_.text }) -join ' / ' } else { '' }
 	'{0}  [answer]   {1} -> {2}' -f $e.id, (& $one $question), (& $one ((@($e.answers) | Where-Object { "$_" }) -join ' / '))
 }
+
+# Who sent an agent's message (rocco.ps1 tell): the conductor, or a feature's own agent.
+function Get-AgentSender($e) { if ($e.from -eq 'conductor') { 'the conductor' } else { "the $($e.from) agent, not the user" } }
 
 # What the user said a message is (the note box's Fix, Ask or Feature), in the agent's words.
 function Get-MessageKind([string]$type) {
@@ -321,7 +392,7 @@ function Show-ThreadItem([string]$id) {
 	$time = ([datetime]$e.at).ToString('HH:mm')
 	switch ($e.kind) {
 		'message' {
-			"$($e.id)  message from $(if ($e.who -eq 'rocco') { 'Rocco itself (Fix lanes)' } else { 'the user' }), $time$(if ($e.to) { ", replying to $($e.to)" })$(if ($e.type) { ". They said it's $(Get-MessageKind $e.type)" })"
+			"$($e.id)  message from $(if ($e.who -eq 'rocco') { 'Rocco itself (Fix lanes)' } elseif ($e.who -eq 'agent') { Get-AgentSender $e } else { 'the user' }), $time$(if ($e.to) { ", replying to $($e.to)" })$(if ($e.type) { ". They said it's $(Get-MessageKind $e.type)" })"
 			$e.text
 			$shots = @($e.shots | Where-Object { $_ })
 			if ($shots.Count) {

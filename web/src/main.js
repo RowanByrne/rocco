@@ -54,7 +54,7 @@ on('updates', renderUpdates);
 on('thumbs', renderThumbnails);
 on('settings', () => { renderSettings(); renderWorkboard(); });
 // This PC's agent changed (Settings), or loaded: everything that names it.
-on('agent', () => { renderSettings(); renderWorkboard(); renderConductor(); renderDocs(); renderUpdates(); renderThumbnails(); renderConnections(); renderMe(); loadConnections(true); });
+on('agent', () => { renderSettings(); renderSidebar(); renderWorkboard(); renderConductor(); renderDocs(); renderUpdates(); renderThumbnails(); renderConnections(); renderMe(); loadConnections(true); });
 on('open-task', id => { go('workboard'); openTask(id); }); // a desktop notification was clicked, or a card named in the chat
 on('open-card', id => { go('workboard'); openTask(id, true); }); // the card itself, of something that has a thread (its plan)
 on('open-project', id => switchProject(id)); // another project wants the user (sync.js), and they went to it

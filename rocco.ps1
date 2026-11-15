@@ -24,6 +24,8 @@
 #                                      user, above their note box; wait returns the answer ([answer] C-xxxxxx)
 #   rocco.ps1 doing "Merging the trade window"   what the conductor is doing now: Rocco's status line
 #   rocco.ps1 say -Text "..."          a message to the user (a report, anything you'd tell them): Rocco's history
+#   rocco.ps1 tell [T-020] -Text "..."   one agent to another, never as the user: a feature's agent to the conductor
+#                                      (no id), the conductor to a feature's agent (its id). Its wait hands it over as a [message]
 #   rocco.ps1 reply T-012 -Text "..."   answer the user: a question card shows it under the note box (and turns
 #                                      answered); on any other card it goes in the card's session, which stays put
 #   rocco.ps1 set T-012 -Status working -Lane 3 -Step "Coding" [-Progress 40] [-Branch agent/x]
@@ -43,8 +45,8 @@
 #   rocco.ps1 show C-1a2b3c / clear C-1a2b3c   a message or answer the user sent the conductor; clear: it's read
 #   rocco.ps1 wait [-Timeout 540]      the conductor watching the board: returns when something waits on it (as list
 #                                      -Pending), or after -Timeout seconds. Rocco shows it listening meanwhile
-#   rocco.ps1 hook permission|question|stop   Claude Code's hooks, for a conductor Rocco opened (server\conductor.ps1).
-#                                      stop: it can't end a turn while something waits on it, or with no wait running
+#   rocco.ps1 hook permission|question|stop|codex-stop   Hooks for an agent Rocco opened (server\conductor.ps1).
+#                                      codex-stop watches the board before the turn can end
 #   rocco.ps1 lanes [-Count 3]         open this PC's lanes: makes any missing lane, the Main and lane places, starts
 #                                      Lync for each (no window) and opens them in Studio. -Count: record this PC's number first
 param(
@@ -68,7 +70,7 @@ $AppDir = $PSScriptRoot
 # Kept before the parts load: they keep the thread in use under the same name (core.ps1 Use-Thread), and start with none.
 $named = $ThreadId
 # An agent's command loads only what the board needs: it runs many of these, and each starts PowerShell afresh.
-$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
+$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
 	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes' }
 foreach ($part in $parts) { . (Join-Path $AppDir "server\$part.ps1") }
 
@@ -147,6 +149,45 @@ function Get-PendingTasks {
 function Write-Pending($rows, $thread) {
 	if (@($rows).Count) { Format-Tasks $rows }
 	foreach ($e in $thread.pending) { Format-ThreadItem $e $thread }
+}
+
+function Wait-Pending([int]$seconds) {
+	$deadline = if ($seconds -gt 0) { (Get-Date).AddSeconds($seconds) } else { [datetime]::MaxValue }
+	$beat = [datetime]::MinValue
+	try {
+		while ($true) {
+			$rows = @(Get-PendingTasks)
+			$thread = Get-ThreadState
+			if ($rows.Count -or $thread.pending.Count) { return @{ tasks = $rows; thread = $thread } }
+			if ((Get-Date) -ge $deadline) { return }
+			if (((Get-Date) - $beat).TotalSeconds -ge 5) { Register-Waiting $true; $beat = Get-Date }
+			Start-Sleep -Seconds 2
+		}
+	} finally { Register-Waiting $false }
+}
+
+# Codex does not start a turn when a background command returns. Its synchronous Stop hook watches the board
+# before the turn ends, then gives Codex the pending work as a continuation. Keep the hook's own timeout outside this wait.
+function Wait-CodexStop($in) {
+	$waiting = Wait-Pending $(if ($Timeout -gt 0) { $Timeout } else { 3570 })
+	if (-not $waiting) {
+		$reason = 'Rocco is still waiting for work. End your turn so the Stop hook can continue watching the Workboard.'
+	} else {
+		$items = (Write-Pending $waiting.tasks $waiting.thread) -join "`n"
+		$reason = "The Rocco Workboard has work for you. Show each pending item and handle it before ending your turn again:`n$items"
+		# An unchanged item after repeated continuations can be blocked on something the hook cannot resolve.
+		$state = Join-Path (Get-ThreadDir) 'codex-stop-check.json'
+		$last = if ($in.stop_hook_active -and (Test-Path -LiteralPath $state)) {
+			try { [IO.File]::ReadAllText($state, $Utf8) | ConvertFrom-Json } catch { }
+		}
+		$tries = if ($last.turn -eq $in.turn_id -and $last.items -ceq $items) { [int]$last.tries + 1 } else { 1 }
+		if ($tries -gt 3) {
+			Add-Event 'Codex stopped with work still waiting. Use Restart it to pick up the Workboard.'
+			return
+		}
+		[IO.File]::WriteAllText($state, (ConvertTo-Json -Compress @{ turn = $in.turn_id; items = $items; tries = $tries }), $Utf8)
+	}
+	ConvertTo-Json -Compress -InputObject ([ordered]@{ decision = 'block'; reason = $reason })
 }
 # The conductor ending a turn (Claude Code's Stop hook, for a conductor Rocco opened): not while something waits on it,
 # and not with nothing watching the board, or the user's next note sits unseen until they prompt it. Says what to do
@@ -281,18 +322,9 @@ switch ($Command) {
 	# The conductor between jobs: returns as soon as the user hands something over. Rocco shows it listening meanwhile,
 	# and opens no other conductor.
 	'wait' {
-		$deadline = if ($Timeout -gt 0) { (Get-Date).AddSeconds($Timeout) } else { [datetime]::MaxValue }
-		$beat = [datetime]::MinValue
-		try {
-			while ($true) {
-				$rows = @(Get-PendingTasks)
-				$thread = Get-ThreadState
-				if ($rows.Count -or $thread.pending.Count) { $PendingHead; Write-Pending $rows $thread; break }
-				if ((Get-Date) -gt $deadline) { 'Nothing new yet. Run wait again.'; break }
-				if (((Get-Date) - $beat).TotalSeconds -ge 5) { Register-Waiting $true; $beat = Get-Date }
-				Start-Sleep -Seconds 2
-			}
-		} finally { Register-Waiting $false }
+		$waiting = Wait-Pending $Timeout
+		if ($waiting) { $PendingHead; Write-Pending $waiting.tasks $waiting.thread }
+		else { 'Nothing new yet. Run wait again.' }
 	}
 
 	'lanes' {
@@ -502,7 +534,14 @@ switch ($Command) {
 		if ($Order -ge 0) { Set-Field $t 'order' $Order }
 		Set-Common $t
 		# Where to test it is checked against git: an agent with an old picture can't send the user to the wrong place.
-		if ($t.status -eq 'ready' -and ($Status -eq 'ready' -or $PSBoundParameters.ContainsKey('Where') -or $PSBoundParameters.ContainsKey('Branch'))) { Assert-TestPlace $t }
+		$testing = $t.status -eq 'ready' -and ($Status -eq 'ready' -or $PSBoundParameters.ContainsKey('Where') -or $PSBoundParameters.ContainsKey('Branch'))
+		$markingDone = $Status -eq 'done' -and $before -ne 'done'
+		if (($testing -or $markingDone) -and $t.branch -and $t.lane -and (Test-RequiresLaneApproval)) {
+			if ($NothingToTest -or $markingDone) { throw "$($t.id) needs the user's approval in its lane. Set it ready with test instructions and wait for the user to approve it on the Workboard." }
+			if ($Status -eq 'ready' -and -not $PSBoundParameters.ContainsKey('Where')) { Set-Field $t 'where' 'lane' }
+			if ($t.where -ne 'lane') { throw "$($t.id) needs the user's approval in its lane. Use -Where lane and merge only after approval." }
+		}
+		if ($testing) { Assert-TestPlace $t }
 		if ($Status -eq 'ready') { Set-Field $t 'nothingToTest' ([bool]$NothingToTest) }
 		# Approved as the user's Approve would: done, and on its branch the conductor merges it. There's no Undo: they
 		# didn't click anything. (A setup card is done already: it approves itself.)
@@ -632,8 +671,31 @@ switch ($Command) {
 		Add-Thread 'said' @{ text = $words } | Out-Null
 	}
 
-	# Claude Code's hooks for a conductor Rocco opened (server\conductor.ps1 writes them): they wait for the user's
-	# answer in Rocco and hand it back. Anything that goes wrong leaves the agent's own dialog to ask instead.
+	# One agent to another, never as the user: a feature's agent to the conductor (tell -Text "..."), or the conductor
+	# to a feature's agent (tell T-020 -Text "..."). Plain code, no agent in between: it lands in the other's thread,
+	# where its wait hands it over as a [message] from that agent. The chat shows only a line saying it was sent.
+	'tell' {
+		if (-not $Text) { throw 'tell needs -Text.' }
+		$from = $script:ThreadId
+		$to = if ($from) { if ($Id) { throw "A feature's agent tells only the conductor: tell -Text `"...`"." }; '' }
+			elseif ($Id) { "$Id" } else { throw 'The conductor tells a feature''s agent: tell T-020 -Text "...".' }
+		if ($to) {
+			$t = try { Get-Task $to } catch { throw "No task $to." }
+			if (-not $t.lead) { throw "$to has no agent of its own to tell." }
+		}
+		$was = $script:ThreadId
+		try {
+			Use-Thread $to
+			$e = Add-Thread 'message' @{
+				via = 'agent'; from = $(if ($from) { $from } else { 'conductor' })
+				line = $(if ($from) { "The $from agent wrote to the conductor" } else { "The conductor wrote to this feature's agent" })
+				text = $Text
+			} 'agent'
+		} finally { $script:ThreadId = $was }
+		"$($e.id) sent to $(if ($to) { "the $to agent" } else { 'the conductor' })."
+	}
+
+	# Hooks for a conductor Rocco opened (server\conductor.ps1): wait for the user's answer in Rocco and hand it back.
 	'hook' {
 		# Bytes in and out, as UTF-8: the console's own encoding would garble anything past ASCII.
 		$raw = New-Object IO.MemoryStream
@@ -643,6 +705,7 @@ switch ($Command) {
 			'permission' { Wait-Permission $in }
 			'question' { Wait-Question $in }
 			'stop' { Test-ConductorStop $in }
+			'codex-stop' { Wait-CodexStop $in }
 			default { throw "Unknown hook '$Id'." }
 		}
 		if ($out) {

@@ -244,7 +244,8 @@ function conductorView(d, id = '') {
   const open = t.items.filter(e => (e.kind === 'asked' && !has('answered', e.id)) || (e.kind === 'permission' && !has('decided', e.id) && !has('expired', e.id)));
   const last = [...t.items].reverse().find(e => e.kind === 'said');
   const replied = !!last && t.items.some(e => e.who === 'you' && e.at > last.at);
-  return { doing: '', ...agentOf(d, id), open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
+  const agent = agentOf(d, id), step = t.steps.at(-1);
+  return { doing: '', ...agent, doingAt: step?.text === agent.doing ? step?.at || '' : '', open, elsewhere: [], last: last ? { id: last.id, at: last.at, text: last.text, replied } : null, stamp: `${t.items.length}.${t.steps.length}` };
 }
 
 // The threads with an agent of their own (server/leads.ps1, Get-LeadsState).
@@ -253,9 +254,34 @@ const leadsView = d => d.tasks.filter(t => t.lead && onBoard(t)).map(t => ({
   waiting: t.pending === 'handoff' ? '' : t.leadWaiting || '', opened: true, conductor: conductorView(d, t.id),
 }));
 
-export async function conductorThread(stamp, thread = '') {
+export async function conductorThread(stamp, thread = '', before = '') {
   const d = current(), t = threadOf(d, thread), now = `${t.items.length}.${t.steps.length}`;
-  return stamp === now ? { same: true } : { stamp: now, items: t.items, steps: t.steps };
+  if (!before && stamp === now) return { same: true };
+  const relations = new Set(['made', 'answered', 'decided', 'expired', 'handled']);
+  const messages = t.items.filter(e => !relations.has(e.kind));
+  const end = before ? messages.findIndex(e => e.id === before) : messages.length;
+  const page = messages.slice(Math.max(0, end - 50), Math.max(0, end));
+  const cursor = end > 50 ? page[0].id : null;
+  const ids = new Set(page.map(e => e.id));
+  const items = t.items.filter(e => ids.has(e.id) || (relations.has(e.kind) && e.kind !== 'handled' && ids.has(e.to)));
+  const steps = t.steps.filter(s => (!cursor || s.at >= page[0].at) && (!before || s.at < messages[end]?.at)).slice(-150);
+  const answers = new Map(t.items.filter(e => e.kind === 'answered').map(e => [e.to, e]));
+  const decisions = [], why = {}, whyIds = {};
+  if (!before) {
+    let previous;
+    for (const e of messages) {
+      if (e.kind === 'asked') {
+        const answer = answers.get(e.id);
+        if (answer && thread) e.questions.forEach((q, i) => decisions.push({ at: answer.at, q: q.text, a: answer.answers?.[i] }));
+        if (!answer && previous?.kind === 'said' && Date.parse(e.at) - Date.parse(previous.at) < 10 * 60e3) {
+          why[e.id] = previous.text;
+          whyIds[e.id] = previous.id;
+        }
+      }
+      if (e.kind !== 'said' || !/^(still |back to )?(watching|listening|waiting|standing by)\b[^\n]{0,70}$/i.test(String(e.text || '').trim())) previous = e;
+    }
+  }
+  return { stamp: now, before: cursor, items, steps, decisions, why, whyIds };
 }
 
 // The demo's agents carry on a moment after the user answers or writes.
@@ -324,9 +350,10 @@ export async function snapshot() {
   const d = current();
   // Another sample project with a card waiting, to show the project picker's mark for it.
   const others = state.project === 'sample-game' ? [{ id: 'sky-farm', name: 'Sky Farm', stuck: 1, ready: 0, asks: 0 }] : [];
-  // The plan's limits, as a status line last said them: the 5-hour window nearly used, the week two-thirds.
+  // Sample limits for the selected agent.
   const secs = Math.floor(Date.now() / 1000);
-  const limits = { five: { used: 89, resets: secs + 2 * 3600 }, week: { used: 69, resets: secs + 3 * 86400 }, at: new Date().toISOString() };
+  const usage = { claude: [89, 69], codex: [24, 41] }[agentId];
+  const limits = usage ? { agent: agentId, five: { used: usage[0], resets: secs + 2 * 3600 }, week: { used: usage[1], resets: secs + 3 * 86400 }, at: new Date().toISOString() } : null;
   return JSON.stringify({ rocco: 'demo', project: { template: false, ...PROJECTS.find(p => p.id === state.project) }, lanes: d.lanes, conductor: conductorView(d), leads: leadsView(d), main: d.main, tasks: d.tasks.filter(onBoard), others, limits });
 }
 
@@ -710,13 +737,12 @@ const installed = id => id !== 'gemini' || fixed.has('gemini-update');
 const models = {};
 // Whether a feature the user approves gets an agent of its own (server/leads.ps1).
 let leadsOn = true;
-let codexConductorFullAccess = false;
 export async function agent() {
   const a = AGENTS.find(x => x.id === agentId), takes = a.id === 'claude';
   return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] ?? (takes ? 'claude-opus-5-5' : ''), takesModel: takes,
     models: takes ? ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'opusplan'] : [],
     effort: efforts[a.id] ?? (takes ? 'high' : ''), takesEffort: takes, efforts: takes ? ['low', 'medium', 'high', 'xhigh', 'max'] : [],
-    codexConductorFullAccess, leads: leadsOn, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+    leads: leadsOn, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
 }
 const efforts = {};
 export async function setAgentEffort(effort) {
@@ -725,7 +751,6 @@ export async function setAgentEffort(effort) {
   return agent();
 }
 export async function setLeads(on) { leadsOn = !!on; return agent(); }
-export async function setCodexConductorFullAccess(on) { codexConductorFullAccess = on; return agent(); }
 export async function setAgent(id) { agentId = id; return agent(); }
 export async function setAgentModel(model) {
   if (model && !/^[A-Za-z0-9][\w.:[\]-]{0,79}$/.test(model)) throw new Error("That doesn't look like a model's name (like opus, sonnet, or a full name such as claude-opus-5-5).");

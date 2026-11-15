@@ -4,6 +4,7 @@
 // for the program itself: Settings, Connections, starting it, and its window.
 import { state, emit } from './state.js';
 import { api } from './api.js';
+import { refresh } from './sync.js';
 
 // "Claude Code", "Gemini CLI", ...
 export const agentName = () => state.agent?.name || 'your agent';
@@ -14,7 +15,9 @@ export async function loadAgent() {
 
 export async function chooseAgent(id) {
   state.agent = await api.setAgent(id);
+  if (state.meta.limits?.agent !== state.agent.id) state.meta.limits = null;
   emit('agent');
+  refresh();
 }
 
 // A model's name as people say it: claude-opus-5-5 is Opus 5.5. Any other name shows as it was typed.

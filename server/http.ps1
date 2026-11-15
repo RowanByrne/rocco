@@ -108,8 +108,7 @@ function Invoke-Request($ctx) {
 		if ($named) { Use-Project (Find-Project $named).path }
 		Send-Json $ctx (Get-LaneAdvice ([bool]$named)); return
 	}
-	# The plan's usage limits, from the status line of an agent Rocco opened (sessions.ps1 Save-Limits): it shows
-	# what this answers.
+	# Claude's status line posts its usage limits and displays the reply (sessions.ps1 Save-Limits).
 	if ($path -eq '/api/limits' -and $req.HttpMethod -eq 'POST' -and $req.Headers['X-Rocco'] -eq '1') {
 		Send-Text $ctx 200 (Save-Limits (Read-Json $req)); return
 	}
@@ -132,10 +131,12 @@ function Invoke-Request($ctx) {
 		if ($path -eq '/api/archive') { Send-Json $ctx (Get-Archive ([string]$req.QueryString['q']) ([int]$req.QueryString['skip'])); return }
 		# What each task took: tokens from its sessions, and its time at work (sessions.ps1).
 		if ($path -eq '/api/usage') { Send-Json $ctx (Get-ProjectUsage); return }
-		# The conductor's history (thread.ps1), only when it changed since the stamp the app has.
+		# A page of the conductor's history (thread.ps1). The latest page can be polled by stamp.
 		if ($path -eq '/api/conductor/thread') {
-			if ($req.QueryString['stamp'] -and $req.QueryString['stamp'] -eq (Get-HistoryStamp)) { Send-Json $ctx @{ same = $true }; return }
-			Send-Json $ctx (Get-ConductorHistory); return
+			$before = $req.QueryString['before']
+			if ($before -and $before -notmatch '\A[0-3][0-9]{18}\.C-[0-9a-f]{6}\z') { Send-Text $ctx 400 'Invalid chat history cursor.'; return }
+			if (-not $before -and $req.QueryString['stamp'] -and $req.QueryString['stamp'] -eq (Get-HistoryStamp)) { Send-Json $ctx @{ same = $true }; return }
+			Send-Json $ctx (Get-ConductorHistory $before); return
 		}
 		if ($path -eq '/api/updates') { Send-Json $ctx (Get-Updates ($req.QueryString['refresh'] -eq '1')); return }
 		if ($path -eq '/api/thumbnails') { Send-Json $ctx (Get-Thumbnails ($req.QueryString['refresh'] -eq '1')); return }
@@ -198,11 +199,6 @@ function Invoke-Request($ctx) {
 	if ($path -eq '/api/agent/effort') {
 		try { Send-Json $ctx (Set-AgentEffort ([string](Read-Json $req).effort)) } catch { Send-Text $ctx 400 $_.Exception.Message }
 		return
-	}
-	if ($path -eq '/api/agent/codex-conductor-full-access') {
-		$on = (Read-Json $req).on
-		if ($on -isnot [bool]) { Send-Text $ctx 400 'Full access must be true or false.'; return }
-		Send-Json $ctx (Set-CodexConductorFullAccess $on); return
 	}
 	# Whether a feature the user approves gets an agent of its own (Settings, leads.ps1).
 	if ($path -eq '/api/agent/leads') { Send-Json $ctx (Set-LeadsOn ([bool](Read-Json $req).on)); return }
