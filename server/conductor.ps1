@@ -80,6 +80,12 @@ function Get-Conductor {
 		$fresh = $c.waiting -and ((Get-Date) - [datetime]$c.at).TotalSeconds -lt 20
 		$value.agent = "$($c.agent)"
 		$value.state = if ($fresh) { 'listening' } elseif ($alive) { 'busy' } else { 'none' }
+		# When it last ended a turn (its Stop hook, kept on its record so a restart of Rocco doesn't lose it), and when
+		# it was opened: the chat's line under a message it picked up ends with that turn (conductor.js).
+		$ended = if ($c.PSObject.Properties['turnEndedAt'] -and $c.turnEndedAt) { [string]$c.turnEndedAt } elseif ($script:TurnEnded[(Get-ThreadKey)]) { ([datetime]$script:TurnEnded[(Get-ThreadKey)]).ToString('o') } else { '' }
+		if ($ended) { $value | Add-Member -NotePropertyName turnEndedAt -NotePropertyValue $ended }
+		$opened = if ($c.PSObject.Properties['opened'] -and $c.opened) { [string]$c.opened } else { [string]$c.started }
+		if ($opened) { $value | Add-Member -NotePropertyName openedAt -NotePropertyValue $opened }
 		$ask = $script:WindowAsk[(Get-ThreadKey)]
 		if ($ask -and $value.state -ne 'none') { $value | Add-Member -NotePropertyName windowAsk -NotePropertyValue ([pscustomobject]@{ id = $ask.id; text = $ask.text; at = $ask.at }) }
 		# Its latest step, while it's working and the step is recent.
@@ -241,6 +247,43 @@ function Write-ConductorHooks {
 # from="...">, <system-reminder>): none of it is the user's words.
 $NotTyped = '^\s*<[a-z]+(-[a-z]+)+[\s>]'
 
+# What the agent wrote in its window earlier in the turn that just ended, before the message it ended on: read from
+# Claude Code's session file. An answer written there, followed by a few commands and a short last line, would
+# otherwise never reach the chat (2026-11-16: the user asked how the road's sides are built, the conductor explained it
+# in its window, then ended on "The worker is still running", and the chat showed only that). Only what reads as a
+# message ($TurnTextMin characters or more): the short lines between its commands ("Reading the road code") are its
+# steps. The end of the file is read, back to where the turn began: what the user typed, or a notice that started it.
+$TurnTextMin = 280
+$TurnTailBytes = 2MB
+function Get-TurnTexts([string]$path, [string]$last) {
+	if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+	try {
+		$bytes = Read-Shared $path ([Math]::Max(0, (Get-Item -LiteralPath $path).Length - $TurnTailBytes))
+		$lines = $Utf8.GetString($bytes) -split "`n"
+	} catch { return @() }
+	$texts = New-Object Collections.Generic.List[string]
+	for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+		$line = $lines[$i]
+		if ($line -match '^\{"parentUuid"' -or $line -match '"type":"(user|assistant)"') {
+			if ($line -match '"isSidechain":true') { continue } # a helper's
+			# A stop check that kept the turn going (Rocco's own) began what came after it: what came before was
+			# posted when it stopped then. Any other line marked meta is a reminder, inside the turn.
+			if ($line -match '"isMeta":true') { if ($line -match 'Stop hook feedback') { break }; continue }
+			if ($line -match '"type":"user"') {
+				# A command's result is part of the turn. Anything else from the user's side began it.
+				if ($line -match '"tool_use_id"') { continue }
+				break
+			}
+			if ($line -notmatch '"type":"text"') { continue }
+			try { $entry = $line | ConvertFrom-Json } catch { continue }
+			foreach ($block in @($entry.message.content)) {
+				if ($block.type -eq 'text' -and "$($block.text)".Trim()) { $texts.Insert(0, "$($block.text)".Trim()) }
+			}
+		}
+	}
+	@($texts | Where-Object { $_.Length -ge $TurnTextMin -and $_ -ne $last.Trim() })
+}
+
 # What a hook passed on: a step, the conductor's message at the end of a turn, or something the user typed in its
 # window. Its workers' steps are left out (their cards show them), but a worker's hooks still say it's alive, and
 # which task its session is for (sessions.ps1).
@@ -293,8 +336,18 @@ function Add-HookEvent([string]$event, $in) {
 			}
 			$since = $script:TurnEnded[$key]
 			$script:TurnEnded[$key] = Get-Date
+			$c = Read-Conductor
+			if ($c) { $c | Add-Member -Force -NotePropertyName turnEndedAt -NotePropertyValue (Now); Save-Conductor $c; $script:ConductorCache = @{} }
 			$told = @($items | Select-Object -Skip ($from + 1) | Where-Object { $_.kind -eq 'said' -and (-not $since -or [datetime]$_.at -gt $since) }).Count
-			if (-not $again -and -not $told) { Add-Thread 'said' @{ text = $text; via = 'hook' } | Out-Null }
+			if (-not $told) {
+				# What it wrote earlier this turn that reads as a message (Get-TurnTexts), then what it ended on.
+				# Never one the chat already has: what an earlier stop in the same turn posted, or a say.
+				$posted = @{}; foreach ($x in @($items | Select-Object -Last 200)) { if ($x.kind -eq 'said') { $posted["$($x.text)".Trim()] = $true } }
+				foreach ($earlier in @(Get-TurnTexts ([string]$in.transcript_path) $text)) {
+					if (-not $posted.ContainsKey($earlier)) { Add-Thread 'said' @{ text = $earlier; via = 'hook' } | Out-Null; $posted[$earlier] = $true }
+				}
+				if (-not $again) { Add-Thread 'said' @{ text = $text; via = 'hook' } | Out-Null }
+			}
 		}
 		'prompt' {
 			$text = "$($in.prompt)".Trim()

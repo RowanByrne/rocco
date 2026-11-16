@@ -483,6 +483,28 @@ const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revis
 
 // What you write sits on the right in a bubble, as in any chat app; what Rocco says and does runs down the left, so
 // its work never reads as yours.
+// Under a message of yours that an answer is still coming to (plans/answer-coming.md): whether its agent has it yet,
+// is on it, or has gone quiet. It picked it up when a seen line was written (rocco.ps1 Write-Pending), and it's done
+// with it once the turn it picked it up in has ended: listening or stopped again, or a turn ended since. Then nothing:
+// the answer, or the card it made, is just below. A message from before Rocco recorded pickups is quiet once handled.
+const QUIET_MINUTES = 5;
+function answerLine(e, related) {
+  if (e.via === 'terminal') return nothing;
+  const c = conductor(), lead = !!active, name = lead ? 'Its agent' : 'Rocco';
+  const after = (at, than) => !!at && !!than && Date.parse(at) >= Date.parse(than);
+  const seen = (related.get('seen') || [])[0];
+  if (seen) {
+    // Done: it isn't working now, a turn has ended since, or an agent opened since picked it up (one before it did).
+    if (c.state !== 'busy' || after(c.turnEndedAt, seen.at) || (after(c.openedAt, seen.at) && c.openedAt !== seen.at)) return nothing;
+    if ((c.quiet || 0) >= QUIET_MINUTES) return html`<span class="h-coming quiet">${name} has gone quiet</span>`;
+    return html`<span class="h-coming">${name} is on it<i class="h-dots" aria-hidden="true"><b></b><b></b><b></b></i></span>`;
+  }
+  if (related.get('handled')) return nothing;
+  if (c.state === 'none') return html`<span class="h-coming">Starting ${lead ? 'its agent' : 'Rocco'}…</span>`;
+  if (c.state === 'busy') return html`<span class="h-coming">${name} reads it next</span>`;
+  return html`<span class="h-coming">${name} is reading it…</span>`;
+}
+
 const yours = (body, foot, shots = []) => html`<div class="h-you">${sentRow(shots)}${
   body ? html`<div class="h-bubble">${body}</div>` : nothing}${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
 
@@ -529,7 +551,7 @@ function row(e, related, prev = '') {
       // A message is just a message: a card shows under it only once the agent makes one from it (rocco.ps1 new -From).
       const made = related.get('made') || [];
       return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${KIND[e.type] ? html`<span>${KIND[e.type]}</span>` : nothing}${
-        made.map(x => taskChip(x.task, x.title, e.text))}${at}`, (e.shots || []).map(fileOf));
+        made.map(x => taskChip(x.task, x.title, e.text))}${answerLine(e, related)}${at}`, (e.shots || []).map(fileOf));
     }
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
@@ -619,7 +641,7 @@ function historyNav(v, history) {
   </div>`;
 }
 
-const relationshipKinds = new Set(['answered', 'decided', 'expired', 'made']);
+const relationshipKinds = new Set(['answered', 'decided', 'expired', 'made', 'seen', 'handled']);
 const noRelationships = new Map();
 
 function historyView() {
@@ -633,7 +655,6 @@ function historyView() {
   // Index the lines that annotate another row once per page, rather than scanning for them on each row.
   const related = new Map();
   const items = history.items.filter(e => {
-    if (e.kind === 'handled') return false;
     if (!relationshipKinds.has(e.kind)) return true;
     let byKind = related.get(e.to);
     if (!byKind) related.set(e.to, byKind = new Map());
@@ -722,7 +743,8 @@ function renderLive() {
   if (atEnd) list.scrollTop = list.scrollHeight;
 }
 
-let lastState = ''; // the agent's state at the last draw (renderConductor)
+let lastState = ''; // the agent's state at the last draw (renderConductor), with what the answer lines follow
+const drawKey = () => { const c = conductor(); return `${c.state}|${c.turnEndedAt || ''}|${(c.quiet || 0) >= QUIET_MINUTES}`; };
 let toEnd = false; // the next draw ends at the chat's end, whatever was scrolled (the user just sent something)
 function clearHistoryPage(v) {
   v.older = null;
@@ -872,9 +894,10 @@ export function renderConductor() {
   renderAll();
   const v = view();
   if (v.history?.stamp !== conductor().stamp || v.loadError || !v.history) loadHistory();
-  // It stopped or started working: its last steps move between the live line and the chat.
-  else if (!v.older && lastState !== conductor().state) renderHistory();
-  lastState = conductor().state;
+  // It stopped or started working: its last steps move between the live line and the chat. And the line under a
+  // message waiting on an answer follows it: a turn ended, or it has gone quiet (answerLine).
+  else if (!v.older && lastState !== drawKey()) renderHistory();
+  lastState = drawKey();
 }
 
 // A different project: its own threads, and its own reply in progress.

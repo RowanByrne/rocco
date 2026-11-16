@@ -205,6 +205,7 @@ function sampleThread() {
     { id: 'C-000008', at: at(60), who: 'you', kind: 'decided', to: 'C-000007', allow: true },
     { id: 'C-000009', at: at(31), who: 'conductor', kind: 'said', text: "**Done**\n- Daily reward can't be claimed twice: it saves on claim now (T-038, lane 2).\n- Shop prices fit on phones (T-041).\n\n**Flagged**\n- The trade countdown has no sound yet. I'll ask you which one when it's built.\n- `T-046` found the camera only checks walls behind the head; the fix is in progress." },
     { id: 'C-000010', at: at(28), who: 'you', kind: 'message', text: 'nice. do the camera next', via: 'rocco' },
+    { id: 'C-000032', at: at(27), who: 'conductor', kind: 'handled', to: 'C-000010' },
     // Check-ins with nothing in them: the history folds a run of these into one line.
     { id: 'C-000015', at: at(24), who: 'conductor', kind: 'said', text: 'Watching.' },
     { id: 'C-000016', at: at(20), who: 'conductor', kind: 'said', text: 'Watching the board.' },
@@ -213,6 +214,9 @@ function sampleThread() {
     // An errand: done and said, with no card to approve (rocco.ps1 reply -Done).
     { id: 'C-000021', at: at(4), who: 'you', kind: 'sent', act: 'note', task: 'T-034', title: 'Open Main and 4 lanes', text: 'startup 4 lanes and main' },
     { id: 'C-000022', at: at(3), who: 'conductor', kind: 'said', re: 'Open Main and 4 lanes', task: 'T-034', text: 'Main and lanes 1 to 4 are open in Studio, each syncing.' },
+    // A message the conductor has picked up and is working on: "Rocco is on it" under it (conductor.js answerLine).
+    { id: 'C-000030', at: at(1), who: 'you', kind: 'message', text: 'how do pets pick which player to follow when two are close?', via: 'rocco' },
+    { id: 'C-000031', at: at(1), who: 'conductor', kind: 'seen', to: 'C-000030' },
     // Concepts to pick from: each option has its picture (server/tasks.ps1 Add-Pictures).
     { id: 'C-000014', at: at(3), who: 'conductor', kind: 'asked', via: 'hook', questions: [
       { text: 'Which shop interior should the room be built from? The four concepts are in ..\\art\\generated\\shop-concept\\.', header: 'Shop look', multi: false, images: [],
@@ -264,13 +268,13 @@ const leadsView = d => d.tasks.filter(t => t.lead && onBoard(t)).map(t => ({
 export async function conductorThread(stamp, thread = '', before = '') {
   const d = current(), t = threadOf(d, thread), now = `${t.items.length}.${t.steps.length}`;
   if (!before && stamp === now) return { same: true };
-  const relations = new Set(['made', 'answered', 'decided', 'expired', 'handled']);
+  const relations = new Set(['made', 'answered', 'decided', 'expired', 'handled', 'seen']);
   const messages = t.items.filter(e => !relations.has(e.kind));
   const end = before ? messages.findIndex(e => e.id === before) : messages.length;
   const page = messages.slice(Math.max(0, end - 50), Math.max(0, end));
   const cursor = end > 50 ? page[0].id : null;
   const ids = new Set(page.map(e => e.id));
-  const items = t.items.filter(e => ids.has(e.id) || (relations.has(e.kind) && e.kind !== 'handled' && ids.has(e.to)));
+  const items = t.items.filter(e => ids.has(e.id) || (relations.has(e.kind) && ids.has(e.to)));
   const steps = t.steps.filter(s => (!cursor || s.at >= page[0].at) && (!before || s.at < messages[end]?.at)).slice(-150);
   const answers = new Map(t.items.filter(e => e.kind === 'answered').map(e => [e.to, e]));
   const decisions = [], why = {}, whyIds = {};

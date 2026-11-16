@@ -18,6 +18,8 @@
 #   sent        the user did something on the Workboard that goes to the conductor: act, text, task
 #   event       a milestone: text [, task]
 #   handled     the conductor has read it: to
+#   seen        the conductor was handed it (wait, list -Pending, its stop check): to. Written once (rocco.ps1
+#               Write-Pending): the chat's line under the user's message goes from waiting to "on it" (conductor.js)
 
 # The conductor's thread is the main chat. A feature with its own agent (leads.ps1), or a card given one, has a thread
 # of its own, with the same files, in <Game>\rocco\threads\<its id>\. Which one is meant is core.ps1's Use-Thread.
@@ -279,7 +281,7 @@ function Get-ConductorHistory([string]$before = '') {
 	for ($index = 0; $index -lt $rows.Count; $index++) {
 		$row = $rows[$index]
 		if ($upperId -and $row.id -eq $upperId -and $upper -eq ([DateTimeOffset]$row.at).UtcTicks) { $upperIndex = $index }
-		if ($row.kind -in 'made', 'answered', 'decided', 'expired' -and $row.to) {
+		if ($row.kind -in 'made', 'answered', 'decided', 'expired', 'seen', 'handled' -and $row.to) {
 			if (-not $related.ContainsKey($row.to)) { $related[$row.to] = [Collections.Generic.List[object]]::new() }
 			$related[$row.to].Add($row)
 		}
@@ -290,7 +292,7 @@ function Get-ConductorHistory([string]$before = '') {
 	$previous = $null
 	for ($index = 0; $index -lt $rows.Count; $index++) {
 		$row = $rows[$index]
-		if ($row.kind -in 'made', 'answered', 'decided', 'expired', 'handled') { continue }
+		if ($row.kind -in 'made', 'answered', 'decided', 'expired', 'handled', 'seen') { continue }
 		try { $at = ([DateTimeOffset]$row.at).UtcTicks } catch { continue }
 		if (-not $before) {
 			if ($row.kind -eq 'asked') {

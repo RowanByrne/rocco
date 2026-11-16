@@ -159,6 +159,9 @@ function Get-PendingTasks {
 function Write-Pending($rows, $thread) {
 	if (@($rows).Count) { Format-Tasks $rows }
 	foreach ($e in $thread.pending) { Format-ThreadItem $e $thread }
+	# Handed to the agent now: the chat's line under each says it's on it (thread.ps1 'seen'), once.
+	$seen = @{}; foreach ($x in $thread.items) { if ($x.kind -eq 'seen') { $seen[$x.to] = $true } }
+	foreach ($e in $thread.pending) { if (-not $seen.ContainsKey($e.id)) { Add-Thread 'seen' @{ to = $e.id } | Out-Null } }
 }
 
 function Wait-Pending([int]$seconds) {

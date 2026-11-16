@@ -666,6 +666,58 @@ try {
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -eq 'Merged the lap timer.' }).Count 1 'the next turn''s message is kept'
 	}
 
+	Test 'a message handed to the conductor is marked seen once, and the chat page has it' {
+		$m = Api '/api/conductor/message' @{ text = 'How are the road''s sides built?' }
+		Rocco list -Pending | Out-Null
+		Rocco list -Pending | Out-Null
+		$seen = @(Get-Content (Join-Path $Game 'rocco\conductor\thread.jsonl') | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'seen' -and $_.to -eq $m.id })
+		Assert-Equal $seen.Count 1 'one seen line, however often it is handed over'
+		$items = @((Api '/api/conductor/thread').items)
+		$i = [array]::IndexOf(@($items | ForEach-Object { $_.id }), $m.id)
+		Assert ($i -ge 0) 'the message is on the page'
+		Assert (@($items | Select-Object -Skip ($i + 1) | Where-Object { $_.kind -eq 'seen' -and $_.to -eq $m.id }).Count -eq 1) 'with its seen line after it'
+		Rocco clear $m.id | Out-Null
+		Assert (@((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'handled' -and $_.to -eq $m.id }).Count -eq 1) 'and its handled line, once it is'
+	}
+
+	Test 'an answer the conductor wrote before its last line reaches the chat' {
+		$m = Api '/api/conductor/message' @{ text = 'Explain how the runoff is made.' }
+		$answer = 'Here is how the sides are built. ' + ('The grass runoff is 12 to 40 studs wide, eased between knots so nothing steps. ' * 5)
+		$file = Join-Path $Temp 'turn.jsonl'
+		$line = { param($type, $content) ConvertTo-Json -Compress -Depth 8 ([ordered]@{ parentUuid = 'p'; isSidechain = $false; type = $type; message = @{ role = $type; content = $content } }) }
+		$lines = @(
+			(& $line 'user' 'An earlier turn.'),
+			(& $line 'assistant' @(@{ type = 'text'; text = 'An earlier answer that is long enough to count. ' * 8 })),
+			(& $line 'user' '<task-notification><task-id>w</task-id></task-notification>'),
+			(& $line 'assistant' @(@{ type = 'text'; text = 'Reading the road code.' })),
+			(& $line 'assistant' @(@{ type = 'tool_use'; id = 't1'; name = 'Bash'; input = @{ command = 'grep runoff' } })),
+			(& $line 'user' @(@{ type = 'tool_result'; tool_use_id = 't1'; content = 'RunoffMin = 12' })),
+			(ConvertTo-Json -Compress -Depth 8 ([ordered]@{ parentUuid = 'p'; isSidechain = $false; isMeta = $true; type = 'user'; message = @{ role = 'user'; content = 'A reminder.' } })),
+			(& $line 'assistant' @(@{ type = 'text'; text = $answer })),
+			(& $line 'assistant' @(@{ type = 'tool_use'; id = 't2'; name = 'Bash'; input = @{ command = 'rocco.ps1 wait' } })),
+			(& $line 'user' @(@{ type = 'tool_result'; tool_use_id = 't2'; content = 'Running in the background' })),
+			(& $line 'assistant' @(@{ type = 'text'; text = 'The worker is still running.' }))
+		)
+		[IO.File]::WriteAllText($file, ($lines -join "`n") + "`n", $Utf8)
+		Rocco list -Pending | Out-Null
+		Api '/api/conductor/hook?e=stop' @{ transcript_path = $file; last_assistant_message = 'The worker is still running.' } | Out-Null
+		$said = @((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'said' } | Select-Object -Last 2)
+		Assert-Equal $said[0].text $answer.Trim() 'the answer it wrote earlier in the turn'
+		Assert-Equal $said[1].text 'The worker is still running.' 'then what it ended on'
+		Assert (@((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'said' -and $_.text -match 'An earlier answer|Reading the road' }).Count -eq 0) 'not its steps, nor an earlier turn'
+		# The stop check kept that turn going: what came before it was posted then, and isn't again.
+		$more = @(
+			(ConvertTo-Json -Compress -Depth 8 ([ordered]@{ parentUuid = 'p'; isSidechain = $false; isMeta = $true; type = 'user'; message = @{ role = 'user'; content = 'Stop hook feedback: Before you stop, start wait.' } })),
+			(& $line 'assistant' @(@{ type = 'tool_use'; id = 't3'; name = 'Bash'; input = @{ command = 'rocco.ps1 wait' } })),
+			(& $line 'user' @(@{ type = 'tool_result'; tool_use_id = 't3'; content = 'Running in the background' })),
+			(& $line 'assistant' @(@{ type = 'text'; text = 'Watching the board again.' }))
+		)
+		[IO.File]::AppendAllText($file, ($more -join "`n") + "`n", $Utf8)
+		Api '/api/conductor/hook?e=stop' @{ transcript_path = $file; last_assistant_message = 'Watching the board again.' } | Out-Null
+		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'said' -and $_.text -eq $answer.Trim() }).Count 1 'the answer once, after the stop check kept the turn going'
+		Rocco clear $m.id | Out-Null
+	}
+
 	Test 'the plan''s limits from a status line follow the selected agent until they reset' {
 		$previous = (Api '/api/agent').id
 		$soon = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
