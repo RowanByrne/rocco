@@ -79,8 +79,8 @@ $AppDir = $PSScriptRoot
 # Kept before the parts load: they keep the thread in use under the same name (core.ps1 Use-Thread), and start with none.
 $named = $ThreadId
 # An agent's command loads only what the board needs: it runs many of these, and each starts PowerShell afresh.
-$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'loans', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
-	else { 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'loans' }
+$parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'memory', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'loans', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http' }
+	else { 'core', 'agents', 'memory', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'loans' }
 foreach ($part in $parts) { . (Join-Path $AppDir "server\$part.ps1") }
 
 # A feature's own agent runs in a window that names its thread (ROCCO_THREAD, conductor.ps1 Open-Conductor), so
@@ -208,10 +208,13 @@ function Test-ConductorStop($in) {
 	if ($in.stop_hook_active -and (Test-Path $state)) { try { $tries = [int]([IO.File]::ReadAllText($state, $Utf8) | ConvertFrom-Json).tries } catch { } }
 	$rows = @(Get-PendingTasks)
 	$thread = Get-ThreadState
+	# A watch the agent's program stopped to free memory comes with a note not to start it again: the user's Rocco
+	# asks for it anyway (plans\memory.md). It needs little memory, and without it nothing reaches the conductor.
+	$watchAgain = "If your last watch was stopped because the PC ran low on memory, start it again anyway: Rocco asks you to, it uses little memory, and Rocco looks after its own. This PC has $((Get-PcMemory).free) GB free now."
 	$reason = if ($rows.Count -or $thread.pending.Count) {
-		"Before you stop, handle what waits on you, as $(if ($script:ThreadId) { 'LEAD.md' } else { 'CONDUCTOR.md "What waits on you"' }) says:`n$((Write-Pending $rows $thread) -join "`n")`nThen, if nothing is watching for what the user sends, start $(Get-WaitCommand)."
+		"Before you stop, handle what waits on you, as $(if ($script:ThreadId) { 'LEAD.md' } else { 'CONDUCTOR.md "What waits on you"' }) says:`n$((Write-Pending $rows $thread) -join "`n")`nThen, if nothing is watching for what the user sends, start $(Get-WaitCommand). $watchAgain"
 	} elseif (-not (Wait-ForWatch 20)) {
-		"Before you stop: nothing is watching for what the user sends, so their next note, answer or send-back would sit unseen until they prompt you. Start $(Get-WaitCommand)."
+		"Before you stop: nothing is watching for what the user sends, so their next note, answer or send-back would sit unseen until they prompt you. Start $(Get-WaitCommand). $watchAgain"
 	} else { '' }
 	if (-not $reason -or $tries -ge 3) {
 		if ($reason) { Add-Event "The conductor stopped $(if ($rows.Count -or $thread.pending.Count) { 'with work still waiting on it' } else { 'with nothing watching the board' }): type anything in its window to wake it" }
@@ -403,13 +406,15 @@ switch ($Command) {
 			''
 			if ($free.Count -and -not [int]$free[0].freeLane) { "An agent is free: work $($t.id) -Branch agent/<slug>, set $($t.id) -Status working -Step `"...`", and give the worker its id and its checkout." }
 			elseif ($free.Count) { "Lane $($free[0].freeLane) is free: set $($t.id) -Status working -Lane $($free[0].freeLane) -Step `"...`", and give the worker its id." }
+			elseif (Test-MemoryShort) { "$(Get-MemoryShortText): wait hands it back ([lane]) once there's more." }
 			elseif (Test-SharedLanes) { 'As many agents are at work as this PC runs at once: wait hands it back ([lane]) the moment one finishes.' }
 			else { 'Every lane is busy: wait hands it back ([lane]) the moment one is free.' }
 		}
 		# Nothing to start a task in, for one you're about to start: every lane busy, or (where agents borrow lanes) as
 		# many agents at work as this PC runs at once.
 		if ($t.status -eq 'queued' -and $t.pending -in 'plan', 'reopen') {
-			if (Test-SharedLanes) { if ((Get-AgentsAtWork @(Get-Tasks)) -ge (Get-AgentsLimit)) { ''; "As many agents are at work as this PC runs at once ($(Get-AgentsLimit)). To start it when one finishes: set $($t.id) -ForLane (wait hands it back as [lane])." } }
+			if (Test-MemoryShort) { ''; "$(Get-MemoryShortText), so no new agent should start. To start it when there's more: set $($t.id) -ForLane (wait hands it back as [lane])." }
+			elseif (Test-SharedLanes) { if ((Get-AgentsAtWork @(Get-Tasks)) -ge (Get-AgentsLimit)) { ''; "As many agents are at work as this PC runs at once ($(Get-AgentsLimit)). To start it when one finishes: set $($t.id) -ForLane (wait hands it back as [lane])." } }
 			elseif (-not @(Get-FreeLanes @(Get-Tasks)).Count) { ''; "Every lane is busy. To start it when one frees: set $($t.id) -ForLane (wait hands it back as [lane])." }
 		}
 		# A feature plan is never worked as a card: its steps are tasks, which the plan's chip counts.
@@ -470,7 +475,7 @@ switch ($Command) {
 		if ($m) { Add-FromMessage $t $m }
 		Set-Field $t 'feature' $true
 		if ($Summary) { Set-Field $t 'summary' $Summary }
-		Set-Field $t 'steps' (ConvertTo-Steps $Steps)
+		Set-Field $t 'steps' @(ConvertTo-Steps $Steps)
 		Set-Common $t
 		Save-Task $t
 		Add-MadeLine $t $m
@@ -549,7 +554,7 @@ switch ($Command) {
 		if ($Lane -ge 0) { Set-Field $t 'lane' $(if ($Lane -eq 0) { $null } else { $Lane }) }
 		if ($Progress -ge 0) { Set-Field $t 'progress' ([Math]::Min(100, $Progress)) }
 		# A revised feature plan (the user asked for changes): its new steps.
-		if ($Steps) { Set-Field $t 'steps' (ConvertTo-Steps $Steps) }
+		if ($Steps) { Set-Field $t 'steps' @(ConvertTo-Steps $Steps) }
 		if ($Order -ge 0) { Set-Field $t 'order' $Order }
 		Set-Common $t
 		# Where to test it is checked against git: an agent with an old picture can't send the user to the wrong place.

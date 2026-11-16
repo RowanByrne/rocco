@@ -43,9 +43,9 @@ function agents() {
   return html`<div class="set-group"><div class="set-head">Your agent<span class="set-note">on this PC</span><span class="sp"></span><button class="mini" data-accounts>Your accounts</button></div>${
     a.agents.map(x => html`<button class="set-row agent-row${x.id === a.id ? ' on' : ''}" data-agent=${x.id} role="radio" aria-checked=${x.id === a.id ? 'true' : 'false'}><span class="radio"></span><span class="set-text"><span class="set-title">${x.name}</span><span class="set-sub">${x.installed ? 'Installed' : 'Not installed on this PC (Connections)'}</span></span></button>`)
   }${model(a)}${effort(a)}${
-    row('Features get an agent of their own', `A feature you approve is built by its own ${a.short} session, ${state.meta.lanes?.shared ? 'in its own copy of the game' : 'in a lane it keeps'}, and you talk to it on its own tab above the chat. Off: the conductor builds it with its workers, and everything goes through the conductor.`,
+    row('Features get an agent of their own', `A feature you approve is built by its own ${a.short} session, ${state.meta.lanes?.shared ? 'in its own copy of the game' : 'in a lane it keeps'}, and you talk to it on its own tab above the chat. A feature with only one step goes to the conductor anyway. Off: the conductor builds it with its workers, and everything goes through the conductor.`,
       html`<button class="switch" role="switch" aria-checked=${a.leads !== false ? 'true' : 'false'} data-leads aria-label="Features get an agent of their own"><span></span></button>`)
-  }${lanes(a)}<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
+  }${lanes(a)}${memoryLimit(a)}<div class="set-row set-foot">Rocco opens your agent for onboarding and names it wherever it asks for something. Any of them works: every agent follows the project's AGENTS.md (MODELS.md has more).</div></div>`;
 }
 
 // The model the conductor is opened on, for an agent that takes one on its command line (server/agents.ps1): one from
@@ -62,6 +62,12 @@ function lanes(a) {
     row('Keep a lane for my testing', 'A card you are testing in a lane normally gives way when work is waiting to test, and its card offers Load into a lane to put it back. On: your testing always keeps one lane.',
       html`<button class="switch" role="switch" aria-checked=${a.keepLane ? 'true' : 'false'} data-keep-lane aria-label="Keep a lane for my testing"><span></span></button>`)}`;
 }
+
+// Rocco restarts itself above this much memory (server/memory.ps1): a leak can't take the PC down. It restarts the way
+// it does after an update, so the tab reconnects and the agents carry on.
+const memoryLimit = a => !a.memoryLimits ? nothing : row('Restart Rocco above', `Rocco normally uses well under 1 GB. If it ever grows past this, it restarts itself, the way it does after an update: this tab reconnects and your agents carry on. Each minute it notes its memory in memory.log, in its folder in your AppData, so what made it grow can be found.`,
+  html`<select class="input set-select" data-memory-limit aria-label="Restart Rocco above"><option value="0" ?selected=${!a.memoryLimitGB}>${a.memoryLimitDefault} GB (default)</option>${
+    a.memoryLimits.filter(n => n !== a.memoryLimitDefault).map(n => html`<option value=${n} ?selected=${a.memoryLimitGB === n}>${n} GB</option>`)}</select>`);
 
 const OTHER = '(other)';
 let typingModel = false;
@@ -184,6 +190,12 @@ export function initSettings() {
     else if ('agentsAtOnce' in e.target.dataset) once('agents-at-once', async () => {
       const n = Number(e.target.value) || 0;
       try { state.agent = await api.setLaneSettings({ agentsAtOnce: n }); toast(n ? `Up to ${n} agent${n === 1 ? '' : 's'} work at once on this PC` : 'Two agents per lane work at once on this PC'); }
+      catch (err) { toast(`Couldn't change it: ${err.message}`, 'var(--red)'); }
+      renderSettings();
+    });
+    else if ('memoryLimit' in e.target.dataset) once('memory-limit', async () => {
+      const n = Number(e.target.value) || 0;
+      try { state.agent = await api.setLaneSettings({ memoryLimitGB: n }); toast(`Rocco restarts itself above ${n || state.agent.memoryLimitDefault} GB`); }
       catch (err) { toast(`Couldn't change it: ${err.message}`, 'var(--red)'); }
       renderSettings();
     });

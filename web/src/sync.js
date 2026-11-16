@@ -23,13 +23,16 @@ export async function load() {
     if (text === lastJson) { setProblem(''); return; }
     // leads: the threads with an agent of their own, each with its agent's state. Like the conductor's, it changes
     // with every step an agent takes, so it's kept apart from what redraws the board.
-    const s = JSON.parse(text), { conductor, leads, ...rest } = s;
+    // memory: this PC's free memory and Rocco's own, which change with every look, so they don't redraw the board either.
+    const s = JSON.parse(text), { conductor, leads, memory, ...rest } = s;
     lastJson = text;
     const restJson = JSON.stringify(rest);
     if (restJson !== lastRest) { lastRest = restJson; apply(s); }
     state.meta.conductor = conductor || { state: 'none' };
     state.meta.leads = leads || [];
+    state.meta.memory = memory || null;
     emit('conductor');
+    emit('memory');
     setProblem('');
   } catch (e) {
     if (requested !== generation) return;
@@ -59,6 +62,7 @@ export const taskFrom = t => ({
   ...t,
   options: t.options || [],
   log: t.log || [],
+  steps: [].concat(t.steps || []), // a plan saved with one step as a bare object, before that was fixed
   shots: (t.shots || []).map(name => fileUrl(t, name)),
   questions: (t.questions || []).map(q => ({ ...q, images: (q.images || []).map(name => fileUrl(t, name)),
     options: (q.options || []).map(o => ({ ...o, audio: fileUrl(t, o.audio), image: fileUrl(t, o.image) })) })),
@@ -84,7 +88,7 @@ function apply(s) {
   if (state.rocco && s.rocco && s.rocco !== state.rocco) emit('rocco-updated', s.rocco);
   state.rocco = s.rocco || state.rocco;
   const before = new Map(state.tasks.map(t => [t.id, t.status]));
-  state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, conductor: s.conductor || { state: 'none' }, leads: s.leads || [], main: s.main || {}, limits: s.limits || null };
+  state.meta = { project: s.project, lanes: s.lanes || { count: 0, open: [], main: false }, conductor: s.conductor || { state: 'none' }, leads: s.leads || [], main: s.main || {}, limits: s.limits || null, memory: s.memory || null };
   others(s.others || []);
   state.tasks = (s.tasks || []).map(taskFrom);
   if (loaded) for (const t of state.tasks) {

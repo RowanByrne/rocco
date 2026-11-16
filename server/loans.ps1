@@ -42,7 +42,8 @@ function Resolve-Commit([string]$name, [string]$dir = $RepoDir) {
 # How many agents this PC works at once: Settings' number, else two per lane. With no lane to hold each task back, a
 # big plan would otherwise start an agent per step.
 function Get-AgentsLimit { [Math]::Max(1, [int](Get-Lanes).agents) }
-# Settings: how many agents at once (0: two per lane again), and whether the user's testing keeps a lane.
+# Settings: how many agents at once (0: two per lane again), whether the user's testing keeps a lane, and the memory
+# Rocco restarts itself above (memoryLimitGB, memory.ps1; 0: the default).
 $MostAgents = 24
 function Set-LaneSettings($body) {
 	$settings = Read-RoccoSettings
@@ -50,6 +51,11 @@ function Set-LaneSettings($body) {
 		$n = [int]$body.agentsAtOnce
 		if ($n -lt 0 -or $n -gt $MostAgents) { throw "Agents at once: 1 to $MostAgents, or 0 for two per lane." }
 		$settings | Add-Member -Force -NotePropertyName agentsAtOnce -NotePropertyValue $n
+	}
+	if ($body.PSObject.Properties['memoryLimitGB']) {
+		$gb = [double]$body.memoryLimitGB
+		if ($gb -ne 0 -and $MemoryLimits -notcontains $gb) { throw "Restart Rocco above: one of $($MemoryLimits -join ', ') GB, or 0 for $MemoryLimitDefault." }
+		$settings | Add-Member -Force -NotePropertyName memoryLimitGB -NotePropertyValue $gb
 	}
 	if ($body.PSObject.Properties['keepLane']) { $settings | Add-Member -Force -NotePropertyName keepLane -NotePropertyValue ([bool]$body.keepLane) }
 	Save-RoccoSettings $settings
@@ -73,6 +79,10 @@ function Add-Work($t, [string]$branch, [string]$base) {
 		$limit = Get-AgentsLimit
 		if ($t.status -notin 'working', 'stuck' -and (Get-AgentsAtWork $others) -ge $limit) {
 			throw "$limit agents are at work, which is this PC's limit (Settings, Agents at once). Park it: set $($t.id) -ForLane, and wait hands it back ([lane]) when one finishes."
+		}
+		# No new agent while the PC is short of memory (memory.ps1): it would only make that worse.
+		if ($t.status -notin 'working', 'stuck' -and (Test-MemoryShort)) {
+			throw "$(Get-MemoryShortText), so no new agent starts. Park it: set $($t.id) -ForLane, and wait hands it back ([lane]) when there's more."
 		}
 		$hasOrigin = [bool]"$(Invoke-Git $RepoDir remote get-url origin)"
 		# Not being able to reach GitHub this minute doesn't stop the work: it branches from what was last fetched.

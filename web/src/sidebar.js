@@ -1,5 +1,5 @@
 // The sidebar: project picker, navigation, Main and the lanes, and the user.
-import { state, emit, currentProject } from './state.js';
+import { state, emit, on, currentProject } from './state.js';
 import { $, $$ } from './lib/dom.js';
 import { html, render, nothing } from './lib/html.js';
 import { agoText, initial, logoVars } from './lib/format.js';
@@ -140,7 +140,20 @@ export function renderSidebar() {
   $('#lanes').style.gridTemplateColumns = `repeat(${Math.min(lanes.count, 8) || 1}, 1fr)`;
   render(bars.map(b => html`<span class="ln ${b.cls}" title=${b.tip}>L${b.n}</span>`), $('#lanes'));
   renderLimits();
+  renderMemory();
 }
+
+// This PC's free memory, under the lanes (server/memory.ps1): amber when it's low, red when it's very low. Under the
+// floor no new agent starts, and the hover says so, with what Rocco itself uses.
+function renderMemory() {
+  const m = state.meta.memory;
+  $('#memStat').hidden = !m || !state.online;
+  if (!m) return;
+  $('#memStat').className = 'stat' + (m.freeGB < m.veryLowGB ? ' mem-red' : m.freeGB < m.lowGB ? ' mem-amber' : '');
+  $('#memFree').textContent = `${m.freeGB < 10 ? m.freeGB : Math.round(m.freeGB)} GB free`;
+  $('#memStat').title = `This PC has ${m.freeGB} GB of its ${m.totalGB} GB free.${m.freeGB < m.floorGB ? ` That's under ${m.floorGB} GB, so no new agent starts until there's more.` : ''} Rocco itself uses ${m.roccoMB} MB, and restarts itself above ${m.limitGB} GB (Settings).`;
+}
+on('memory', renderMemory);
 
 // ---- The plan's usage limits, above the lanes ----
 

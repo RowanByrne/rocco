@@ -97,6 +97,8 @@ function Invoke-Request($ctx) {
 	if ($get -and $path -eq '/api/me') { Send-Json $ctx (Get-Me); return }
 	if ($get -and $path -match '^/api/jobs/(\w+)$') { Send-Json $ctx (Get-JobStatus $Matches[1]); return }
 	if ($get -and $path -match '^/api/actions/runs/(\w+)$') { Send-Json $ctx (Get-ActionRun $Matches[1]); return }
+	# What Rocco itself holds, after a full garbage collection (memory.ps1): to see what grows, if it does.
+	if ($get -and $path -eq '/api/debug/heap') { Send-Json $ctx (Get-MemoryReport $true); return }
 	if ($get -and $path -eq '/api/agent') { Send-Json $ctx (Get-Agent); return }
 	# The user's own accounts on this PC (accounts.ps1): onboarding's first screen.
 	if ($get -and $path -eq '/api/accounts') { Send-Json $ctx (Get-Accounts ($req.QueryString['refresh'] -eq '1')); return }
@@ -492,22 +494,35 @@ function Start-Rocco {
 	Write-Host 'Quit it from Settings in the app (or Ctrl+C, when it runs in a window).'
 	# A restart keeps the tab that's open: it reconnects, and reloads for the new version.
 	if ($Open -and -not $Restart) { Start-Process $here }
+	# Restarted for memory (memory.ps1): the main chat says so.
+	Use-Project $HomeProject
+	Show-MemoryRestart
+	$forMemory = $false
 	try {
 		while ($listener.IsListening) {
 			$next = $listener.GetContextAsync()
-			while (-not $next.AsyncWaitHandle.WaitOne(250)) { }
-			$ctx = $next.GetAwaiter().GetResult()
-			try { Invoke-Request $ctx } catch {
-				Write-Host "$((Get-Date).ToString('HH:mm:ss')) $($ctx.Request.HttpMethod) $($ctx.Request.Url.PathAndQuery): $($_.Exception.Message)"
-				try { Send-Text $ctx 500 $_.Exception.Message } catch { }
-			} finally { Unlock-Tasks } # a task read for a change that never came is let go (tasks.ps1)
-			Use-Project $HomeProject
-			Stop-OldJobs
-			if ($script:Quitting) { Write-Host 'Quit.'; break }
-			# Updated: the new version starts in the background and waits for this one to let go of the port.
-			if ($script:Restarting) {
-				Write-Host 'Updated. Rocco restarts in the background.'
-				Start-Hidden "powershell.exe $((Get-ServeArguments $homeId $Port $true) -join ' ')" $AppDir | Out-Null
+			# Waiting, it still looks at its own memory once a minute: past its limit, it restarts.
+			while (-not $next.AsyncWaitHandle.WaitOne(250)) { if (Invoke-MemoryTick) { $forMemory = $true; break } }
+			if (-not $forMemory) {
+				$ctx = $next.GetAwaiter().GetResult()
+				Add-RequestCount $ctx.Request
+				try { Invoke-Request $ctx } catch {
+					Write-Host "$((Get-Date).ToString('HH:mm:ss')) $($ctx.Request.HttpMethod) $($ctx.Request.Url.PathAndQuery): $($_.Exception.Message)"
+					try { Send-Text $ctx 500 $_.Exception.Message } catch { }
+				} finally { Unlock-Tasks } # a task read for a change that never came is let go (tasks.ps1)
+				# PowerShell keeps every error it meets, and each keeps what it was about alive: nothing here reads them.
+				$global:Error.Clear()
+				Use-Project $HomeProject
+				Stop-OldJobs
+				if ($script:Quitting) { Write-Host 'Quit.'; break }
+				$forMemory = Invoke-MemoryTick
+			}
+			# Updated, or past its memory limit: a new Rocco starts in the background and waits for this one to let go of
+			# the port. ROCCO_NO_RESTART (the tests): this one only stops.
+			if ($script:Restarting -or $forMemory) {
+				Write-Host $(if ($forMemory) { "$((Get-Date).ToString('HH:mm:ss')) Past its memory limit. Rocco restarts in the background." } else { 'Updated. Rocco restarts in the background.' })
+				if (-not $env:ROCCO_NO_RESTART) { Start-Hidden "powershell.exe $((Get-ServeArguments $homeId $Port $true) -join ' ')" $AppDir | Out-Null }
+				$script:Restarting = $true
 				break
 			}
 		}

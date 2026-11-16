@@ -25,9 +25,10 @@ function Read-RoccoSettings {
 	[pscustomobject]@{}
 }
 
-# Where an agent's program is: on PATH, or the copy its desktop app keeps. '' when it isn't on this PC.
+# Where an agent's program is: on PATH, or the copy its desktop app keeps. '' when it isn't on this PC. Ignore, not
+# SilentlyContinue: one that isn't installed would be kept in PowerShell's error list each time it's looked for.
 function Find-AgentExe([string]$id) {
-	$command = Get-Command $Agents[$id].exe -ErrorAction SilentlyContinue | Select-Object -First 1
+	$command = Get-Command $Agents[$id].exe -ErrorAction Ignore | Select-Object -First 1
 	if ($command) { return $command.Source }
 	if ($id -eq 'codex') {
 		$exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') -Recurse -Filter codex.exe -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -58,6 +59,9 @@ function Get-Agent {
 			# testing always keeps a lane.
 			agentsAtOnce = $(if ($settings.PSObject.Properties['agentsAtOnce']) { [int]$settings.agentsAtOnce } else { 0 })
 			keepLane = [bool]($settings.PSObject.Properties['keepLane'] -and $settings.keepLane)
+			# Rocco restarts itself above this many GB (memory.ps1): 0 is the default, $MemoryLimitDefault.
+			memoryLimitGB = $(if ($settings.PSObject.Properties['memoryLimitGB']) { [double]$settings.memoryLimitGB } else { 0 })
+			memoryLimitDefault = $MemoryLimitDefault; memoryLimits = $MemoryLimits
 			agents = @($Agents.Keys | ForEach-Object { [pscustomobject]@{ id = $_; name = $Agents[$_].name; short = $Agents[$_].short; installed = ($installed -contains $_) } })
 		} }
 	}

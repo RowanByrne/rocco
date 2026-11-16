@@ -42,6 +42,8 @@ function seed(id) {
     // shared: this game's agents borrow lanes (server/loans.ps1), so a task waits for an agent, not a lane.
     lanes: { count: 8, open: [1, 2, 3, 4, 5, 6, 7], studio: [1, 2, 4, 5, 6, 7], main: true, mine: 8, shared: true, agents: 16 },
     main: { at: ago(4), subject: 'Merge agent/daily-reward' },
+    // This PC's memory (server/memory.ps1): low enough for the sidebar's line to turn amber.
+    memory: { freeGB: 7.4, totalGB: 64, roccoMB: 412, limitGB: 3, floorGB: 6, lowGB: 8, veryLowGB: 4 },
     tasks: [
       { ...base, id: 'T-038', status: 'ready', type: 'bug', lane: 2, attempt: 2, title: 'Daily reward claimable twice after rejoin', shots: [picture(200)],
         note: 'daily reward lets me claim twice if i leave and rejoin quick', summary: 'The claim saves before the reward is given now.',
@@ -741,13 +743,13 @@ const installed = id => id !== 'gemini' || fixed.has('gemini-update');
 // The conductor's model, kept per agent (server/agents.ps1): only Claude Code takes one from Rocco.
 const models = {};
 // Whether a feature the user approves gets an agent of its own (server/leads.ps1).
-let leadsOn = true, agentsAtOnce = 0, keepLane = false;
+let leadsOn = true, agentsAtOnce = 0, keepLane = false, memoryLimitGB = 0;
 export async function agent() {
   const a = AGENTS.find(x => x.id === agentId), takes = a.id === 'claude';
   return { ...a, installed: installed(a.id), chosen: true, model: models[a.id] ?? (takes ? 'claude-opus-5-5' : ''), takesModel: takes,
     models: takes ? ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'opusplan'] : [],
     effort: efforts[a.id] ?? (takes ? 'high' : ''), takesEffort: takes, efforts: takes ? ['low', 'medium', 'high', 'xhigh', 'max'] : [],
-    leads: leadsOn, agentsAtOnce, keepLane, agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
+    leads: leadsOn, agentsAtOnce, keepLane, memoryLimitGB, memoryLimitDefault: 3, memoryLimits: [1, 2, 3, 4, 6, 8, 12, 16], agents: AGENTS.map(x => ({ ...x, installed: installed(x.id) })) };
 }
 const efforts = {};
 export async function setAgentEffort(effort) {
@@ -759,6 +761,7 @@ export async function setLeads(on) { leadsOn = !!on; return agent(); }
 export async function setLaneSettings(body) {
   if ('agentsAtOnce' in body) agentsAtOnce = Number(body.agentsAtOnce) || 0;
   if ('keepLane' in body) keepLane = !!body.keepLane;
+  if ('memoryLimitGB' in body) memoryLimitGB = Number(body.memoryLimitGB) || 0;
   return agent();
 }
 // Load into a lane: the first open lane no task is in.

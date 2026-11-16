@@ -94,11 +94,12 @@ try {
 	RepoGit add -A; RepoGit commit --quiet -m 'A game for the tests'
 	$env:ROCCO_HOME = Join-Path $Temp 'home'
 	$env:ROCCO_NO_CONDUCTOR = '1'
+	$env:ROCCO_MEMORY_TICK = '2' # the server writes its memory line every 2 seconds, not every minute (memory.ps1)
 	Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
 
 	# Rocco's own functions, for the tests that call one directly.
 	$AppDir = $App; $Command = 'test'; $Project = 'Game'; $Port = 34860
-	foreach ($part in 'core', 'agents', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'loans', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
+	foreach ($part in 'core', 'agents', 'memory', 'tasks', 'thread', 'sessions', 'projects', 'codex-watch', 'conductor', 'leads', 'lanes', 'loans', 'connections', 'history', 'docs', 'actions', 'accounts', 'onboarding', 'roblox', 'updates', 'thumbnails', 'http') { . (Join-Path $App "server\$part.ps1") }
 	$ErrorActionPreference = 'Stop'
 
 	Write-Host "Rocco tests in $Temp"
@@ -300,6 +301,16 @@ try {
 		Assert-Match ((Rocco show $plan) -join "`n") 'has an agent of its own' 'show tells the conductor it isn''t its to build'
 	}
 
+	Test 'a feature of one step is the conductor''s to build, and its step is kept as a list' {
+		$plan = @(Rocco plan -Title 'Horn' -Summary 'A horn to honk.' -Steps 'Horn button|1|standard')[0]
+		Assert-Match ([IO.File]::ReadAllText((Join-Path $Tasks "$plan\task.json"))) '"steps":\s*\[' 'one step is saved as a list'
+		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
+		Assert (-not (Read-TaskJson $plan).lead) 'it gets no agent of its own'
+		Assert-Match ((Rocco list -Pending) -join "`n") "$plan\s.*\[approved\]" 'the conductor is asked to build it'
+		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { "$($_.text)" -match 'Horn has its own thread' }).Count 0 'the chat names no thread for it'
+		Rocco set $plan -Status removed | Out-Null
+	}
+
 	Test 'a card with nothing to test approves itself, and its plan moves on' {
 		$plan = @(Rocco plan -Title 'Garage' -Summary 'Players keep cars.' -Steps 'Garage records|1|standard,Garage screen|1|standard')[0]
 		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
@@ -373,7 +384,7 @@ try {
 		$gone = { param($ids) -not @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }).Count }
 
 		# Set done by hand: set closes it.
-		$plan = @(Rocco plan -Title 'Wheels' -Summary 'Rims to pick.' -Steps 'Rim shop|1|standard')[0]
+		$plan = @(Rocco plan -Title 'Wheels' -Summary 'Rims to pick.' -Steps 'Rim shop|1|standard,Rim colours|1|standard')[0]
 		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
 		New-Item -ItemType Directory -Force (Join-Path $Game "rocco\threads\$plan") | Out-Null
 		$ids = & $openAgent $plan
@@ -385,9 +396,11 @@ try {
 
 		# Its last step approved while the plan was held: the step's command couldn't finish it, and the server does,
 		# as it looks at the board.
-		$plan = @(Rocco plan -Title 'Paint' -Summary 'Colours to pick.' -Steps 'Paint booth|1|standard')[0]
+		$plan = @(Rocco plan -Title 'Paint' -Summary 'Colours to pick.' -Steps 'Paint booth|1|standard,Colour list|1|standard')[0]
 		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
 		New-Item -ItemType Directory -Force (Join-Path $Game "rocco\threads\$plan") | Out-Null
+		$first = @(Rocco new -Title 'Colour list' -Plan $plan)[0]
+		Rocco set $first -Status done | Out-Null
 		$step = @(Rocco new -Title 'Paint booth' -Plan $plan)[0]
 		$ids = & $openAgent $plan
 		$lock = New-Object IO.FileStream((Join-Path $Game "rocco\tasks\$plan\task.lock"), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
@@ -559,7 +572,7 @@ try {
 	}
 
 	Test 'tell: a feature agent and the conductor write to each other, never as the user' {
-		$plan = @(Rocco plan -Title 'Biomes' -Summary 'Fields and cliffs.' -Steps 'Shared terrain|2|standard')[0]
+		$plan = @(Rocco plan -Title 'Biomes' -Summary 'Fields and cliffs.' -Steps 'Shared terrain|2|standard,Cliff edges|2|standard')[0]
 		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
 		try {
 			Assert ([bool](Read-TaskJson $plan).lead) 'the feature has an agent of its own'
@@ -581,7 +594,7 @@ try {
 	}
 
 	Test 'the Codex Stop hook waits for a feature answer and continues the same thread' {
-		$plan = @(Rocco plan -Title 'Settings design' -Summary 'Choose a style.' -Steps 'Compare concepts|1|standard')[0]
+		$plan = @(Rocco plan -Title 'Settings design' -Summary 'Choose a style.' -Steps 'Compare concepts|1|standard,Pick one|1|standard')[0]
 		Api "/api/tasks/$plan/approve-plan" @{} | Out-Null
 		Rocco clear $plan -Thread $plan | Out-Null
 		$step = @(Rocco new -Title 'Compare concepts' -Plan $plan -Thread $plan)[0]
@@ -1194,11 +1207,114 @@ try {
 		$r = Invoke-GitNet $Repo @('ls-remote', '--heads', 'http://10.255.255.1/nothing.git') 3 $false
 		Assert (-not $r.ok) 'it failed'
 	}
+
+	Write-Host 'Memory'
+	# The app's server again, stopped after The app: these look at it.
+	Start-Server
+
+	Test 'Rocco logs its memory each tick, and the heap route says what it holds' {
+		$heap = Api '/api/debug/heap'
+		Assert ($heap.heldMB -gt 0 -and $heap.roccoMB -ge $heap.heldMB) "it says what it holds ($($heap.heldMB) MB of $($heap.roccoMB) MB)"
+		Assert-Equal $heap.limitGB 3 'and its limit, the default'
+		$log = Join-Path $env:ROCCO_HOME 'memory.log'
+		$line = ''
+		for ($i = 0; $i -lt 40 -and -not $line; $i++) {
+			Api '/api/state' | Out-Null
+			Start-Sleep -Milliseconds 250
+			if (Test-Path $log) { $line = "$(@(Get-Content $log | Where-Object { $_ -match 'GET /api/state=' }) | Select-Object -Last 1)" }
+		}
+		Assert-Match $line '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d rocco=\d+MB heap=\d+MB pcFree=[\d.]+GB \| .*GET /api/state=\d+' 'a line with its memory and what it was asked'
+		$m = (Api '/api/state').memory
+		Assert ($m.freeGB -gt 0 -and $m.roccoMB -gt 0 -and $m.floorGB -eq 6) 'the board has the PC''s free memory, for the sidebar'
+	}
+
+	Test 'past its limit, Rocco restarts itself, and the next one says why in the chat' {
+		$home2 = Join-Path $Temp 'home-memory'
+		New-Item -ItemType Directory -Force $home2 | Out-Null
+		[IO.File]::WriteAllText((Join-Path $home2 'settings.json'), '{"memoryLimitGB":0.01}', $Utf8)
+		$port = & { $l = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0); $l.Start(); $l.LocalEndpoint.Port; $l.Stop() }
+		$serve = '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $App 'rocco.ps1')`"", 'serve', '-Port', $port, '-Project', 'Game'
+		# Its own settings (a 10 MB limit), no wait before it may restart, and (ROCCO_NO_RESTART) no new Rocco started.
+		$was = $env:ROCCO_HOME
+		$env:ROCCO_HOME = $home2; $env:ROCCO_MEMORY_GRACE = '0'; $env:ROCCO_NO_RESTART = '1'
+		try { $big = Start-Process powershell -ArgumentList $serve -WindowStyle Hidden -PassThru }
+		finally { $env:ROCCO_HOME = $was; Remove-Item Env:ROCCO_MEMORY_GRACE, Env:ROCCO_NO_RESTART -ErrorAction SilentlyContinue }
+		try {
+			Assert ($big.WaitForExit(40000)) 'it stopped, to restart'
+			Assert-Equal $big.ExitCode 3 'as it does to hand over to a new Rocco'
+			Assert-Match ((Get-Content (Join-Path $home2 'memory.log')) -join "`n") 'RESTARTING: rocco=\d+MB, past the 0.01 GB limit\. Held after a full collection: \d+MB' 'the log says why, with what it held'
+			Assert (Test-Path (Join-Path $home2 'restarted.json')) 'it leaves word for the next Rocco'
+		} finally { if (-not $big.HasExited) { & taskkill.exe /T /F /PID $big.Id 2>$null | Out-Null } }
+		# The next one, with the limit back to its default, says so in the main chat.
+		[IO.File]::WriteAllText((Join-Path $home2 'settings.json'), '{}', $Utf8)
+		$env:ROCCO_HOME = $home2
+		try { $next = Start-Process powershell -ArgumentList $serve -WindowStyle Hidden -PassThru } finally { $env:ROCCO_HOME = $was }
+		try {
+			$said = $null
+			for ($i = 0; $i -lt 60 -and -not $said; $i++) {
+				Start-Sleep -Milliseconds 300
+				$said = @((Api '/api/conductor/thread').items | Where-Object { "$($_.text)" -match 'Rocco restarted itself to free memory: it had grown to [\d.]+ GB, past its 0.01 GB limit' }) | Select-Object -First 1
+			}
+			Assert ([bool]$said) 'the main chat says it restarted to free memory'
+			Assert (-not (Test-Path (Join-Path $home2 'restarted.json'))) 'once'
+		} finally { if (-not $next.HasExited) { & taskkill.exe /T /F /PID $next.Id 2>$null | Out-Null } }
+	}
+
+	Test 'a conductor stopping is asked to watch the board again, even after a watch stopped for memory' {
+		$in = Join-Path $Temp 'stop-in.json'; $out = Join-Path $Temp 'stop-out.json'
+		[IO.File]::WriteAllText($in, '{"session_id":"s","stop_hook_active":false}', $Utf8)
+		$p = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $App 'rocco.ps1')`"", 'hook', 'stop', '-Project', 'Game' -WindowStyle Hidden -PassThru -RedirectStandardInput $in -RedirectStandardOutput $out
+		Assert ($p.WaitForExit(60000)) 'the hook answers'
+		$said = [IO.File]::ReadAllText($out, $Utf8) | ConvertFrom-Json
+		Assert-Equal $said.decision 'block' 'it keeps the turn going'
+		Assert-Match $said.reason 'stopped because the PC ran low on memory, start it again anyway: Rocco asks you to' 'and asks for the watch again'
+		Assert-Match $said.reason 'This PC has [\d.]+ GB free now' 'saying how much memory is free'
+		Remove-Item (Join-Path $Game 'rocco\conductor\stop-check.json') -ErrorAction SilentlyContinue
+	}
+
+	Test 'short of memory, no new agent starts, and a parked card says why' {
+		Start-LoanGame
+		Use-Project $Game
+		$env:ROCCO_TEST_FREE_GB = '2'
+		try {
+			$id = @(Rocco new -Title 'Short of memory')[-1]
+			Assert-Throws { Rocco work $id -Branch agent/short-memory } 'only 2 GB of memory free, under 6 GB, so no new agent starts' 'no new checkout'
+			Rocco set $id -ForLane | Out-Null
+			Assert-Equal (Read-TaskJson $id).waiting 'More free memory on this PC' 'the card says what it waits for'
+			Assert (((Rocco list -Pending) -join "`n") -notmatch "$id\s.*\[lane\]") 'it isn''t handed back'
+			Assert-Match ((Rocco show $id) -join "`n") 'only 2 GB of memory free' 'show says why'
+		} finally { Remove-Item Env:ROCCO_TEST_FREE_GB -ErrorAction SilentlyContinue }
+		if ((Get-AgentsAtWork @(Get-Tasks)) -lt (Get-AgentsLimit)) {
+			Assert-Match ((Rocco list -Pending) -join "`n") "$id\s.*\[lane\]" 'with memory back, it is handed back'
+		}
+		Rocco set $id -Status removed | Out-Null
+	}
+
+	Test 'Restart Rocco above is kept, and checked' {
+		Use-Project $Game
+		$settings = Read-RoccoSettings
+		try {
+			Assert-Equal (Get-MemoryLimit) 3 'the default'
+			$a = Set-LaneSettings ([pscustomobject]@{ memoryLimitGB = 6 })
+			Assert-Equal $a.memoryLimitGB 6 'kept'
+			Assert-Equal (Get-MemoryLimit) 6 'and used'
+			Assert-Throws { Set-LaneSettings ([pscustomobject]@{ memoryLimitGB = 5 }) } 'Restart Rocco above' 'a size it doesn''t offer'
+		} finally { Save-RoccoSettings $settings }
+	}
+
+	Test 'Connections, Docs and History leave what Rocco holds flat' {
+		foreach ($route in '/api/connections', '/api/docs', '/api/history') { Api $route | Out-Null }
+		$before = (Api '/api/debug/heap').heldMB
+		for ($i = 0; $i -lt 100; $i++) { foreach ($route in '/api/connections', '/api/docs', '/api/history') { Api $route | Out-Null } }
+		$heap = Api '/api/debug/heap'
+		Assert (($heap.heldMB - $before) -lt 10) "held $before MB before, $($heap.heldMB) MB after 100 of each"
+		Assert ($heap.errors -lt 5) "and keeps no errors ($($heap.errors))"
+	}
 } finally {
 	Stop-Server
 	# The stand-ins for a lane's Lync and its open place.
 	foreach ($f in $script:LoanFixtures) { try { if ($f -is [Net.Sockets.TcpListener]) { $f.Stop() } else { $f.Close() } } catch { } }
-	Remove-Item Env:ROCCO_HOME, Env:ROCCO_NO_CONDUCTOR -ErrorAction SilentlyContinue
+	Remove-Item Env:ROCCO_HOME, Env:ROCCO_NO_CONDUCTOR, Env:ROCCO_MEMORY_TICK, Env:ROCCO_TEST_FREE_GB -ErrorAction SilentlyContinue
 	# The link to Rocco's own files goes first, by itself, and the folder is only deleted once it's gone: deleting a
 	# folder with the link still in it could reach through it into the real files.
 	if (-not $Keep) {

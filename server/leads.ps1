@@ -78,6 +78,7 @@ function Get-LeadPrompt($t, [int]$lane) {
 # needs no lane to start. As many agents at work as this PC runs at once: it waits for one to finish.
 function Start-LeadInWork($t) {
 	$id = "$($t.id)"
+	if ((Get-Conductor).state -eq 'none' -and (Wait-LeadMemory $t)) { return '' } # not for one already running
 	$dir = Get-WorkDir $t
 	if (-not $dir -or -not (Test-Path -LiteralPath $dir)) {
 		$waiting = if ((Get-AgentsAtWork @(Get-Tasks)) -ge (Get-AgentsLimit)) { 'As many agents are at work as this PC runs at once: its agent starts when one finishes' } else { '' }
@@ -96,6 +97,19 @@ function Start-LeadInWork($t) {
 	if ($t.waiting -match 'agent') { Set-Field $t 'waiting' '' }
 	Save-Task $t
 	$agent.name
+}
+
+# A feature's own agent isn't opened while the PC is short of memory (memory.ps1): its card says so, and it opens
+# once there's more. Returns whether it waits. Its line is cleared as it opens (it names an agent).
+function Wait-LeadMemory($t) {
+	if (-not (Test-MemoryShort)) { return $false }
+	$line = "$(Get-MemoryShortText): its agent starts once there's more"
+	if ("$($t.waiting)" -notmatch '^This PC has only .* of memory free') {
+		$t = Read-Task $t.id
+		Set-Field $t 'waiting' $line
+		Save-Task $t
+	}
+	$true
 }
 
 # Opens a thread's agent if it should be running and isn't. First it's given its lane, which it keeps. Returns the
@@ -118,6 +132,7 @@ function Start-Lead([string]$id) {
 		Save-Task $t
 	}
 	if ($waiting) { return '' }
+	if ((Get-Conductor).state -eq 'none' -and (Wait-LeadMemory $t)) { return '' } # not for one already running
 	if ($env:ROCCO_NO_CONDUCTOR -or (Get-Conductor).state -ne 'none') { return '' }
 	$agent = Get-Agent
 	if (-not $agent.installed) { return '' }

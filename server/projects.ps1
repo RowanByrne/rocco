@@ -136,6 +136,8 @@ function Get-State([string]$projectId) {
 		tasks = $tasks
 		others = @(Get-OtherProjects $p.id)
 		limits = Get-Limits (Get-Agent).id
+		# This PC's free memory, and Rocco's own (memory.ps1): the sidebar shows them.
+		memory = [pscustomobject]@{ freeGB = (Get-PcMemory).free; totalGB = (Get-PcMemory).total; roccoMB = Get-RoccoMemoryMB; limitGB = Get-MemoryLimit; floorGB = $MemoryFloor; lowGB = $MemoryLow; veryLowGB = $MemoryVeryLow }
 	}
 }
 

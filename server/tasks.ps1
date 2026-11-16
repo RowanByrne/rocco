@@ -123,6 +123,8 @@ function Get-LaneReady($tasks) {
 		-not @(Get-List $_.after | Where-Object { $byId[$_] -and $byId[$_].status -notin 'done', 'removed' }).Count } |
 		Sort-Object { if ($_.order) { [int]$_.order } else { 9999 } }, id)
 	if (-not $parked.Count) { return @() }
+	# None is handed back while the PC is short of memory (memory.ps1): starting it would need an agent.
+	if (Test-MemoryShort) { return @() }
 	if (Test-SharedLanes) {
 		$room = [Math]::Max(0, (Get-AgentsLimit) - (Get-AgentsAtWork $tasks))
 		return @(for ($i = 0; $i -lt [Math]::Min($room, $parked.Count); $i++) { Set-Field $parked[$i] 'pending' 'lane'; Set-Field $parked[$i] 'freeLane' 0; $parked[$i] })
@@ -135,13 +137,13 @@ function Get-LaneReady($tasks) {
 function Set-LaneWait($t, [string]$waiting) {
 	if ($t.status -ne 'queued') { Set-Status $t 'queued' }
 	Set-Field $t 'waitingFor' 'lane'
-	Set-Field $t 'waiting' $(if ($waiting) { $waiting } else { $LaneWait })
+	Set-Field $t 'waiting' $(if ($waiting) { $waiting } elseif (Test-MemoryShort) { $MemoryWait } else { $LaneWait })
 	if ($t.pending -in 'plan', 'answer', 'reopen', 'approved', 'question') { Set-Field $t 'pending' '' }
 }
 
 function Clear-LaneWait($t) {
 	Set-Field $t 'waitingFor' ''
-	if ($t.waiting -eq $LaneWait) { Set-Field $t 'waiting' '' }
+	if ($t.waiting -in $LaneWait, $MemoryWait) { Set-Field $t 'waiting' '' }
 }
 
 # The end of Up next.
@@ -717,8 +719,9 @@ function Invoke-TaskAction([string]$id, [string]$action, [string]$text) {
 			Set-Field $t 'pending' 'approved'
 			Set-Field $t 'waiting' $ToConductor
 			Add-Log $t 'you' 'Approved the plan.'
-			# It's built by an agent of its own, in its own thread (leads.ps1), unless this PC turned that off.
-			if (Test-LeadsOn) { Set-Field $t 'lead' $true; Set-Field $t 'waiting' 'Opening its own agent'; $newThread = $true }
+			# It's built by an agent of its own, in its own thread (leads.ps1), unless this PC turned that off. A plan of
+			# one step isn't: that agent would only hand its one task to a worker, which the conductor does anyway.
+			if ((Test-LeadsOn) -and @(Get-List $t.steps).Count -gt 1) { Set-Field $t 'lead' $true; Set-Field $t 'waiting' 'Opening its own agent'; $newThread = $true }
 		}
 		'revise' {
 			if (-not $text) { throw 'Say what to change.' }
