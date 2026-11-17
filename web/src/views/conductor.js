@@ -258,6 +258,16 @@ async function sendTyped(id) {
 
 const SEND_ICON = html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>`;
 
+// A question as its own sentence, then the background under it, softer, with its paragraphs and lists kept: a long
+// question isn't one block. The question is the text up to its first "?" (or its first line); one with neither, or a
+// question mark only near the end, stays whole.
+function askText(text) {
+  const t = String(text || '').trim();
+  const asked = t.match(/^([\s\S]{1,240}?\?)\s+(\S[\s\S]*)$/);
+  const [lead, more] = asked ? [asked[1], asked[2]] : t.includes('\n') ? [t.slice(0, t.indexOf('\n')), t.slice(t.indexOf('\n') + 1).trim()] : [t, ''];
+  return html`<div class="ask-lead">${proseLine(lead)}</div>${more ? html`<div class="ask-more">${prose(more)}</div>` : nothing}`;
+}
+
 function askCard(ask) {
   const got = picksOf(ask.id), i = got.length, q = ask.questions[i];
   if (!q || answering.has(ask.id)) return html`<div class="c-ask done"><span class="spin"></span>Sending your answer</div>`;
@@ -266,7 +276,7 @@ function askCard(ask) {
     : html`<button class="opt${ticked.includes(o.label) ? ' on' : ''}" data-c-pick=${o.label} data-ask=${ask.id} title=${ifDefined(o.detail || undefined)}><span>${o.label}</span></button>`;
   const pictured = (q.options || []).some(o => o.image);
   return html`<div class="c-ask${ask.expired ? ' late' : ''}" data-ask-card=${ask.id}><div class="c-ask-head"><span class="c-who">Rocco asks</span>${q.header ? html`<span class="c-tag">${q.header}</span>` : nothing}${
-    ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${proseLine(q.text)}</div>${
+    ask.questions.length > 1 ? html`<span class="ask-n">${i + 1} of ${ask.questions.length}</span>` : nothing}<span class="c-at">${hhmm(ask.at)}</span></div><div class="c-ask-q">${askText(q.text)}</div>${
     view().history?.why?.[ask.id] && !i ? html`<details class="c-why"><summary>Why Rocco asks</summary><div class="prose">${prose(view().history.why[ask.id])}</div></details>` : nothing}<div data-pic-set data-ask=${ask.id}>${pics((q.images || []).map(fileOf))}${
     q.options?.length ? html`<div class="opts${pictured ? ' with-pics' : ''}">${q.options.map(opt)}</div>` : nothing
   }</div><div class="c-reply"><textarea data-c-input=${ask.id} rows="1" placeholder=${q.options?.length ? (q.multi ? 'Tick some, or type your answer' : 'Or type your answer') : 'Type your answer'} aria-label="Your answer to Rocco" .value=${live(typedOf(ask.id))}></textarea><button type="button" class="send round" data-c-send=${ask.id} title="Send your answer" aria-label="Send your answer">${SEND_ICON}</button></div><div class="ask-foot">${
@@ -568,7 +578,7 @@ function row(e, related, prev = '') {
       return html`<div class="h-msg them"><div class="h-body"><div class="h-head"><span class="h-act ask">Asked</span>${at}</div>${e.questions.map((q, i) => {
         // The picture of the option picked, when it had one.
         const pic = reply && (q.options || []).find(o => o.image && o.label === reply.answers?.[i])?.image;
-        return html`<div class="h-qq">${proseLine(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${pic ? html`<img class="h-pic" src=${fileOf(pic)} alt="" loading="lazy">` : nothing}${reply ? reply.answers?.[i] ?? '' : 'Waiting for your answer, below'}</div>`;
+        return html`<div class="h-qq">${askText(q.text)}</div><div class="h-qa${reply ? '' : ' open'}">${pic ? html`<img class="h-pic" src=${fileOf(pic)} alt="" loading="lazy">` : nothing}${reply ? reply.answers?.[i] ?? '' : 'Waiting for your answer, below'}</div>`;
       })}</div></div>`;
     }
     case 'permission': {

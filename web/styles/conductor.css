@@ -15,7 +15,11 @@
 .c-at { margin-left: auto; font-variant-numeric: tabular-nums; }
 .c-ask-head .ask-n + .c-at { margin-left: 8px; }
 .c-ask-head .ask-n { margin-left: auto; }
-.c-ask-q { margin-top: 5px; font-size: 14px; font-weight: 400; line-height: 1.45; color: var(--text); white-space: pre-wrap; }
+.c-ask-q { margin-top: 5px; font-size: 14px; line-height: 1.5; }
+/* A question: its own sentence, then the background under it, softer (conductor.js askText). */
+.ask-lead { color: var(--text); }
+.ask-more { margin-top: 6px; font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
+.ask-more .prose p { margin: 0 0 6px; }
 .c-ask .opts { margin-top: 10px; }
 /* What the agent said just before asking, folded under the question */
 .c-why { margin-top: 6px; font-size: 13px; color: var(--text-2); }

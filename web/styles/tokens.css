@@ -17,6 +17,7 @@
   --stroke: rgba(var(--ink), .1);
   --stroke-2: rgba(var(--ink), .17);
   --text: #211e1a;
+  --text-body: #45403a;   /* running text: messages, questions. Softer than --text, which titles and names keep */
   --text-2: #5e5951;
   --text-3: #8d877e;
   --accent: #d2601a;
@@ -67,6 +68,7 @@
   --stroke: rgba(var(--ink), .09);
   --stroke-2: rgba(var(--ink), .15);
   --text: #eeeae4;
+  --text-body: #d4cec5;
   --text-2: #aea79d;
   --text-3: #7d766d;
   --accent: #ea8a42;

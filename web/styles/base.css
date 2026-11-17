@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+body { margin: 0; background: var(--bg); color: var(--text-body); overflow: hidden;
   font: 13.5px/1.45 var(--font); font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; }
 button, textarea, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
