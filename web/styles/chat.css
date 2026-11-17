@@ -106,11 +106,23 @@
 .h-qa.open { font-weight: 400; color: var(--text-3); font-style: italic; border-left-color: var(--stroke-2); }
 .h-pic { display: block; width: 120px; aspect-ratio: 16 / 10; margin: 4px 0; object-fit: cover; border-radius: 7px; background: #000; }
 /* A card, where the chat names it: its name as a link, with where it is now. No box: it reads as part of the text. */
-.tchip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 0; border: 0; background: none; font-size: 13px; color: var(--text-2); }
-.tchip .sdot { width: 6px; height: 6px; }
-.tchip:hover .tchip-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
-.tchip-name { min-width: 0; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tchip-state { flex: none; font-size: 12px; color: var(--c); }
+/* A card the chat names, small (conductor.js miniCard): under your message on the right, under Rocco's on the left. */
+.h-minis { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 100%; margin: 3px 0 1px; }
+.h-body > .h-minis { justify-content: flex-start; margin: 8px 0 2px; }
+.h-you.mine .h-minis { margin-top: 2px; }
+.mcard { position: relative; display: block; width: 116px; min-width: 0; padding: 6px 8px 6px 10px; overflow: hidden; border: 1px solid var(--stroke);
+  border-radius: var(--r-sm); background: var(--panel); text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+.mcard::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); }
+.mcard:hover { border-color: var(--stroke-2); background: color-mix(in srgb, var(--panel) 94%, var(--c)); }
+.mcard-title { display: block; font-size: 12px; line-height: 1.3; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcard-state { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 11px; color: var(--c); white-space: nowrap; }
+.mcard-state .sdot { width: 5px; height: 5px; }
+.mcard-state .sdot.live { animation: mcard-pulse 1.6s ease-in-out infinite; }
+@keyframes mcard-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .mcard-state .sdot.live { animation: none; } }
+/* How far along: a hairline along the bottom edge, one segment per step of a feature. */
+.mcard-bar { position: absolute; left: 3px; right: 0; bottom: 0; display: flex; gap: 2px; height: 2px; }
+.mcard-bar i { flex: 1; background: rgba(var(--ink), .1); }
 .h-chips { margin-top: 3px; }
 /* What happened between two messages, as plain lines under the agent's name, the way a coding agent's transcript
    shows its tool calls: a dot and a line each, the time only on hover. */
@@ -261,7 +273,8 @@
 .count { font-size: 12.5px; font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .rail-list { display: flex; flex-direction: column; margin-top: 2px; border-radius: var(--r); overflow: hidden; background: var(--panel); border: 1px solid var(--stroke);
   box-shadow: inset 3px 0 0 var(--c); }
-.rail-list > [data-id] + [data-id] { border-top: 1px solid var(--stroke); }
+/* Every row split from the next, a question Rocco asks too (it has no task id), so two never read as one. */
+.rail-list > :not(.rail-all) + :not(.rail-all) { border-top: 1px solid var(--stroke-2); }
 .rail-all { align-self: flex-start; margin: 4px 12px 10px 15px; }
 .empty { padding: 14px 8px; text-align: center; color: var(--text-3); font-size: 12.5px; }
 /* A row in the rail: no box of its own, a tint on hover */

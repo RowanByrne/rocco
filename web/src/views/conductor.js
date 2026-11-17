@@ -515,8 +515,9 @@ function answerLine(e, related) {
   return html`<span class="h-coming">${name} is reading it…</span>`;
 }
 
-const yours = (body, foot, shots = []) => html`<div class="h-you">${sentRow(shots)}${
-  body ? html`<div class="h-bubble">${body}</div>` : nothing}${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
+// cards: the cards made from it, under the bubble (minis).
+const yours = (body, foot, shots = [], cards = nothing) => html`<div class="h-you">${sentRow(shots)}${
+  body ? html`<div class="h-bubble">${body}</div>` : nothing}${cards}${foot ? html`<div class="h-you-foot">${foot}</div>` : nothing}</div>`;
 
 // The screenshots that went with what the user sent (ui/pics.js sentShots). A note sent before they were kept on the
 // message shows its card's.
@@ -526,20 +527,35 @@ function shotsOf(e) {
   return r;
 }
 
-// A card, small, where the chat mentions it: its name and where it is now. It opens the card's own conversation.
-// typed: the words the card came from. Until Rocco names the card, its title is just those words again, so only
-// where it is shows ("Up next"), not the same text twice.
-function taskChip(id, title = '', typed = '') {
-  const t = byId(id), s = t && STATUS[t.status];
-  const where = !t ? '' : t.kind === 'plan' ? (t.status === 'inbox' ? 'Plan to approve' : t.status === 'done' ? 'Built' : 'Feature')
-    : t.kind === 'question' ? (t.status === 'queued' ? 'Asked' : 'Answered') : t.kind === 'errand' ? 'Done' : s?.[0] || '';
+// A card, small, where the chat names it: its title, where it is now in its color, and for work under way a hairline
+// of how far along (a feature's steps, a task's progress). It opens the card over the page. Under your message for a
+// card made from it, on the right; under Rocco's, on the left, for each card it names.
+function miniCard(id, title = '') {
+  const t = byId(id), plan = t?.kind === 'plan';
+  const kids = plan ? state.tasks.filter(k => k.plan === id) : [];
+  // A feature under way is where its steps are: stuck if one is, else working, else to test, else up next.
+  const status = !t ? '' : plan && !['inbox', 'done', 'removed'].includes(t.status)
+    ? ['stuck', 'working', 'ready'].find(s => kids.some(k => k.status === s)) || 'queued' : t.status;
+  const label = !t ? '' : t.kind === 'question' ? (t.status === 'queued' ? 'Asked' : 'Answered') : t.kind === 'errand' ? 'Done'
+    : plan && status === 'inbox' ? 'Plan to approve' : plan && status === 'done' ? 'Built' : STATUS[status]?.[0] || '';
+  const bar = plan && kids.length ? (t.steps || []).map(s => {
+    const k = kids.find(x => x.title === s.title);
+    return html`<i style=${k ? `background:${STATUS[k.status]?.[1] || 'var(--gray)'}` : ''}></i>`;
+  }) : status === 'working' ? html`<i style="flex:0 0 ${t.progress >= 0 ? t.progress : 35}%;background:var(--c)"></i><i></i>` : null;
   const name = t?.title || title || id;
-  const flat = v => String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  const echo = !!typed && flat(typed).startsWith(flat(name).replace(/\.\.\.$/, ''));
-  if (echo && !where) return nothing; // a card that's gone: nothing left to say about it
-  return html`<button class="tchip" data-open-task=${id} style="--c:${s ? s[1] : 'var(--gray)'}" title="Open ${id}"><i class="sdot"></i>${
-    echo ? nothing : html`<span class="tchip-name">${name}</span>`}${where ? html`<span class="tchip-state">${where}</span>` : nothing}</button>`;
+  return html`<button type="button" class="mcard" style="--c:${STATUS[status]?.[1] || 'var(--gray)'}" data-open-card=${id} title=${name}><span class="mcard-title">${name}</span>${
+    label ? html`<span class="mcard-state"><i class="sdot${status === 'working' ? ' live' : ''}"></i>${label}</span>` : nothing}${bar ? html`<span class="mcard-bar">${bar}</span>` : nothing}</button>`;
 }
+// The cards a row names, each once: [id, title] pairs. A card that's gone from the board (an answered question, one
+// archived) has nothing left to show, so it's left out.
+const minis = pairs => {
+  const seenIds = new Set(), list = pairs.filter(([id]) => id && byId(id) && !seenIds.has(id) && seenIds.add(id));
+  return list.length ? html`<div class="h-minis">${list.map(([id, title]) => miniCard(id, title))}</div>` : nothing;
+};
+// The cards one of Rocco's messages names (a task id in its text shows as the card's name), the ones still known.
+const named = text => [...String(text || '').matchAll(/(?:^|[^\w-])(T-\d{3,})(?![\w-])/g)].map(m => m[1]).filter(id => byId(id)).map(id => [id]);
+// "You approved the plan for", with the card on a line of its own under it: "You approved the plan".
+const didAlone = act => (DID[act] || act).replace(/ (for|to|of|on|about)$/, '');
 
 // "Reply" on a line about a card: what's typed next goes to that card (sent back if it's waiting to be tested).
 const replyTo = id => { const t = byId(id); return t && !['done', 'removed', 'inbox'].includes(t.status) && t.kind !== 'plan' ? html`<button class="linkish h-reply" data-reply-card=${id}>Reply</button>` : nothing; };
@@ -551,7 +567,7 @@ function row(e, related, prev = '') {
     case 'said': {
       const long = (String(e.text || '').length > 900 || String(e.text || '').split('\n').length > 18) && !expanded.has(e.id);
       return html`<div class="h-msg them"><div class="h-body"><div class="h-head">${e.re && task !== prev ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
-        long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}</div></div>`;
+        long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}${minis([...(e.re && task !== prev ? [[task, e.re]] : []), ...named(e.text)])}</div></div>`;
     }
     case 'message': {
       // Rocco's own word to the agent (Fix lanes): a line, in the words meant for the user.
@@ -561,15 +577,15 @@ function row(e, related, prev = '') {
       // A message is just a message: a card shows under it only once the agent makes one from it (rocco.ps1 new -From).
       const made = related.get('made') || [];
       return yours(e.text, html`${e.via === 'terminal' ? html`<span>in its window</span>` : nothing}${KIND[e.type] ? html`<span>${KIND[e.type]}</span>` : nothing}${
-        made.map(x => taskChip(x.task, x.title, e.text))}${answerLine(e, related)}${at}`, (e.shots || []).map(fileOf));
+        answerLine(e, related)}${at}`, (e.shots || []).map(fileOf), minis(made.map(x => [x.task, x.title])));
     }
     case 'sent': {
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
       const typed = e.act === 'note' || e.act === 'question';
       const { text, shots } = shotsOf(e);
-      if (typed || (SAID[e.act] && e.text)) return yours(text || (shots.length ? '' : e.title || ''), html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${task ? taskChip(task, e.title, e.text || e.title) : nothing}${at}`, shots);
-      // Something you did to a card, with no words: a small line on your side.
-      return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${DID[e.act] || e.act}</span>${task ? taskChip(task, e.title) : html`<span>${e.title || ''}</span>`}${at}</div></div>`;
+      if (typed || (SAID[e.act] && e.text)) return yours(text || (shots.length ? '' : e.title || ''), html`${typed ? nothing : html`<span>${SAID[e.act]}</span>`}${at}`, shots, minis([[task, e.title]]));
+      // Something you did to a card, with no words: a small line on your side, the card under it.
+      return html`<div class="h-you mine"><div class="h-you-foot"><span>You ${task ? didAlone(e.act) : DID[e.act] || e.act}</span>${task ? nothing : html`<span>${e.title || ''}</span>`}${at}</div>${minis([[task, e.title]])}</div>`;
     }
     case 'asked': {
       const reply = related.get('answered')?.[0];
@@ -660,7 +676,7 @@ function historyView() {
   if (!history) return v.loadError ? failed : html`<div class="h-empty"><span class="spin"></span>Loading</div>`;
   // What was sent and is in the thread now is drawn from the thread; the rest is still on its way, at the end.
   if (v.history) v.outbox = v.outbox.filter(o => !arrived(o, v.history.items));
-  const sending = v.older ? [] : v.outbox.map(o => yours(o.text, html`${o.kind === 'sent' ? html`<span>${SAID[o.act]}</span>${taskChip(o.task, o.title)}` : KIND[o.type] ? html`<span>${KIND[o.type]}</span>` : nothing}<span class="h-sending">${o.done ? 'Sent' : 'Sending'}</span>`, o.shots || []));
+  const sending = v.older ? [] : v.outbox.map(o => yours(o.text, html`${o.kind === 'sent' ? html`<span>${SAID[o.act]}</span>` : KIND[o.type] ? html`<span>${KIND[o.type]}</span>` : nothing}<span class="h-sending">${o.done ? 'Sent' : 'Sending'}</span>`, o.shots || [], o.kind === 'sent' ? minis([[o.task, o.title]]) : nothing));
   const nav = historyNav(v, history);
   // Index the lines that annotate another row once per page, rather than scanning for them on each row.
   const related = new Map();
@@ -1028,6 +1044,7 @@ export function initConductor() {
       expanded.add(hit('[data-more]').dataset.more);
       renderHistory();
     } else if (hit('[data-history-retry]')) loadHistory();
+    else if (hit('[data-open-card]')) emit('open-card', hit('[data-open-card]').dataset.openCard); // a mini card: the card itself
     else if (hit('[data-open-task]') && !hit('a')) emit('open-task', hit('[data-open-task]').dataset.openTask);
   });
   // The chat's room changes (a question opens under it, the note box grows): read at its end, it stays at its end.
