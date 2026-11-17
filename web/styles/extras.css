@@ -18,7 +18,7 @@
 .checks { border: 1px solid var(--stroke); border-radius: var(--r); }
 .check + .check { border-top: 1px solid var(--stroke); }
 .check-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 12.5px; color: var(--text-2); }
-.check-mark { flex: none; display: inline-flex; width: 16px; justify-content: center; font-weight: 700; }
+.check-mark { flex: none; display: inline-flex; width: 16px; justify-content: center; font-weight: 600; }
 .check.ok .check-mark { color: var(--green); }
 .check.bad .check-mark, .check.bad .check-text { color: var(--red); }
 .check-text { flex: 1; min-width: 0; }
@@ -56,7 +56,7 @@ button.chg > svg { flex: none; width: 12px; height: 12px; color: var(--text-3); 
 .use-stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
 .use-stat span { font-size: 12px; color: var(--text-3); }
 .use-cols, .use-head { display: flex; align-items: center; gap: 10px; padding: 8px 4px; font-size: 12px; color: var(--text-3); }
-.use-head { margin-top: 10px; color: var(--text); font-weight: 600; border-bottom: 1px solid var(--stroke-2); }
+.use-head { margin-top: 10px; color: var(--text); font-weight: 500; border-bottom: 1px solid var(--stroke-2); }
 .use-cols .use-title { padding-left: 56px; }
 .use-n { flex: none; width: 62px; text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-2); }
 .use-n.out { color: var(--text-3); }
@@ -67,7 +67,7 @@ button.chg > svg { flex: none; width: 12px; height: 12px; color: var(--text-3); 
 .cond-used { margin-left: 8px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* Another project wants the user: a number beside it in the project picker, and a dot on the picker itself. */
-.mi-wants { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; color: var(--on-fill); background: var(--amber); }
+.mi-wants { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 500; line-height: 18px; text-align: center; color: var(--on-fill); background: var(--amber); }
 #projBtn.wants { position: relative; }
 #projBtn.wants::after { content: ''; position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
 

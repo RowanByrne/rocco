@@ -10,7 +10,7 @@
 .ob-card > * { position: relative; }
 
 .ob-top { display: flex; align-items: center; gap: 12px; padding: 16px 16px 0 26px; min-height: 44px; }
-.ob-label { flex: none; font-size: 12.5px; font-weight: 600; color: var(--accent-text); white-space: nowrap; }
+.ob-label { flex: none; font-size: 12.5px; font-weight: 500; color: var(--accent-text); white-space: nowrap; }
 .ob-count { margin-left: 6px; font-weight: 400; color: var(--text-3); }
 .ob-top .sp { flex: 1; }
 .ob-progress { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: var(--glass-3); }
@@ -54,7 +54,7 @@
 
 /* Lanes: this PC, then one chip per number, the suggested one dotted */
 .ob-pc { display: grid; gap: 2px; margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; background: var(--glass); border: 1px solid var(--stroke); }
-.ob-pc b { font-size: 13px; font-weight: 600; }
+.ob-pc b { font-size: 13px; font-weight: 500; }
 .ob-pc span { font-size: 12.5px; color: var(--text-2); }
 .ob-lanes { margin-bottom: 12px; }
 .ob-lane { min-width: 42px; padding: 0 10px; position: relative; font-variant-numeric: tabular-nums; }
@@ -65,8 +65,8 @@
 .ob-review { display: grid; gap: 2px; margin-bottom: 14px; }
 .ob-rev { display: grid; gap: 2px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; text-align: left; color: inherit; }
 .ob-rev:hover { background: var(--glass-2); }
-.ob-rev small { font-size: 11px; font-weight: 600; color: var(--text-3); }
-.ob-rev .q { font-weight: 500; }
+.ob-rev small { font-size: 11px; font-weight: 500; color: var(--text-3); }
+.ob-rev .q { font-weight: 400; }
 .ob-rev .a { color: var(--text-2); font-size: 13px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ob-rev .a.skipped { color: var(--text-3); font-style: italic; }
 
@@ -88,11 +88,11 @@
   font-size: 12.5px; background: var(--glass); border: 1px solid var(--stroke); transition: border-color .15s, background .15s; }
 .ob-tile:hover { border-color: rgba(var(--accent-rgb), .45); background: rgba(var(--accent-rgb), .06); }
 .ob-tile-head { display: flex; align-items: center; gap: 6px; }
-.ob-tile-head b { flex: 1; font-size: 14px; font-weight: 600; color: var(--text); }
+.ob-tile-head b { flex: 1; font-size: 14px; font-weight: 500; color: var(--text); }
 .ob-tile-head svg { color: var(--green); }
 .ob-tile.filled { border-color: rgba(var(--green-rgb), .3); }
 .ob-tq { display: grid; gap: 4px; margin-bottom: 16px; }
-.ob-tq-prompt { font-weight: 600; font-size: 14.5px; }
+.ob-tq-prompt { font-weight: 500; font-size: 14.5px; }
 
 /* The Workboard, before the first game */
 .first-game { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; padding: 16px 18px; border-radius: 16px;
@@ -108,14 +108,14 @@
 .ob-status.warn > span { flex: 1; }
 .acc-sec { margin-top: 18px; }
 .acc-sec-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 6px; }
-.acc-sec-head b { font-size: 14px; font-weight: 600; }
+.acc-sec-head b { font-size: 14px; font-weight: 500; }
 .acc-sec-head span { font-size: 12.5px; color: var(--text-3); }
 .acc-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 10px 12px; border-radius: 12px;
   background: var(--glass); border: 1px solid var(--stroke); }
 .acc-row + .acc-row { margin-top: 6px; }
 .acc-text { display: grid; gap: 2px; min-width: 0; }
-.acc-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.acc-chip { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--accent-text); background: rgba(var(--accent-rgb), .14); }
+.acc-name { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.acc-chip { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 400; color: var(--accent-text); background: rgba(var(--accent-rgb), .14); }
 .acc-need { font-size: 12.5px; color: var(--text-3); }
 .acc-state { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
 .acc-state i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--gray); }

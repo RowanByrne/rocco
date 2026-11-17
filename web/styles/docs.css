@@ -23,7 +23,7 @@
 .dt-chev { display: grid; width: 13px; transition: transform .15s; transform: rotate(90deg); }
 .dt-group.shut > .dt-folder .dt-chev { transform: none; }
 .dt-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dt-folder .dt-name { font-weight: 500; }
+.dt-folder .dt-name { font-weight: 400; }
 .dt-count { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .dt-file.on { background: var(--glass-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--stroke); }
 .dt-file.on svg { color: var(--accent-text); }
@@ -44,10 +44,10 @@
 .doc-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 0 18px; }
 .doc-crumbs { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .doc-crumbs i { font-style: normal; margin: 0 5px; opacity: .55; }
-.doc-crumbs b { font-weight: 500; color: var(--text); }
+.doc-crumbs b { font-weight: 400; color: var(--text); }
 .doc-tabs { display: inline-flex; flex: none; padding: 2px; border-radius: 9px; background: rgba(var(--ink), .03); border: 1px solid var(--stroke); }
 .doc-tabs button { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent;
-  font-size: 12.5px; font-weight: 500; color: var(--text-3); transition: background .12s, color .12s; }
+  font-size: 12.5px; font-weight: 400; color: var(--text-3); transition: background .12s, color .12s; }
 .doc-tabs button:hover:not(:disabled) { color: var(--text); }
 .doc-tabs button.on { color: var(--text); background: var(--glass-3); box-shadow: inset 0 0 0 1px var(--stroke-2); }
 .doc-tabs button:disabled { opacity: .45; cursor: default; }
@@ -86,11 +86,11 @@
 .doc-blank { padding: 48px 24px 28px; text-align: center; }
 .doc-blank .blank-icon svg { width: 22px; height: 22px; }
 .doc-recents { max-width: 520px; margin: 26px auto 0; text-align: left; }
-.doc-recents-label { padding: 0 10px 6px; font-size: 11.5px; font-weight: 500; color: var(--text-3); }
+.doc-recents-label { padding: 0 10px 6px; font-size: 11.5px; font-weight: 400; color: var(--text-3); }
 .doc-recent { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; text-align: left; color: var(--text-2); }
 .doc-recent:hover { background: var(--glass-2); color: var(--text); }
 .doc-recent svg { color: var(--text-3); }
-.dr-name { flex: none; max-width: 45%; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dr-name { flex: none; max-width: 45%; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dr-path { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dr-at { flex: none; font-size: 11.5px; color: var(--text-3); }
 
@@ -100,8 +100,8 @@
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { color: var(--text); scroll-margin-top: 16px; }
 .md h1 { margin: 0 0 14px; font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
 .md h2 { margin: 30px 0 10px; padding-bottom: 7px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; border-bottom: 1px solid var(--stroke); }
-.md h3 { margin: 22px 0 8px; font-size: 14.5px; font-weight: 600; }
-.md h4, .md h5, .md h6 { margin: 18px 0 6px; font-size: 13.5px; font-weight: 600; }
+.md h3 { margin: 22px 0 8px; font-size: 14.5px; font-weight: 500; }
+.md h4, .md h5, .md h6 { margin: 18px 0 6px; font-size: 13.5px; font-weight: 500; }
 .md p { margin: 0 0 12px; }
 .md strong { color: var(--text); font-weight: 600; }
 .md a { color: var(--accent-text); text-decoration: none; }
@@ -124,6 +124,6 @@
 .md table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
 .md th, .md td { padding: 7px 11px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--stroke); }
 .md th + th, .md td + td { border-left: 1px solid var(--stroke); }
-.md th { font-weight: 600; color: var(--text); background: rgba(var(--ink), .03); }
+.md th { font-weight: 500; color: var(--text); background: rgba(var(--ink), .03); }
 .md tr:last-child td { border-bottom: 0; }
 .md-link, .md-img { color: var(--text); border-bottom: 1px dotted var(--text-3); }

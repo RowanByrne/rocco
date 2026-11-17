@@ -10,12 +10,12 @@
 .c-ask.late, .c-perm.late { border-style: dashed; animation: none; }
 .c-perm.sending { opacity: .55; pointer-events: none; }
 .c-ask-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-3); }
-.c-who { font-weight: 600; color: var(--amber-text); }
+.c-who { font-weight: 500; color: var(--amber-text); }
 .c-tag { padding: 1px 7px; border-radius: 99px; font-size: 11px; color: var(--amber-text); background: rgba(var(--amber-rgb), .14); }
 .c-at { margin-left: auto; font-variant-numeric: tabular-nums; }
 .c-ask-head .ask-n + .c-at { margin-left: 8px; }
 .c-ask-head .ask-n { margin-left: auto; }
-.c-ask-q { margin-top: 5px; font-size: 14px; font-weight: 500; line-height: 1.45; color: var(--text); white-space: pre-wrap; }
+.c-ask-q { margin-top: 5px; font-size: 14px; font-weight: 400; line-height: 1.45; color: var(--text); white-space: pre-wrap; }
 .c-ask .opts { margin-top: 10px; }
 /* What the agent said just before asking, folded under the question */
 .c-why { margin-top: 6px; font-size: 13px; color: var(--text-2); }
@@ -38,7 +38,7 @@
 /* The note box, when what's typed is for one message or one card */
 .note-mode { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 3px 4px 3px 10px; border-radius: var(--r-sm); font-size: 12px;
   background: rgba(var(--accent-rgb), .08); border: 1px solid rgba(var(--accent-rgb), .25); }
-.nm-label { flex: none; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent-text); }
+.nm-label { flex: none; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--accent-text); }
 .nm-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .nm-x { flex: none; width: 22px; height: 22px; margin-left: auto; border: 0; border-radius: 6px; background: none; color: var(--text-3); font-size: 15px; line-height: 1; }
 .nm-x:hover { color: var(--text); background: var(--glass-2); }
