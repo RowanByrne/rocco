@@ -131,6 +131,9 @@
 .h-event.of-card { cursor: pointer; }
 .h-event.of-card:hover .h-line { color: var(--text); }
 .h-event.mine .h-dot { background: var(--text-3); opacity: .5; }
+/* A line about a card: just the card, as a mini card on the left (conductor.js row 'event'). */
+.h-ev-card { margin: 2px 0; }
+.h-ev-card .mcard { flex: 0 1 auto; width: auto; max-width: min(260px, 60%); }
 .h-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .h-event.mine .h-line { flex: none; color: var(--text-3); }
 .h-event .h-at, .h-steps-head .h-at { margin-left: auto; opacity: 0; transition: opacity .15s; }

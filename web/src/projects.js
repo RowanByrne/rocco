@@ -20,6 +20,6 @@ export function switchProject(id) {
   state.conn = null;
   state.history = null;
   state.docs = null;
-  state.meta = { project: state.projects.find(p => p.id === id) || null, lanes: { count: 0, open: [], main: false }, conductor: { state: 'none' }, leads: [], main: {}, limits: state.meta.limits };
+  state.meta = { project: state.projects.find(p => p.id === id) || null, lanes: { count: 0, open: [], main: false }, conductor: { state: 'none' }, leads: [], main: {}, limits: state.meta.limits, memory: state.meta.memory };
   emit('project');
 }

@@ -187,8 +187,10 @@ export async function sendMessage(text, { to = '', type = '', shots = [], thread
   if (r.opened) toast(`${r.opened} started, minimized in your taskbar, to pick it up`, 'var(--claude)');
 }
 
-// What the user typed, sent in the note box's mode. Returns false when it's a plain note.
-export async function sendInMode(text) {
+// What the user typed, sent in the note box's mode, with any screenshots pasted or attached ({ file, url }). To a
+// card they go up onto the card first and are named in the words ("Screenshots: shot-3.png"), as a send-back from its
+// sheet does; to an agent's thread, or a reply, they go with the message. Returns false when it's a plain note.
+export async function sendInMode(text, shots = []) {
   const m = noteMode();
   if (!m) return false;
   const was = mode, thread = active;
@@ -196,11 +198,17 @@ export async function sendInMode(text) {
   try {
     if (m.kind === 'card') {
       const t = byId(was.task), act = cardAction(t);
-      const r = await showSending({ kind: 'sent', act, task: t.id, title: t.title, text }, thread, () => api.act(t.id, act, text));
+      const o = { kind: 'sent', act, task: t.id, title: t.title, text, shots: shots.map(s => s.url) };
+      const r = await showSending(o, thread, async () => {
+        const names = [];
+        for (const s of shots) names.push((await api.shot(t.id, s.file)).name || '');
+        const named = names.filter(Boolean);
+        return api.act(t.id, act, [text, named.length ? `Screenshots: ${named.join(', ')}` : ''].filter(Boolean).join('\n'));
+      });
       await refresh();
       toast(`${t.status === 'ready' ? 'Sent back' : t.status === 'stuck' ? 'Answer sent' : 'Added'}: ${t.title}${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
     } else {
-      await sendMessage(text, { to: m.kind === 'reply' ? was.to : '', thread });
+      await sendMessage(text, { to: m.kind === 'reply' ? was.to : '', thread, shots });
     }
     stickToEnd();
   } catch (e) {
@@ -603,9 +611,13 @@ function row(e, related, prev = '') {
       return html`<div class="h-event perm"><span class="h-dot"></span><span class="h-line">${e.worker ? 'A worker' : 'Rocco'} asked to: ${e.text}</span><span class="h-verdict v-${d ? (d.allow ? 'yes' : 'no') : 'wait'}">${verdict}</span>${at}</div>`;
     }
     case 'event': {
-      // A line about a card, in the color of where the card is now.
-      const t = task && byId(task), s = t && STATUS[t.status];
-      return html`<div class="h-event${task ? ' of-card' : ''}" data-open-task=${ifDefined(task)} style=${ifDefined(s ? `--c:${s[1]}` : undefined)}><span class="h-dot"></span><span class="h-line">${e.text}</span>${task ? replyTo(task) : nothing}${at}</div>`;
+      // About a card still on the board ("Started: Rebalance the road"): just the card, as a mini card on the left,
+      // which says where it is now and opens it. Anything else (a card that's gone, Main) stays a line.
+      if (task && byId(task)) {
+        const text = String(e.text || ''), cut = text.indexOf(': ');
+        return html`<div class="h-event h-ev-card">${miniCard(task, cut > 0 ? text.slice(cut + 2) : '')}${replyTo(task)}${at}</div>`;
+      }
+      return html`<div class="h-event"><span class="h-dot"></span><span class="h-line">${e.text}</span>${at}</div>`;
     }
   }
   return nothing;

@@ -98,11 +98,13 @@ async function addNote() {
   // What it still hears after this isn't part of the note.
   if (listening()) cancelVoice();
   const note = text().value.trim(), shots = drafts, noteType = type;
-  // Answering the conductor, or replying to it: words only. Screenshots stay for a note.
+  // To a card, a feature's (or a card's) own agent, or a reply to Rocco: the screenshots go with the words.
   if (noteMode()) {
-    if (!note) { text().focus(); return; }
+    if (!note && !shots.length) { text().focus(); return; }
     setText('');
-    try { await sendInMode(note); } catch { putBack(note); }
+    drafts = [];
+    renderDrafts();
+    try { await sendInMode(note, shots); } catch { if (note) putBack(note); drafts = [...shots, ...drafts]; renderDrafts(); }
     return;
   }
   if (!note && !shots.length) return;
