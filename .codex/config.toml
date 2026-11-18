@@ -1,0 +1,8 @@
+[features]
+computer_use = false
+
+[plugins."computer-use@openai-bundled"]
+enabled = false
+
+[plugins."unified-computer-use@openai-bundled"]
+enabled = false

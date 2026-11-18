@@ -126,11 +126,15 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	$extra = @()
 	if (-not $dir) { $dir = $RepoDir }
 	$set = @{ ROCCO_THREAD = "$($script:ThreadId)" }
+	$computerUseOff = @('--disable', 'computer_use', '-c', 'plugins.computer-use@openai-bundled.enabled=false', '-c', 'plugins.unified-computer-use@openai-bundled.enabled=false')
+	$prompt += ' Never use the Computer Use skill or its desktop-control tools for Rocco work. Include this rule in every worker brief.'
+	$prompt += " Start separately launched Codex workers with $($computerUseOff -join ' '). If a worker launcher cannot forward these options, pass them directly to codex exec."
 	$codexWatch = @()
 	$hooks = [bool]$Agents[$agent.id].hooks
 	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
 	# Codex: Rocco's Stop hook watches the board at the end of each turn, where its version supports one (codex-watch.ps1).
 	if ($agent.id -eq 'codex') {
+		$extra += $computerUseOff
 		if (-not $script:ThreadId) { $extra += '--approve-for-me' }
 		$codexWatch = @(Get-CodexWatchArguments $dir)
 		if ($codexWatch.Count) {

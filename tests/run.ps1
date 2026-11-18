@@ -791,6 +791,7 @@ try {
 	Test 'Codex conductors start with Approve for me on first launch and keep it with the Stop hook' {
 		$settings = Read-RoccoSettings
 		$launch = @{}
+		$disabled = '--disable|computer_use|-c|plugins.computer-use@openai-bundled.enabled=false|-c|plugins.unified-computer-use@openai-bundled.enabled=false|'
 		function Find-AgentExe([string]$id) { "C:\fake\$id.exe" }
 		function Get-CodexWatchArguments { if ($launch.hookAvailable) { '-c', 'fake-stop-hook' } }
 		function Start-Process {
@@ -804,15 +805,17 @@ try {
 		try {
 			Set-Agent 'codex' | Out-Null
 			Open-Conductor 'Watch the board' | Out-Null
-			Assert-Match $launch.arguments '^--approve-for-me\|Watch the board\b' 'the conductor requests automatic review on the first launch'
+			Assert ($launch.arguments.StartsWith($disabled + '--approve-for-me|Watch the board')) 'the first conductor disables Computer Use and requests automatic review'
+			Assert-Match $launch.arguments 'Never use the Computer Use skill.*every worker brief' 'all worker briefs carry the rule'
+			Assert ($launch.arguments.Contains($disabled.TrimEnd('|').Replace('|', ' '))) 'independent Codex workers receive the same disable options as the conductor'
 			Assert-Match $launch.arguments 'write_stdin' 'an unsupported Codex launch asks the agent to poll'
 			$launch.hookAvailable = $true
 			Open-Conductor 'Watch the board' | Out-Null
-			Assert-Match $launch.arguments '^--approve-for-me\|-c\|fake-stop-hook\|Watch the board\b' 'the conductor keeps automatic review alongside the Stop hook'
+			Assert ($launch.arguments.StartsWith($disabled + '--approve-for-me|-c|fake-stop-hook|Watch the board')) 'the conductor keeps both settings with the Stop hook'
 			Use-Thread 'T-900'
 			$lane = Join-Path $Game 'lanes\lane1'
 			Open-Conductor 'Build this feature' $lane | Out-Null
-			Assert-Match $launch.arguments '^-c\|fake-stop-hook\|Build this feature' 'the lead gets the Stop hook before the prompt, and no permission flags'
+			Assert ($launch.arguments.StartsWith($disabled + '-c|fake-stop-hook|Build this feature')) 'the feature lead disables Computer Use and keeps its Stop hook'
 			Assert-Match $launch.arguments 'Stop hook' 'the prompt tells the lead it can use its hook'
 			Assert ($launch.arguments -notmatch 'write_stdin') 'a hooked agent can end its turn'
 			Assert-Equal $launch.set.ROCCO_THREAD 'T-900' 'the lead watches its own thread'
@@ -822,6 +825,7 @@ try {
 			Set-Agent 'gemini' | Out-Null
 			Open-Conductor 'Watch the board' | Out-Null
 			Assert-Match $launch.arguments '^-i\|Watch the board\b' 'other agents keep their launch arguments'
+			Assert-Match $launch.arguments 'Never use the Computer Use skill.*separately launched Codex workers' 'other agents receive the rule for themselves and their workers'
 		} finally {
 			Use-Thread ''
 			Save-RoccoSettings $settings
