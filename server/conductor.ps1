@@ -131,6 +131,7 @@ function Open-Conductor([string]$prompt, [string]$dir = '', [string]$as = '') {
 	if ($hooks) { $extra = $Agents[$agent.id].hooks, (Write-ConductorHooks); $prompt = "$prompt $InRocco" }
 	# Codex: Rocco's Stop hook watches the board at the end of each turn, where its version supports one (codex-watch.ps1).
 	if ($agent.id -eq 'codex') {
+		if (-not $script:ThreadId) { $extra += '--approve-for-me' }
 		$codexWatch = @(Get-CodexWatchArguments $dir)
 		if ($codexWatch.Count) {
 			$extra += $codexWatch

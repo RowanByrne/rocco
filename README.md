@@ -196,6 +196,7 @@ A feature you approve is built by an agent of its own, not by the conductor's wo
 
 You follow the conductor in Rocco, not in its window.
 
+- **Codex permissions.** When Codex is the selected agent, Rocco starts the project's conductor with `--approve-for-me` from the first onboarding session. Codex uses its workspace sandbox and sends approval requests to automatic review. This requires a Codex CLI that supports `--approve-for-me`.
 - **Codex handoff.** Rocco enables a Stop hook on Codex versions that support it. The hook listens at the end of a turn and continues the same session when the user sends something to its thread. Without the hook, Codex keeps the turn open and polls `wait` until it returns.
 - **The chat** is where you follow it ("The chat", above): what it says and does, with its questions under it, and its status line under the note box: listening, working on a step ("Rocco · Merge the trade branch"), asking you something, or not running.
 - **Its questions** show above the note box, each with its short options (the detail on hover), its pictures, "Let Rocco decide", and its own answer box: type there and Enter sends it (on a multi-select, with what's ticked). What's typed in it stays through the board's refreshes. **Reply** on a message turns the note box into a reply ("Replying to Rocco ×"; the × makes it a note again), sent as a message, not a card. What you send comes back to it through `wait`, as `[message]` or `[answer]`.
