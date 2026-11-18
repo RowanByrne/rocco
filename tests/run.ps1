@@ -853,7 +853,7 @@ try {
 		Assert-Equal "$($l.five.used) $($null -eq $l.week) $($l.other[0].used) $($l.other[0].minutes)" '52 True 23 1440' 'an older response keeps both its standard and custom windows'
 	}
 
-	Test 'Codex conductors and leads start with their own permissions, and the Stop hook where there is one' {
+	Test 'Codex conductors start with Approve for me on first launch and keep it with the Stop hook' {
 		$settings = Read-RoccoSettings
 		$launch = @{}
 		function Find-AgentExe([string]$id) { "C:\fake\$id.exe" }
@@ -869,10 +869,12 @@ try {
 		try {
 			Set-Agent 'codex' | Out-Null
 			Open-Conductor 'Watch the board' | Out-Null
-			Assert ($launch.arguments -notmatch '--sandbox|--ask-for-approval|--approve-for-me|danger-full-access') 'the conductor starts with the user''s own Codex permissions'
+			Assert-Match $launch.arguments '^--approve-for-me\|Watch the board\b' 'the conductor requests automatic review on the first launch'
 			Assert-Match $launch.arguments 'write_stdin' 'an unsupported Codex launch asks the agent to poll'
-			Use-Thread 'T-900'
 			$launch.hookAvailable = $true
+			Open-Conductor 'Watch the board' | Out-Null
+			Assert-Match $launch.arguments '^--approve-for-me\|-c\|fake-stop-hook\|Watch the board\b' 'the conductor keeps automatic review alongside the Stop hook'
+			Use-Thread 'T-900'
 			$lane = Join-Path $Game 'lanes\lane1'
 			Open-Conductor 'Build this feature' $lane | Out-Null
 			Assert-Match $launch.arguments '^-c\|fake-stop-hook\|Build this feature' 'the lead gets the Stop hook before the prompt, and no permission flags'
