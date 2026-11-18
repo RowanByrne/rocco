@@ -2,6 +2,7 @@
 // and the tokens its agent's sessions used, which Claude Code records with each message (server/sessions.ps1). These
 // are counts of tokens, not money: what they cost depends on the user's plan, which Rocco doesn't know.
 import { html, nothing } from '../lib/html.js';
+import { ticket } from '../state.js';
 import { $ } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
 import { api } from '../api.js';
@@ -15,7 +16,7 @@ const sum = (rows, of) => rows.reduce((n, r) => n + of(r), 0);
 const totals = rows => ({ in: sum(rows, r => r.in), out: sum(rows, r => r.out), cacheRead: sum(rows, r => r.cacheRead), cacheWrite: sum(rows, r => r.cacheWrite) });
 
 function row(t) {
-  return html`<div class="s-row use-row" data-use=${t.id} tabindex="0" role="button"><span class="s-id">${t.id}</span><span class="use-title">${t.title}</span><span class="use-n" title="Time at work">${t.worked ? duration(t.worked) : ''}</span><span class="use-n" title=${tokenDetail(t)}>${allTokens(t) ? tokens(allTokens(t)) : ''}</span><span class="use-n out" title="Tokens the model wrote">${t.out ? tokens(t.out) : ''}</span></div>`;
+  return html`<div class="s-row use-row" data-use=${t.id} tabindex="0" role="button"><span class="s-id">${ticket(t.id)}</span><span class="use-title">${t.title}</span><span class="use-n" title="Time at work">${t.worked ? duration(t.worked) : ''}</span><span class="use-n" title=${tokenDetail(t)}>${allTokens(t) ? tokens(allTokens(t)) : ''}</span><span class="use-n out" title="Tokens the model wrote">${t.out ? tokens(t.out) : ''}</span></div>`;
 }
 
 function group(name, rows) {

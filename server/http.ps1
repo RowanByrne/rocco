@@ -159,18 +159,18 @@ function Invoke-Request($ctx) {
 		if ($path -eq '/api/docs/file') { Send-Json $ctx (Read-Doc $req.QueryString['path'] $project.template); return }
 		if ($path -eq '/api/onboarding') { Send-Json $ctx ([pscustomobject]@{ survey = (Get-Survey $RepoDir); answers = (Read-Answers) }); return }
 		# One task by its id, on the board or put away: a link to a task opens it.
-		if ($path -match '^/api/tasks/(T-\d+)$') {
+		if ($path -match "^/api/tasks/($TaskIdPattern)$") {
 			try { Send-Json $ctx (Get-Task $Matches[1]) } catch { Send-Text $ctx 404 "There's no task $($Matches[1]) in this project." }
 			return
 		}
-		if ($path -match '^/api/tasks/(T-\d+)/changes$') { Send-Json $ctx (Get-TaskChanges (Get-Task $Matches[1])); return }
+		if ($path -match "^/api/tasks/($TaskIdPattern)/changes$") { Send-Json $ctx (Get-TaskChanges (Get-Task $Matches[1])); return }
 		# One changed file's lines, as git shows them (history.ps1).
-		if ($path -match '^/api/tasks/(T-\d+)/diff$') { Send-Json $ctx (Get-TaskDiff (Get-Task $Matches[1]) ([string]$req.QueryString['path'])); return }
+		if ($path -match "^/api/tasks/($TaskIdPattern)/diff$") { Send-Json $ctx (Get-TaskDiff (Get-Task $Matches[1]) ([string]$req.QueryString['path'])); return }
 		# Its agent's sessions (sessions.ps1), then each one's lines from where the app got to.
-		if ($path -match '^/api/tasks/(T-\d+)/sessions$') { Send-Json $ctx @(Get-TaskSessions (Get-Task $Matches[1])); return }
-		if ($path -match '^/api/tasks/(T-\d+)/session$') { Send-SessionText $ctx (Get-Task $Matches[1]) ([string]$req.QueryString['key']) ([long]$req.QueryString['from']); return }
+		if ($path -match "^/api/tasks/($TaskIdPattern)/sessions$") { Send-Json $ctx @(Get-TaskSessions (Get-Task $Matches[1])); return }
+		if ($path -match "^/api/tasks/($TaskIdPattern)/session$") { Send-SessionText $ctx (Get-Task $Matches[1]) ([string]$req.QueryString['key']) ([long]$req.QueryString['from']); return }
 		# A task's screenshot or audio option, or the output of a check its worker ran (check-N.txt).
-		if ($path -match '^/files/(T-\d+)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a)|check-\d+\.txt)$' -and $Matches[2] -notmatch '\.\.') {
+		if ($path -match "^/files/($TaskIdPattern)/([\w.-]+\.(png|jpe?g|gif|webp|mp3|ogg|wav|m4a)|check-\d+\.txt)$" -and $Matches[2] -notmatch '\.\.') {
 			$name = $Matches[2]
 			$file = try { Join-Path (Get-TaskDir $Matches[1]) $name } catch { '' }
 			if ($file -and (Test-Path -LiteralPath $file -PathType Leaf)) { Send $ctx 200 $Mime[[IO.Path]::GetExtension($file).ToLower()] ([IO.File]::ReadAllBytes($file)); return }
@@ -381,7 +381,7 @@ function Invoke-Request($ctx) {
 		Send-Json $ctx @{ id = $t.id; opened = (Request-Conductor) }; return
 	}
 	# A held note's screenshots are in (or as many as would upload): over to the conductor.
-	if ($path -match '^/api/tasks/(T-\d+)/release$') {
+	if ($path -match "^/api/tasks/($TaskIdPattern)/release$") {
 		$t = Read-Task $Matches[1]
 		if ($t.uploading) { Send-Note $t; Send-Json $ctx @{ ok = $true; opened = (Request-Conductor) } } else { Send-Json $ctx @{ ok = $true; opened = '' } }
 		return
@@ -394,14 +394,14 @@ function Invoke-Request($ctx) {
 	}
 	if ($path -eq '/api/send') { $sent = Send-Inbox; Send-Json $ctx @{ sent = $sent; opened = $(if ($sent) { Request-Conductor } else { '' }) }; return }
 	if ($path -eq '/api/order') {
-		$ids = @((Read-Json $req).ids | Where-Object { "$_" -match '^T-\d+$' })
+		$ids = @((Read-Json $req).ids | Where-Object { Test-TaskId "$_" })
 		Set-QueueOrder $ids
 		Send-Json $ctx @{ ok = $true }; return
 	}
 	if ($path -eq '/api/history/bookmark') {
 		Send-Json $ctx @{ bookmarked = (Switch-Bookmark ([string](Read-Json $req).hash)) }; return
 	}
-	if ($path -match '^/api/tasks/(T-\d+)/shot$') {
+	if ($path -match "^/api/tasks/($TaskIdPattern)/shot$") {
 		$id = $Matches[1]
 		$t = Read-Task $id
 		$name = Receive-Picture $ctx $req (Join-Path (Get-TaskDir $id) ('shot-{0}' -f (@(@($t.shots) | Where-Object { $_ }).Count + 1)))
@@ -412,7 +412,7 @@ function Invoke-Request($ctx) {
 	}
 	# Load into a lane (a card to test on its branch, with no lane holding it: loans.ps1). A free lane is switched to
 	# its latest commit, which takes a few seconds; with none free it says so. { lane, text }.
-	if ($path -match '^/api/tasks/(T-\d+)/load$') {
+	if ($path -match "^/api/tasks/($TaskIdPattern)/load$") {
 		try {
 			$t = Get-Task $Matches[1]
 			if (-not (Test-NeedsLane $t)) { throw "$($t.id) isn't waiting for a lane." }
@@ -421,14 +421,22 @@ function Invoke-Request($ctx) {
 		} catch { Send-Text $ctx 400 $_.Exception.Message } finally { Unlock-Lanes; Unlock-Tasks }
 		return
 	}
-	if ($path -match '^/api/tasks/(T-\d+)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise|pause|resume|restart|assign|promote|make-task)$') {
+	if ($path -match "^/api/tasks/($TaskIdPattern)/(approve|reopen|answer|queue|remove|followup|undo|approve-plan|revise|pause|resume|restart|assign|promote|make-task)$") {
 		$id, $action = $Matches[1], $Matches[2]
-		$text = [string](Read-Json $req).text
+		$body = Read-Json $req
+		$text = [string]$body.text
 		try { Invoke-TaskAction $id $action $text } catch { Send-Text $ctx 400 $_.Exception.Message; return }
 		$t = Get-Task $id
 		# On the user's own question, approve is "Got it" and reopen is "Ask more".
 		$said = if ($t.kind -eq 'question' -and $action -eq 'approve') { 'got-it' } elseif ($t.kind -eq 'question' -and $action -eq 'reopen') { 'ask-more' } else { $action }
-		Add-Sent $said $t $text
+		# An answer picked on the card: the chat says what was picked ("You picked: X"), not the questions again. The
+		# agent still gets the whole text. picks: the options picked, '' for Rocco's call; typed: the words typed with them.
+		$more = $null
+		if ($action -eq 'answer' -and $null -ne $body.picks) {
+			$more = @{ picks = @(@($body.picks) | Select-Object -First 10 | ForEach-Object { $s = [string]$_; $s.Substring(0, [Math]::Min(200, $s.Length)) }) }
+			if ("$($body.typed)".Trim()) { $more.typed = "$($body.typed)".Trim() }
+		}
+		Add-Sent $said $t $text @() $more
 		# What the user did may wait on the conductor now (an answer, a reopen, a plan approved). A deleted task's work
 		# waits for the next conductor instead: with none running, nothing is running it either.
 		# Nor does a pause open one: with no conductor there's no worker to stop (it took effect at once).

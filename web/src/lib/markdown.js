@@ -167,7 +167,7 @@ function tokenHTML(m, o) {
 const docLink = (path, inner, o) => `<a class="doc-ref" href="${esc(o.href(path))}" data-doc="${esc(path)}">${inner}</a>`;
 
 function code(text, o) {
-  const task = /^T-\d{3,}$/.test(text) && o.task(text);
+  const task = /^(?:T|[A-Z][A-Z0-9]{1,3})-\d{3,}$/.test(text) && o.task(text);
   if (task) return task;
   const path = /\.md\b/i.test(text) ? o.docRef(text, o.base) : '';
   return path ? docLink(path, `<code>${esc(text)}</code>`, o) : `<code>${esc(text)}</code>`;
@@ -202,7 +202,7 @@ function prose(s, o, mentions = true) {
     .replace(/(^|[^\w])_(?=\S)([^_]*?\S)_(?!\w)/g, '$1<em>$2</em>')
     .replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
   if (!mentions) return h;
-  h = h.replace(/(^|[^\w-])(T-\d{3,})(?![\w-])/g, (all, pre, id) => { const ref = o.task(id); return ref ? pre + ref : all; });
+  h = h.replace(/(^|[^\w-])((?:T|[A-Z][A-Z0-9]{1,3})-\d{3,})(?![\w-])/g, (all, pre, id) => { const ref = o.task(id); return ref ? pre + ref : all; });
   // A mention of another doc, like WORKFLOW.md or docs/game/GDD.md, opens it.
   h = h.replace(/(^|[^\w/\\.-])((?:[\w.-]+[\\/])*[\w-]+\.md)(?![\w])/g, (all, pre, ref) => {
     const path = o.docRef(ref, o.base);

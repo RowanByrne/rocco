@@ -52,6 +52,8 @@
 .thd-row .sp { flex: 1; }
 .thd-title { min-width: 0; font-size: 14.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .thd-sub { flex: none; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+/* Where the card is: one line, never squeezed into two by a long title (the title gives way). */
+.thd-row > .chip { flex: none; white-space: nowrap; }
 .thd-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 0; padding: 0; }
 .thd-step { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 26px; padding: 0 9px 0 4px; border-radius: 7px; border: 1px solid var(--stroke);
   font-size: 12.5px; cursor: pointer; }
@@ -117,6 +119,7 @@
 .mcard-title { display: block; font-size: 12px; line-height: 1.3; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcard-state { display: flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 11px; color: var(--c); white-space: nowrap; }
 .mcard-state .sdot { width: 5px; height: 5px; }
+.mcard-id { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .mcard-state .sdot.live { animation: mcard-pulse 1.6s ease-in-out infinite; }
 @keyframes mcard-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .mcard-state .sdot.live { animation: none; } }
@@ -132,7 +135,7 @@
 .h-event.of-card:hover .h-line { color: var(--text); }
 .h-event.mine .h-dot { background: var(--text-3); opacity: .5; }
 /* A line about a card: just the card, as a mini card on the left (conductor.js row 'event'). */
-.h-ev-card { margin: 2px 0; }
+.h-ev-card { margin: 8px 0; }
 .h-ev-card .mcard { flex: 0 1 auto; width: auto; max-width: min(260px, 60%); }
 .h-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .h-event.mine .h-line { flex: none; color: var(--text-3); }
@@ -160,6 +163,7 @@
 .h-bubble { max-width: 100%; padding: 8px 13px; border-radius: 16px 16px 4px 16px; font-size: 14px; line-height: 1.5; color: var(--text-body);
   white-space: pre-wrap; overflow-wrap: anywhere; background: rgba(var(--accent-rgb), .1); border: 1px solid rgba(var(--accent-rgb), .18); }
 .h-you-foot { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--text-3); }
+.h-you-foot .h-picked { font-weight: 600; color: var(--text-2); }
 .h-you-foot .h-at { opacity: 0; transition: opacity .15s; }
 .h-you:hover .h-you-foot .h-at { opacity: 1; }
 .h-you.mine { margin: 2px 0; }

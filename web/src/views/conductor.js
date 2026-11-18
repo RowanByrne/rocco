@@ -4,7 +4,7 @@
 // straight to that agent. Under the chat: the open questions and permission requests, each with its own answer box,
 // the agent's status line, and the note box. The data is a thread (server/thread.ps1), named by ?t= when it isn't
 // the conductor's.
-import { state, on, emit, byId } from '../state.js';
+import { state, on, emit, byId, ticket, TASK_ID_IN_TEXT } from '../state.js';
 import { $ } from '../lib/dom.js';
 import { html, render, nothing, repeat, live, ifDefined } from '../lib/html.js';
 import { hhmm, featureVars } from '../lib/format.js';
@@ -206,7 +206,7 @@ export async function sendInMode(text, shots = []) {
         return api.act(t.id, act, [text, named.length ? `Screenshots: ${named.join(', ')}` : ''].filter(Boolean).join('\n'));
       });
       await refresh();
-      toast(`${t.status === 'ready' ? 'Sent back' : t.status === 'stuck' ? 'Answer sent' : 'Added'}: ${t.title}${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
+      toast(`${t.status === 'ready' ? 'Asked for more' : t.status === 'stuck' ? 'Answer sent' : 'Added'}: ${t.title}${r.opened ? `. ${r.opened} started, minimized in your taskbar, to pick it up` : ''}`, 'var(--amber)');
     } else {
       await sendMessage(text, { to: m.kind === 'reply' ? was.to : '', thread, shots });
     }
@@ -349,7 +349,7 @@ function renderTabs() {
   const threads = leads();
   render(html`${main}${threads.length ? html`<span class="tabs-sep" aria-hidden="true"></span>` : nothing}${repeat(threads, l => l.id, l => {
     const p = l.kind === 'feature' ? progressOf(l.id) : null;
-    return tab(l.id, l.title, p ? `${p.done}/${p.total}` : l.id, featureVars(l.id));
+    return tab(l.id, l.title, p ? `${p.done}/${p.total}` : ticket(l.id), featureVars(l.id));
   })}`, $('#threadTabs'));
 }
 
@@ -406,7 +406,7 @@ function renderHead() {
   const waiting = lead.handoff ? 'Its worker is wrapping up, then its own agent takes over' : lead.waiting;
   if (lead.kind === 'card') {
     const s = STATUS[t.status] || ['', 'var(--gray)'];
-    render(html`<div class="thd-row"><span class="thd-title">${t.title}</span><span class="chip" style="--c:${s[1]}"><i></i>${s[0]}</span><span class="thd-sub">${[t.id, lane, t.attempt > 1 ? `attempt ${t.attempt}` : ''].filter(Boolean).join(' · ')}</span><span class="sp"></span><button class="btn-sm" data-open-card=${t.id}>Open the card</button></div>${
+    render(html`<div class="thd-row"><span class="thd-title">${t.title}</span><span class="chip" style="--c:${s[1]}"><i></i>${s[0]}</span><span class="thd-sub">${[ticket(t.id), lane, t.attempt > 1 ? `attempt ${t.attempt}` : ''].filter(Boolean).join(' · ')}</span><span class="sp"></span><button class="btn-sm" data-open-card=${t.id}>Open the card</button></div>${
       waiting ? html`<div class="thd-wait">${icon.clock}${waiting}</div>` : nothing}`, box);
     return;
   }
@@ -491,13 +491,18 @@ async function showWindow(id = active) {
 const DID = {
   approve: 'approved', 'approve-plan': 'approved the plan for', queue: 'queued', remove: 'deleted', undo: 'took back what you did to',
   'got-it': 'closed', pause: 'paused', resume: 'resumed', restart: 'started again', assign: 'picked a lane or worker for',
-  promote: 'gave an agent of its own to', 'make-task': 'made a task of', reopen: 'sent back', followup: 'added to', answer: 'answered',
+  promote: 'gave an agent of its own to', 'make-task': 'made a task of', reopen: 'asked for more on', followup: 'added to', answer: 'answered',
   revise: 'asked for changes to', 'ask-more': 'asked more about',
 };
 // What the user said a message is (the note box's Fix, Ask, Feature), under it.
 const KIND = { fix: 'Fix', question: 'Question', feature: 'Feature' };
+// "You picked: Redline Bonus", from an answer's picks ('' is one left to Rocco).
+function pickedLine(picks) {
+  if (picks.every(p => !p)) return 'You left it to Rocco';
+  return html`You picked: <b class="h-picked">${picks.map(p => p || "Rocco's call").join(' · ')}</b>`;
+}
 // What the user typed about a card, above their words.
-const SAID = { reopen: 'Sent back', followup: 'Added', answer: 'Answered', revise: 'Asked for changes', 'ask-more': 'Asked more', restart: 'Started again', 'make-task': 'Made a task' };
+const SAID = { reopen: 'Asked for more', followup: 'Added', answer: 'Answered', revise: 'Asked for changes', 'ask-more': 'Asked more', restart: 'Started again', 'make-task': 'Made a task' };
 
 // What you write sits on the right in a bubble, as in any chat app; what Rocco says and does runs down the left, so
 // its work never reads as yours.
@@ -550,9 +555,11 @@ function miniCard(id, title = '') {
     const k = kids.find(x => x.title === s.title);
     return html`<i style=${k ? `background:${STATUS[k.status]?.[1] || 'var(--gray)'}` : ''}></i>`;
   }) : status === 'working' ? html`<i style="flex:0 0 ${t.progress >= 0 ? t.progress : 35}%;background:var(--c)"></i><i></i>` : null;
+  // Where it is shows as its color (the stripe and the dot, which pulses while it's worked on); under its title, its
+  // number (DR-104). Hovering says where it is in words.
   const name = t?.title || title || id;
-  return html`<button type="button" class="mcard" style="--c:${STATUS[status]?.[1] || 'var(--gray)'}" data-open-card=${id} title=${name}><span class="mcard-title">${name}</span>${
-    label ? html`<span class="mcard-state"><i class="sdot${status === 'working' ? ' live' : ''}"></i>${label}</span>` : nothing}${bar ? html`<span class="mcard-bar">${bar}</span>` : nothing}</button>`;
+  return html`<button type="button" class="mcard" style="--c:${STATUS[status]?.[1] || 'var(--gray)'}" data-open-card=${id} title=${label ? `${name}: ${label}` : name}><span class="mcard-title">${name}</span><span class="mcard-state"><i class="sdot${status === 'working' ? ' live' : ''}"></i><span class="mcard-id">${ticket(t?.id || id)}</span></span>${
+    bar ? html`<span class="mcard-bar">${bar}</span>` : nothing}</button>`;
 }
 // The cards a row names, each once: [id, title] pairs. A card that's gone from the board (an answered question, one
 // archived) has nothing left to show, so it's left out.
@@ -561,7 +568,15 @@ const minis = pairs => {
   return list.length ? html`<div class="h-minis">${list.map(([id, title]) => miniCard(id, title))}</div>` : nothing;
 };
 // The cards one of Rocco's messages names (a task id in its text shows as the card's name), the ones still known.
-const named = text => [...String(text || '').matchAll(/(?:^|[^\w-])(T-\d{3,})(?![\w-])/g)].map(m => m[1]).filter(id => byId(id)).map(id => [id]);
+const named = text => [...String(text || '').matchAll(TASK_ID_IN_TEXT)].map(m => byId(m[1])?.id).filter(Boolean).map(id => [id]);
+// And the cards on the board it names by their title ("Ground stops short of the vista" is now in Main). Short titles
+// are left to the number: they'd turn up in ordinary words.
+const titled = text => {
+  const said = String(text || '').toLowerCase();
+  return said ? state.tasks.filter(t => t.title?.length >= 12 && said.includes(t.title.toLowerCase())).map(t => [t.id]) : [];
+};
+// Every card a message of Rocco's names: the one it answers, its numbers and its titles.
+const cardsIn = e => [...(e.re && e.task ? [[e.task, e.re]] : []), ...named(e.text), ...titled(e.text)];
 // "You approved the plan for", with the card on a line of its own under it: "You approved the plan".
 const didAlone = act => (DID[act] || act).replace(/ (for|to|of|on|about)$/, '');
 
@@ -575,7 +590,7 @@ function row(e, related, prev = '') {
     case 'said': {
       const long = (String(e.text || '').length > 900 || String(e.text || '').split('\n').length > 18) && !expanded.has(e.id);
       return html`<div class="h-msg them"><div class="h-body"><div class="h-head">${e.re && task !== prev ? html`<span class="h-re" data-open-task=${ifDefined(task)}>re: ${e.re}</span>` : nothing}${at}<button class="linkish h-reply" data-reply=${e.id}>Reply</button></div><div class="h-text${long ? ' clamp' : ''}">${prose(e.text)}</div>${
-        long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}${minis([...(e.re && task !== prev ? [[task, e.re]] : []), ...named(e.text)])}</div></div>`;
+        long ? html`<button class="linkish h-more" data-more=${e.id}>Show all</button>` : nothing}${minis(cardsIn(e).filter(([id]) => !(e.re && id === task && task === prev)))}</div></div>`;
     }
     case 'message': {
       // Rocco's own word to the agent (Fix lanes): a line, in the words meant for the user.
@@ -588,6 +603,12 @@ function row(e, related, prev = '') {
         answerLine(e, related)}${at}`, (e.shots || []).map(fileOf), minis(made.map(x => [x.task, x.title])));
     }
     case 'sent': {
+      // An answer picked on a card: what was picked, not the questions again. Words typed with it are a message.
+      if (e.act === 'answer' && Array.isArray(e.picks) && e.picks.length) {
+        const line = pickedLine(e.picks);
+        if (e.typed) return yours(e.typed, html`<span>${line}</span>${at}`, [], minis([[task, e.title]]));
+        return html`<div class="h-you mine"><div class="h-you-foot"><span>${line}</span>${at}</div>${minis([[task, e.title]])}</div>`;
+      }
       // What the user typed (a note, a question, why a card went back) reads as their message, with the card under it.
       const typed = e.act === 'note' || e.act === 'question';
       const { text, shots } = shotsOf(e);
@@ -713,6 +734,14 @@ function historyView() {
   const yoursTasks = new Set([...items.filter(e => e.kind === 'sent' && (e.act === 'note' || e.act === 'question') && e.task).map(e => e.task),
     ...history.items.filter(e => e.kind === 'made').map(e => e.task)]);
   for (const e of items) if (e.kind === 'event' && e.task && yoursTasks.has(e.task) && /^Started\b/.test(e.text || '')) hidden.add(e.id);
+  // A card one of Rocco's messages names shows under that message, where it's talked about. A line about the same card
+  // within half an hour of it would only show it again, further down, so it's left out.
+  const near = 30 * 60e3, saidCards = items.filter(e => e.kind === 'said').map(e => ({ at: Date.parse(e.at), ids: new Set(cardsIn(e).map(([id]) => id)) }));
+  for (const e of items) {
+    if (e.kind !== 'event' || !e.task) continue;
+    const id = byId(e.task)?.id, at = Date.parse(e.at);
+    if (id && saidCards.some(s => s.ids.has(id) && Math.abs(s.at - at) < near)) hidden.add(e.id);
+  }
   const rows = [...items.filter(e => !hidden.has(e.id)).map(e => ({ at: e.at, e })), ...history.steps.map(s => ({ at: s.at, s }))];
   rows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const out = [];

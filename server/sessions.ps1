@@ -8,8 +8,8 @@ $script:SessionIndex = @{}  # path -> what a session file says about itself, rea
 
 # A JSON string's characters, escapes included, so a quoted path inside a command doesn't end it.
 $JsonChars = '(?:[^"\\]|\\.)'
-$SessionNamed = [regex]('"content":"' + $JsonChars + '{0,400}?\b(T-\d{3,})\b')
-$SessionCommand = [regex]('"command":"' + $JsonChars + '*?rocco' + $JsonChars + '*?\b(?:set|ask|log)\s+(T-\d{3,})\b')
+$SessionNamed = [regex]('"content":"' + $JsonChars + '{0,400}?\b(' + $TaskIdInTextPattern + ')\b')
+$SessionCommand = [regex]('"command":"' + $JsonChars + '*?rocco' + $JsonChars + '*?\b(?:set|ask|log)\s+(' + $TaskIdInTextPattern + ')\b')
 
 function Get-AgentProjectDir([string]$dir) {
 	$base = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
@@ -62,7 +62,7 @@ function Resolve-SessionPath([string]$path) {
 # A worker's hooks reach Rocco with its agent id. When it runs a Rocco command on a task, that pairs its session with
 # the task; when it ends, the hook names its session file. Both go in <Game>\rocco\conductor\workers.jsonl, so a
 # card finds its sessions from what the agent's program reported, not only from how it lays out its files.
-$WorkerCommand = [regex]'rocco(?:\.ps1)?\b[^|;&\r\n]*?\b(?:set|ask|log|result)\s+(T-\d{3,})\b'
+$WorkerCommand = [regex]('rocco(?:\.ps1)?\b[^|;&\r\n]*?\b(?:set|ask|log|result)\s+(' + $TaskIdInTextPattern + ')\b')
 $script:WorkerSeen = @{}
 function Get-WorkersFile { Join-Path (Get-ThreadDir) 'workers.jsonl' }
 function Add-WorkerEvent([string]$event, $in) {
@@ -123,7 +123,7 @@ function Get-SessionInfo($file) {
 		$meta = [IO.Path]::ChangeExtension($file.FullName, '.meta.json')
 		if (Test-Path -LiteralPath $meta) {
 			try { $m = [IO.File]::ReadAllText($meta, $Utf8) | ConvertFrom-Json; $info.desc = [string]$m.description; $info.type = [string]$m.agentType } catch { }
-			foreach ($x in [regex]::Matches($info.desc, 'T-\d{3,}')) { $info.ids[$x.Value] = $true }
+			foreach ($x in [regex]::Matches($info.desc, $TaskIdInTextPattern)) { $info.ids[$x.Value] = $true }
 		}
 	}
 	$bytes = Read-Shared $file.FullName $info.length

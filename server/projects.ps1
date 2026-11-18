@@ -127,7 +127,7 @@ function Get-State([string]$projectId) {
 	$tasks = @(Get-Tasks | Where-Object { $_.status -ne 'removed' -and ($_.status -ne 'done' -or -not $_.doneAt -or [datetime]$_.doneAt -gt $cutoff) })
 	[pscustomobject]@{
 		rocco = $RoccoVersion # the app reloads when this changes: Rocco updated itself
-		project = [pscustomobject]@{ id = $p.id; name = $p.name; phase = $p.phase; template = $p.template }
+		project = [pscustomobject]@{ id = $p.id; name = $p.name; phase = $p.phase; template = $p.template; code = (Get-TaskCode) } # code: the app shows T-012 as DR-012
 		lanes = Get-Lanes
 		conductor = Get-Conductor
 		# The threads with an agent of their own: a feature's, or a card's (leads.ps1). Each with its agent's state.

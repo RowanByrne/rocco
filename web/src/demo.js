@@ -28,8 +28,8 @@ function sound(seed, ms = 420) {
 }
 
 const PROJECTS = [
-  { id: 'sample-game', name: 'Sample Game', phase: 'Production', template: false },
-  { id: 'sky-farm', name: 'Sky Farm', phase: 'Core loop', template: false },
+  { id: 'sample-game', name: 'Sample Game', phase: 'Production', template: false, code: 'SG' },
+  { id: 'sky-farm', name: 'Sky Farm', phase: 'Core loop', template: false, code: 'SF' },
   { id: 'template', name: 'RoDev template', phase: 'Template', template: true },
 ];
 
@@ -161,6 +161,8 @@ function featureThread() {
       { text: 'Can a player have more than one trade request open at a time?', header: 'Requests', multi: false, options: [{ label: 'One at a time' }, { label: 'Up to three' }] }] },
     { id: 'C-000104', at: at(116), who: 'you', kind: 'answered', to: 'C-000103', answers: ['One at a time'], text: 'Can a player have more than one trade request open at a time? One at a time' },
     { id: 'C-000105', at: at(84), who: 'rocco', kind: 'event', text: 'Ready to test: Trade requests', task: 'T-042' },
+    // An answer picked on the card: the chat says what was picked (conductor.js pickedLine).
+    { id: 'C-000112', at: at(84), who: 'you', kind: 'sent', act: 'answer', task: 'T-042', title: 'Trade requests', text: 'Which request sound? Soft chime', picks: ['Soft chime'] },
     { id: 'C-000106', at: at(80), who: 'you', kind: 'sent', act: 'approve', task: 'T-042', title: 'Trade requests', text: '' },
     { id: 'C-000107', at: at(78), who: 'conductor', kind: 'said', text: 'Trade requests are in. Starting the trade window: both inventories side by side, an offer slot each, and a confirm button that starts the countdown.' },
     { id: 'C-000108', at: at(40), who: 'you', kind: 'message', text: 'make the accept button green, and put it on the right', via: 'rocco' },

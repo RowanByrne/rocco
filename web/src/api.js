@@ -36,7 +36,8 @@ export const api = {
   note: (text, type, hold = false) => DEMO ? demo.note(text, type, hold) : post(withProject('/api/note'), { text, type, hold }),
   release: id => DEMO ? demo.release(id) : post(withProject(`/api/tasks/${id}/release`), {}),
   shot: (id, file) => DEMO ? demo.shot(id, file) : post(withProject(`/api/tasks/${id}/shot`), file, file.type),
-  act: (id, action, text) => DEMO ? demo.act(id, action, text) : post(withProject(`/api/tasks/${id}/${action}`), { text }),
+  // more: an answer's picks and typed words, for the chat's line ("You picked: X").
+  act: (id, action, text, more = {}) => DEMO ? demo.act(id, action, text, more) : post(withProject(`/api/tasks/${id}/${action}`), { text, ...more }),
   // Up next in this order; the server refuses an order that puts a task before one it needs.
   order: ids => DEMO ? demo.order(ids) : post(withProject('/api/order'), { ids }),
   changes: id => DEMO ? demo.changes(id) : getJson(withProject(`/api/tasks/${id}/changes`)),

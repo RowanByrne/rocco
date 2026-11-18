@@ -26,7 +26,18 @@ export const on = (name, handler) => bus.addEventListener(name, e => handler(/**
 export const emit = (name, detail) => bus.dispatchEvent(new CustomEvent(name, { detail }));
 
 // A task by its id: on the board, or one opened from the archive.
-export const byId = id => state.tasks.find(t => t.id === id) || state.extra.get(id);
+// A task's id: its game's code and a number (DR-012). A game made before that keeps T-012 on disk, shown with the code
+// (ticket), and its code's form finds it (taskId). TASK_ID matches either in text; TASK_ID_IN_TEXT as an id appears in
+// a message, three digits or more (server/core.ps1 $TaskIdPattern).
+export const TASK_ID = /^(?:T|[A-Z][A-Z0-9]{1,3})-\d+$/;
+export const TASK_ID_IN_TEXT = /(?:^|[^\w-])((?:T|[A-Z][A-Z0-9]{1,3})-\d{3,})(?![\w-])/g;
+const code = () => /** @type {any} */ (state.meta.project)?.code || '';
+export const ticket = id => { const m = /^T-(\d+)$/.exec(String(id || '')), c = code(); return m && c ? `${c}-${m[1]}` : String(id || ''); };
+export const taskId = id => {
+  const up = String(id || '').trim().toUpperCase(), c = code(), m = c && new RegExp(`^${c}-(\\d+)$`).exec(up);
+  return m && !state.tasks.some(t => t.id === up) && !state.extra.has(up) ? `T-${m[1]}` : up;
+};
+export const byId = id => state.tasks.find(t => t.id === id) || state.extra.get(id) || (TASK_ID.test(String(id || '').toUpperCase()) && id !== taskId(id) ? byId(taskId(id)) : undefined);
 export const of = status => state.tasks.filter(t => t.status === status);
 export const approvedToday = () => of('done').filter(t => isToday(t.doneAt)).sort((a, b) => String(b.doneAt).localeCompare(String(a.doneAt)));
 export const currentProject = () => state.projects.find(p => p.id === state.project) || state.meta.project || { id: state.project, name: 'Rocco', phase: '' };

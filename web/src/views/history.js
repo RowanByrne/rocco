@@ -1,6 +1,6 @@
 // History: what's landed on main, the branches still open, and what each lane has been doing
 // (busy lanes first). Loaded while the view is open, every ten seconds.
-import { state, emit, of } from '../state.js';
+import { state, emit, of, ticket } from '../state.js';
 import { $, webUrl } from '../lib/dom.js';
 import { html, render, nothing } from '../lib/html.js';
 import { agoText, hhmm, isToday } from '../lib/format.js';
@@ -99,7 +99,7 @@ function lane(l, s) {
     l.branch ? html`${icon.branch}<span>${l.branch}</span>` : html`<span>main @ ${l.head}${l.ahead ? ` · ${l.ahead} commit${l.ahead === 1 ? '' : 's'} not on main yet` : ''}</span>`
   }</div></div><span class="state-pill">${label}</span></div><div class="lane-flags"><span class="flag${l.open ? ' on' : ''}"><i></i>${l.open ? 'Syncing to Studio' : 'Not open'}</span>${
     l.dirty ? html`<span class="flag warn">${l.dirty} uncommitted file${l.dirty === 1 ? '' : 's'}</span>` : nothing}</div>${
-    s.task ? html`<button class="lane-task" data-task=${s.task.id}><span class="s-id">${s.task.id}</span><span>${s.task.title}</span>${icon.chev}</button>` : nothing}${
+    s.task ? html`<button class="lane-task" data-task=${s.task.id}><span class="s-id">${ticket(s.task.id)}</span><span>${s.task.title}</span>${icon.chev}</button>` : nothing}${
     events.length ? html`<ol class="lane-events">${events.map(e => html`<li class="ev ev-${e.kind}"><span class="ev-icon">${EVENT_ICON[e.kind] || icon.commit}</span><span class="ev-text">${e.text}</span><span class="ev-at" title=${e.at}>${agoText(e.at)}</span></li>`)}</ol>` : html`<div class="empty">Nothing done here yet</div>`}${
     done.length ? html`<div class="lane-done">${done.map(t => html`<button class="done-row" data-task=${t.id}>${icon.checkSm}<span>${t.title}</span></button>`)}</div>` : nothing}</div>`;
 }

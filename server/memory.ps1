@@ -81,7 +81,7 @@ $script:RequestCounts = @{}
 
 # Each request, counted by what it asked: ids are left out so like requests count together, and a hook by its event.
 function Add-RequestCount($req) {
-	$path = $req.Url.AbsolutePath -creplace 'T-\d+', 'T-n' -creplace 'C-[0-9a-f]{6}', 'C-x' # case matters: shot-1.png isn't a task
+	$path = $req.Url.AbsolutePath -creplace $TaskIdPattern, 'T-n' -creplace 'C-[0-9a-f]{6}', 'C-x' # case matters: shot-1.png isn't a task
 	if ($path -notmatch '^/(api|files)/') { $path = '(the app''s files)' }
 	$key = "$($req.HttpMethod) $path"
 	if ($path -eq '/api/conductor/hook') { $key += " $($req.QueryString['e'])" }

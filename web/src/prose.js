@@ -2,7 +2,7 @@
 // The text itself stays as written. ALL-CAPS lead-ins turn bold in sentence case, -- turns into a dash, commit hashes
 // drop out of sentences, a task id shows as the task's name and opens it, and a doc's path opens the doc. Where the
 // tidying changed anything, "Show original" under it shows the text as the agent wrote it.
-import { state, byId, emit } from './state.js';
+import { state, byId, emit, ticket } from './state.js';
 import { esc } from './lib/dom.js';
 import { html, nothing, unsafeHTML } from './lib/html.js';
 import { markdown } from './lib/markdown.js';
@@ -13,7 +13,7 @@ import { tidy } from './lib/tidy.js';
 // Markdown's own output is a string it has escaped (lib/markdown.js), so the chip is too.
 const taskChip = id => {
   const t = byId(id);
-  return t ? `<a href="#" class="task-ref" data-task-ref="${esc(id)}" title="${esc(id)}">${esc(t.title)}</a>` : '';
+  return t ? `<a href="#" class="task-ref" data-task-ref="${esc(t.id)}" title="${esc(ticket(t.id))}">${esc(t.title)}</a>` : '';
 };
 const opts = { docRef: (text, base) => state.docs ? docRef(text, base) : '', href: docUrl, task: taskChip, breaks: true };
 

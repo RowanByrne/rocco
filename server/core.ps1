@@ -131,10 +131,50 @@ function Use-Project([string]$dir) {
 	$script:ThreadId = ''
 }
 
+# A task's id: its game's code and a number (DR-012), so an agent working in two games can't mix their tickets up. A
+# game made before that keeps T-012 on disk and for its agents; the app shows those with the code too, and DR-012 typed
+# anywhere finds T-012 (ConvertTo-TaskId). Upper case only: shot-1.png isn't a task. $TaskIdInTextPattern: as an id appears
+# in a session or a message, three digits or more.
+$TaskIdPattern = '(?:T|[A-Z][A-Z0-9]{1,3})-\d+'
+$TaskIdInTextPattern = '(?:T|[A-Z][A-Z0-9]{1,3})-\d{3,}'
+function Test-TaskId([string]$id) { $id -cmatch "^$TaskIdPattern$" }
+
+# The game's code from PROJECT.md (DR), upper case; '' while it has none.
+$script:TaskCodes = @{}
+function Get-TaskCode {
+	if (-not $script:TaskCodes.ContainsKey($Root)) {
+		$code = "$(Get-ProjectField 'Code')".Trim('`', ' ').ToUpper()
+		$script:TaskCodes[$Root] = if ($code -cmatch '^[A-Z0-9]{2,4}$') { $code } else { '' }
+	}
+	$script:TaskCodes[$Root]
+}
+
+# What new tasks are called: the game's code, unless it already has T- tasks (made before ids carried it), which
+# carry on as they are.
+function Get-TaskPrefix {
+	$old = @(Get-ChildItem $TasksDir, $ArchiveDir -Directory -Filter 'T-*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch '^T-\d+$' }).Count
+	$code = Get-TaskCode
+	if ($old -or -not $code) { 'T' } else { $code }
+}
+
+# An id as typed (dr-104, DR-104, T-104): upper case, and in a game whose tasks are still T-, the code's form is that
+# task. Anything that isn't an id comes back as it was, for the caller to refuse.
+function ConvertTo-TaskId([string]$id) {
+	$up = "$id".Trim().ToUpper()
+	if ($up -cnotmatch "^$TaskIdPattern$") { return $id }
+	$code = Get-TaskCode
+	if ($code -and $up -cmatch "^$code-(\d+)$") {
+		$old = "T-$($Matches[1])"
+		foreach ($base in $TasksDir, $ArchiveDir) { if (Test-Path -LiteralPath (Join-Path $base $old)) { return $old } }
+	}
+	$up
+}
+
 # The conversation a command or request is about: '' for the conductor's (the main chat), or the id of a feature (or
 # of a card given its own agent), which has a thread and an agent of its own (thread.ps1, leads.ps1).
 function Use-Thread([string]$id) {
-	if ($id -and $id -notmatch '^T-\d+$') { throw "Not a thread: '$id' (a feature's or a card's id, like T-020)." }
+	if ($id) { $id = ConvertTo-TaskId $id }
+	if ($id -and -not (Test-TaskId $id)) { throw "Not a thread: '$id' (a feature's or a card's id, like DR-020)." }
 	$script:ThreadId = "$id"
 }
 Use-Project $HomeProject

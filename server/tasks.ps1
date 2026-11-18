@@ -161,7 +161,8 @@ function Send-ToConductor($t, [string]$pending) {
 
 # A task's folder: on the board (tasks\), or put away once it was long finished (archive\).
 function Get-TaskDir([string]$id) {
-	if ($id -notmatch '^T-\d+$') { throw "Not a task id: '$id' (expected T-012)." }
+	$id = ConvertTo-TaskId $id
+	if (-not (Test-TaskId $id)) { throw "Not a task id: '$id' (expected $(Get-TaskPrefix)-012)." }
 	foreach ($base in $TasksDir, $ArchiveDir) {
 		$dir = Join-Path $base $id
 		if (Test-Path (Join-Path $dir 'task.json')) { return $dir }
@@ -237,12 +238,13 @@ function Save-Task($t) {
 
 function New-Task([string]$title, [string]$note, [string]$status, [string]$kind, [string]$type = '') {
 	New-Item -ItemType Directory -Force $TasksDir | Out-Null
-	# Numbers carry on from the highest ever used, the archive's included.
-	$numbers = @(Get-ChildItem $TasksDir, $ArchiveDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^T-(\d+)$' } | ForEach-Object { [int]$Matches[1] })
+	# Named with the game's code (Get-TaskPrefix). Numbers carry on from the highest ever used, the archive's included.
+	$prefix = Get-TaskPrefix
+	$numbers = @(Get-ChildItem $TasksDir, $ArchiveDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -cmatch "^$prefix-(\d+)$" } | ForEach-Object { [int]$Matches[1] })
 	$next = 1 + [int]($numbers | Measure-Object -Maximum).Maximum
 	$id = $null
 	for ($i = 0; $i -lt 50 -and -not $id; $i++) {
-		$candidate = 'T-{0:D3}' -f ($next + $i)
+		$candidate = "$prefix-{0:D3}" -f ($next + $i)
 		try { New-Item -ItemType Directory (Join-Path $TasksDir $candidate) -ErrorAction Stop | Out-Null; $id = $candidate } catch { }
 	}
 	if (-not $id) { throw "Couldn't create a task folder in $TasksDir." }
@@ -261,7 +263,7 @@ function New-Task([string]$title, [string]$note, [string]$status, [string]$kind,
 
 # A task made a moment ago that has to be taken back whole (what it was made for fell through): its folder goes.
 function Remove-TaskFolder([string]$id) {
-	if ($id -notmatch '^T-\d+$') { return }
+	if (-not (Test-TaskId $id)) { return }
 	$dir = Join-Path $TasksDir $id
 	Unlock-Task $dir
 	Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

@@ -185,9 +185,11 @@
 .plan-wait { flex: 1; min-height: 34px; padding: 7px 14px; display: flex; align-items: center; justify-content: center; gap: 9px; text-align: center;
   border: 1px dashed rgba(var(--ink), .22); border-radius: var(--r); color: var(--text-2); font-size: 13px; }
 
-/* A task's sheet: its top (what it is, what to try, Approve, its questions) stays in view while the rest scrolls. */
+/* A task's sheet: its top (what it is, what to try, its questions) stays in view while the rest scrolls. */
 .s-top { position: sticky; top: -8px; z-index: 2; max-height: 48vh; overflow-y: auto; margin: -8px -20px 0; padding: 8px 20px 14px;
   background: var(--panel); border-bottom: 1px solid var(--stroke); }
-.s-approve { display: flex; justify-content: center; width: 100%; margin-top: 12px; }
+/* Approve and close, in the sheet's top bar by the close button: small and outlined, not a big filled button. */
+.s-tools .s-approve { margin-left: 6px; color: var(--green-text); border-color: rgba(var(--green-rgb), .4); background: rgba(var(--green-rgb), .1); }
+.s-tools .s-approve:hover { color: var(--green-text); background: rgba(var(--green-rgb), .2); border-color: rgba(var(--green-rgb), .6); }
 .reply .send { width: 32px; height: 32px; }
 .reply.msg:focus-within { border-color: rgba(var(--accent-rgb), .5); }

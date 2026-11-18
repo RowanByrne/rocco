@@ -2,6 +2,7 @@
 // searched by word across each task's title, note, summary and history (server/tasks.ps1 Get-Archive). A row opens
 // the task as it was: its session, what it changed, its checks.
 import { html, nothing } from '../lib/html.js';
+import { ticket } from '../state.js';
 import { $ } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
 import { api } from '../api.js';
@@ -19,7 +20,7 @@ function body() {
   return html`<h2 class="s-title">Archive</h2><div class="s-where">Everything approved more than a few days ago, or deleted. A task opens as it was.</div><div class="arch-find">${icon.search}<input class="input" id="archiveQ" type="search" placeholder="Find a task by any words in it" aria-label="Search the archive" .value=${view.q}></div>${
     view.error ? html`<div class="load-error">${icon.alert}<span>Couldn't read the archive: ${view.error}</span><button class="btn-sm" data-arch-retry>Retry</button></div>` : nothing}${
     !view.rows.length && !view.loading && !view.error ? html`<div class="mut arch-none">${view.q ? 'Nothing in the archive has all of those words.' : 'Nothing here yet. Tasks arrive a few days after they\'re approved.'}</div>` : nothing
-  }<div class="arch-list">${view.rows.map(t => html`<div class="s-row arch-row${t.status === 'removed' ? ' gone' : ''}" data-arch=${t.id} tabindex="0" role="button"><span class="s-id">${t.id}</span><span class="arch-title">${t.title}</span><span class="at">${kind(t)} · ${when(t.doneAt || t.updated)}</span></div>`)}</div>${
+  }<div class="arch-list">${view.rows.map(t => html`<div class="s-row arch-row${t.status === 'removed' ? ' gone' : ''}" data-arch=${t.id} tabindex="0" role="button"><span class="s-id">${ticket(t.id)}</span><span class="arch-title">${t.title}</span><span class="at">${kind(t)} · ${when(t.doneAt || t.updated)}</span></div>`)}</div>${
     view.loading ? html`<div class="mut arch-none"><span class="spin"></span> Looking</div>` : more ? html`<div class="row arch-more"><button class="btn-sm" data-arch-more>Show more</button><span class="mut">${view.rows.length} of ${view.total}</span></div>` : view.rows.length ? html`<div class="mut arch-none">${view.total} task${view.total === 1 ? '' : 's'}</div>` : nothing}`;
 }
 

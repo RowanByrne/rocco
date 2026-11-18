@@ -1,5 +1,5 @@
 // The command palette (Ctrl+K): find any task, view, project or action and go there.
-import { state } from '../state.js';
+import { state, TASK_ID, ticket, taskId } from '../state.js';
 import { $ } from '../lib/dom.js';
 import { html, render } from '../lib/html.js';
 import { ACTIONS, keyFor, run } from '../hotkeys.js';
@@ -30,7 +30,7 @@ function collect() {
     { group: 'Actions', label: 'Usage: time and tokens by task', run: () => { go('workboard'); showUsage(); } },
     ...views.map(v => ({ group: 'Go to', label: v[0].toUpperCase() + v.slice(1), hint: keyFor(`go-${v}`), run: () => go(v) })),
     ...state.tasks.filter(t => t.status !== 'removed').map(t => ({
-      group: 'Tasks', label: `${t.id} ${t.title}`, hint: t.kind === 'plan' ? 'Feature plan' : t.kind === 'question' ? (t.status === 'ready' ? 'Answered' : 'Question') : STATUS[t.status] || '',
+      group: 'Tasks', label: `${ticket(t.id)} ${t.title}`, hint: t.kind === 'plan' ? 'Feature plan' : t.kind === 'question' ? (t.status === 'ready' ? 'Answered' : 'Question') : STATUS[t.status] || '',
       run: () => { go('workboard'); openTask(t.id); },
     })),
     ...state.projects.filter(p => p.id !== state.project).map(p => ({ group: 'Switch project', label: p.name, hint: p.phase, run: () => switchProject(p.id) })),
@@ -42,8 +42,8 @@ function draw() {
   const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
   shown = items.filter(i => words.every(w => `${i.label} ${i.group} ${i.hint || ''}`.toLowerCase().includes(w))).slice(0, 40);
   // A task's id that isn't on the board opens it from the archive; any other words can be looked for there.
-  const typed = input.value.trim(), id = typed.toUpperCase();
-  if (/^T-\d+$/.test(id) && !state.tasks.some(t => t.id === id)) shown.push({ group: 'Archive', label: `Open ${id}`, hint: 'From the archive', run: () => { go('workboard'); openTaskById(id); } });
+  const typed = input.value.trim(), id = taskId(typed);
+  if (TASK_ID.test(id) && !state.tasks.some(t => t.id === id)) shown.push({ group: 'Archive', label: `Open ${ticket(id)}`, hint: 'From the archive', run: () => { go('workboard'); openTaskById(id); } });
   else if (typed.length > 1) shown.push({ group: 'Archive', label: `Search older tasks for "${typed}"`, hint: 'Archive', run: () => { go('workboard'); showArchive(typed); } });
   active = Math.min(active, Math.max(0, shown.length - 1));
   render(shown.length ? shown.map((i, n) => html`${i.group !== shown[n - 1]?.group ? html`<div class="pl-group">${i.group}</div>` : ''}<div class="pl-item${n === active ? ' on' : ''}" data-n=${n} role="option" aria-selected=${n === active ? 'true' : 'false'}><span>${i.label}</span><span class="pl-hint">${i.hint || ''}</span></div>`)

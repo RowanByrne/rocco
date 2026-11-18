@@ -107,60 +107,77 @@ try {
 
 	Test 'new, set, log and show keep a task' {
 		$id = @(Rocco new -Title 'First task' -Note 'Do the first thing')[-1]
-		Assert-Equal $id 'T-001' 'the first id'
+		Assert-Equal $id 'TG-001' 'the first id carries the game''s code'
+		Assert-Match ((Rocco show 'tg-001') -join "`n") '^TG-001\s' 'typed in lower case, it''s the same task'
 		Rocco set $id -Status working -Lane 1 -Step Coding -Branch agent/first | Out-Null
 		Rocco log $id -Text 'Started on it' | Out-Null
 		$shown = (Rocco show $id) -join "`n"
-		Assert-Match $shown 'T-001\s+working\s+lane 1\s+agent/first' 'show says where it is'
+		Assert-Match $shown 'TG-001\s+working\s+lane 1\s+agent/first' 'show says where it is'
 		Assert-Match $shown 'Started on it' 'show has the log'
 	}
 
 	Test 'a list through -File is split at its commas' {
-		$out = Rocco set T-001 -Test 'Drive a lap,Drift the hairpin' -Summary 'Faster car'
-		Assert-Equal (Read-TaskJson 'T-001').test "Drive a lap`nDrift the hairpin" 'two steps'
+		$out = Rocco set TG-001 -Test 'Drive a lap,Drift the hairpin' -Summary 'Faster car'
+		Assert-Equal (Read-TaskJson 'TG-001').test "Drive a lap`nDrift the hairpin" 'two steps'
 		Assert-Match ($out -join ' ') 'read as 2 items' 'it says it split them'
 	}
 
 	Test 'a branch name that git would read as an option is refused' {
-		Assert-Throws { Rocco set T-001 -Branch 'agent//x' } "isn't a branch name" 'set -Branch'
-		Assert-Throws { Rocco set T-001 -Branch 'has space' } "isn't a branch name" 'set -Branch with a space'
-		Assert-Equal (Read-TaskJson 'T-001').branch 'agent/first' 'the branch is unchanged'
+		Assert-Throws { Rocco set TG-001 -Branch 'agent//x' } "isn't a branch name" 'set -Branch'
+		Assert-Throws { Rocco set TG-001 -Branch 'has space' } "isn't a branch name" 'set -Branch with a space'
+		Assert-Equal (Read-TaskJson 'TG-001').branch 'agent/first' 'the branch is unchanged'
 	}
 
 	Test 'result puts a check and its output on the card' {
 		$file = Join-Path $Temp 'console.txt'
 		[IO.File]::WriteAllText($file, "line 1`nAll tests passed`n", $Utf8)
-		Rocco result T-001 -Pass -Text '3 of 3 tests pass' -File $file | Out-Null
-		$t = Read-TaskJson 'T-001'
+		Rocco result TG-001 -Pass -Text '3 of 3 tests pass' -File $file | Out-Null
+		$t = Read-TaskJson 'TG-001'
 		Assert-Equal @($t.checks).Count 1 'one check'
 		Assert ([bool]$t.checks[0].ok) 'it passed'
-		Assert (Test-Path (Join-Path $Tasks "T-001\$($t.checks[0].file)")) 'the output is beside the task'
-		Assert-Throws { Rocco result T-001 -Text 'nothing said' } 'needs -Pass or -Fail' 'result without a verdict'
+		Assert (Test-Path (Join-Path $Tasks "TG-001\$($t.checks[0].file)")) 'the output is beside the task'
+		Assert-Throws { Rocco result TG-001 -Text 'nothing said' } 'needs -Pass or -Fail' 'result without a verdict'
 	}
 
 	Test 'commands at the same moment lose nothing' {
 		$exe = Join-Path $App 'rocco.ps1'
-		$runs = 1..8 | ForEach-Object { Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$exe`"", 'log', 'T-001', '-Text', "parallel-$_", '-Project', 'Game' -WindowStyle Hidden -PassThru }
+		$runs = 1..8 | ForEach-Object { Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$exe`"", 'log', 'TG-001', '-Text', "parallel-$_", '-Project', 'Game' -WindowStyle Hidden -PassThru }
 		$runs | ForEach-Object { $_.WaitForExit(60000) | Out-Null }
-		$lines = @((Read-TaskJson 'T-001').log | Where-Object { $_.text -match '^parallel-' })
+		$lines = @((Read-TaskJson 'TG-001').log | Where-Object { $_.text -match '^parallel-' })
 		Assert-Equal $lines.Count 8 'all eight log lines are there'
 	}
 
 	Test 'a task file is never left half written' {
-		Assert (-not (Test-Path (Join-Path $Tasks 'T-001\task.json.new'))) 'no leftover of the swap'
-		$null = Read-TaskJson 'T-001'
+		Assert (-not (Test-Path (Join-Path $Tasks 'TG-001\task.json.new'))) 'no leftover of the swap'
+		$null = Read-TaskJson 'TG-001'
 	}
 
 	Test 'time at work is counted' {
-		$t = Read-TaskJson 'T-001'; $t.workSince = (Get-Date).AddMinutes(-10).ToString('o'); Write-TaskJson $t
-		Rocco set T-001 -Status ready -Where lane | Out-Null
-		$worked = [int](Read-TaskJson 'T-001').worked
+		$t = Read-TaskJson 'TG-001'; $t.workSince = (Get-Date).AddMinutes(-10).ToString('o'); Write-TaskJson $t
+		Rocco set TG-001 -Status ready -Where lane | Out-Null
+		$worked = [int](Read-TaskJson 'TG-001').worked
 		Assert ($worked -ge 590 -and $worked -le 700) "about ten minutes, got $worked s"
+	}
+
+	Test 'a game whose tasks are T- keeps them, and its code finds them' {
+		# A game from before ids carried its code: a T- folder on disk. Its new tasks carry on as T-, and TG-n is T-n.
+		Use-Project $Game
+		$old = Join-Path $Tasks 'T-050'
+		New-Item -ItemType Directory -Force $old | Out-Null
+		try {
+			$t = Read-TaskJson 'TG-001'; $t.id = 'T-050'; $t.title = 'An old task'
+			[IO.File]::WriteAllText((Join-Path $old 'task.json'), ($t | ConvertTo-Json -Depth 10), $Utf8)
+			Assert-Equal (Get-TaskPrefix) 'T' 'new tasks stay T-'
+			Assert-Equal (ConvertTo-TaskId 'TG-050') 'T-050' 'its code finds the old task'
+			Assert-Equal (ConvertTo-TaskId 'tg-001') 'TG-001' 'a task made with the code is itself'
+			Assert-Match ((Rocco show 'TG-050') -join "`n") '^T-050\s' 'show, given the code'
+		} finally { Remove-Item -LiteralPath $old -Recurse -Force }
+		Assert-Equal (Get-TaskPrefix) 'TG' 'with none left, new tasks carry the code'
 	}
 
 	Test 'the other commands an agent runs' {
 		$plan = @(Rocco plan -Title 'Trading' -Summary 'Players trade cars.' -Steps 'Trade window|1|standard,Trade service|2|heavy')[0]
-		Assert-Match $plan '^T-\d+$' 'plan gives its id'
+		Assert-Match $plan '^TG-\d+$' 'plan gives its id'
 		Assert-Equal @((Read-TaskJson $plan).steps).Count 2 'two steps, split at the comma'
 		$idea = @(Rocco suggest -Title 'Add a horn' -Summary 'Players asked')[0]
 		Assert-Equal (Read-TaskJson $idea).status 'inbox' 'a suggestion waits in the inbox'
@@ -187,7 +204,7 @@ try {
 		$s = Api '/api/state'
 		Assert-Equal $s.project.name 'Test Game' 'the project'
 		Assert ($null -ne $s.others) 'others is there'
-		Assert (@($s.tasks | Where-Object { $_.id -eq 'T-001' }).Count -eq 1) 'T-001 is on the board'
+		Assert (@($s.tasks | Where-Object { $_.id -eq 'TG-001' }).Count -eq 1) 'TG-001 is on the board'
 	}
 
 	Test 'a write without the app''s header is refused' {
@@ -221,23 +238,23 @@ try {
 	}
 
 	Test 'an approval waits out Undo before the conductor hears of it' {
-		Api '/api/tasks/T-001/approve' @{} | Out-Null
-		Assert-Equal (Read-TaskJson 'T-001').pending 'merge' 'it will merge'
-		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match 'T-001' }).Count 0 'held back while Undo is offered'
-		Api '/api/tasks/T-001/undo' @{} | Out-Null
-		Assert-Equal (Read-TaskJson 'T-001').status 'ready' 'Undo put it back'
-		Api '/api/tasks/T-001/approve' @{} | Out-Null
+		Api '/api/tasks/TG-001/approve' @{} | Out-Null
+		Assert-Equal (Read-TaskJson 'TG-001').pending 'merge' 'it will merge'
+		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match 'TG-001' }).Count 0 'held back while Undo is offered'
+		Api '/api/tasks/TG-001/undo' @{} | Out-Null
+		Assert-Equal (Read-TaskJson 'TG-001').status 'ready' 'Undo put it back'
+		Api '/api/tasks/TG-001/approve' @{} | Out-Null
 		Start-Sleep -Seconds 7
-		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match 'T-001\s.*\[merge\]' }).Count 1 'handed over once Undo is gone'
-		Assert-Throws { Api '/api/tasks/T-001/undo' @{} } 'Too late to undo' 'a late Undo'
+		Assert-Equal @(Rocco list -Pending | Where-Object { $_ -match 'TG-001\s.*\[merge\]' }).Count 1 'handed over once Undo is gone'
+		Assert-Throws { Api '/api/tasks/TG-001/undo' @{} } 'Too late to undo' 'a late Undo'
 		# Approved in its lane, it stays done through the merge: the conductor can't hand it back to To test.
-		Assert-Match ((Rocco show T-001) -join "`n") "don't set it ready" 'show says it stays done'
-		Assert-Throws { Rocco set T-001 -Status ready -Where main } 'stays done' 'merged, it isn''t handed back to test'
-		Assert-Throws { Rocco set T-001 -Status working } 'stays done' 'nor taken up again before its merge'
-		Rocco clear T-001 | Out-Null
-		$t = Read-TaskJson 'T-001'
+		Assert-Match ((Rocco show TG-001) -join "`n") "don't set it ready" 'show says it stays done'
+		Assert-Throws { Rocco set TG-001 -Status ready -Where main } 'stays done' 'merged, it isn''t handed back to test'
+		Assert-Throws { Rocco set TG-001 -Status working } 'stays done' 'nor taken up again before its merge'
+		Rocco clear TG-001 | Out-Null
+		$t = Read-TaskJson 'TG-001'
 		Assert-Equal "$($t.status)/$($t.pending)" 'done/' 'merged and cleared, it''s done'
-		Assert-Throws { Rocco set T-001 -Status ready } "doesn't go back to To test" 'an approved card isn''t made ready again'
+		Assert-Throws { Rocco set TG-001 -Status ready } "doesn't go back to To test" 'an approved card isn''t made ready again'
 	}
 
 	Test 'pause, the lane and worker, resume and restart' {
@@ -285,7 +302,7 @@ try {
 			Assert-Equal @(Rocco list | Where-Object { $_ -match 'Worked on' }).Count 0 'and nobody else''s'
 		} finally { Remove-Item Env:ROCCO_THREAD }
 		$items = (Api "/api/conductor/thread?t=$plan").items
-		Assert (@($items | Where-Object { $_.kind -eq 'event' -and $_.task -eq $step }).Count -ge 1) 'the step''s start is in the thread'
+		Assert (@($items | Where-Object { $_.kind -eq 'event' -and $_.task -eq $step }).Count -ge 1) "the step's start is in the thread (step '$step'; events: $(@($items | Where-Object kind -eq 'event' | ForEach-Object { "$($_.task) $($_.text)" }) -join '; '))"
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -match 'half built' }).Count 1 'and so is what its agent said'
 		Assert-Equal @((Api '/api/conductor/thread').items | Where-Object { "$($_.text)" -match 'half built' }).Count 0 'neither is in the main chat'
 		Assert (@((Api '/api/state').leads | Where-Object { $_.id -eq $plan }).Count -eq 1) 'the board lists the thread'
@@ -589,7 +606,7 @@ try {
 			Assert-Match ((Rocco list -Pending -Thread $plan) -join "`n") 'from the conductor: Merged; pull main' 'the feature agent''s wait has it'
 			Rocco clear ($back -split ' ')[0] -Thread $plan | Out-Null
 			Assert-Throws { Rocco tell -Text 'hello' } 'tells a feature' 'the conductor names whom it tells'
-			Assert-Throws { Rocco tell T-001 -Text 'x' -Thread $plan } 'tells only the conductor' 'a feature agent tells only the conductor'
+			Assert-Throws { Rocco tell TG-001 -Text 'x' -Thread $plan } 'tells only the conductor' 'a feature agent tells only the conductor'
 		} finally { Rocco set $plan -Status removed | Out-Null }
 	}
 
@@ -664,6 +681,18 @@ try {
 		$items = (Api '/api/conductor/thread').items
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -match 'mid-run' }).Count 0 'the answer once, not again at the end of the turn'
 		Assert-Equal @($items | Where-Object { $_.kind -eq 'said' -and $_.text -eq 'Merged the lap timer.' }).Count 1 'the next turn''s message is kept'
+	}
+
+	Test 'an answer picked on a card says in the chat what was picked' {
+		$id = @(Rocco new -Title 'Score sound')[0]
+		Rocco set $id -Status stuck | Out-Null
+		$text = "Which score sound feels right? Redline Bonus`nLouder on the last hit"
+		Api "/api/tasks/$id/answer" @{ text = $text; picks = @('Redline Bonus'); typed = 'Louder on the last hit' } | Out-Null
+		$sent = @((Api '/api/conductor/thread').items | Where-Object { $_.kind -eq 'sent' -and $_.task -eq $id -and $_.act -eq 'answer' })[-1]
+		Assert-Equal (@($sent.picks) -join '|') 'Redline Bonus' 'the pick, for "You picked"'
+		Assert-Equal $sent.typed 'Louder on the last hit' 'and what was typed with it'
+		Assert-Equal $sent.text $text 'its agent still gets the questions with it'
+		Rocco set $id -Status queued | Out-Null
 	}
 
 	Test 'a message handed to the conductor is marked seen once, and the chat page has it' {
@@ -778,9 +807,9 @@ try {
 	}
 
 	Test 'a worker''s hooks pair its session with its task' {
-		Api '/api/conductor/hook?e=tool' @{ agent_id = 'abc123'; agent_type = 'worker'; tool_name = 'PowerShell'; tool_input = @{ command = '..\..\_tools\rocco\rocco.ps1 set T-001 -Step "Testing"' } } | Out-Null
+		Api '/api/conductor/hook?e=tool' @{ agent_id = 'abc123'; agent_type = 'worker'; tool_name = 'PowerShell'; tool_input = @{ command = '..\..\_tools\rocco\rocco.ps1 set TG-001 -Step "Testing"' } } | Out-Null
 		$rows = @([IO.File]::ReadAllLines((Join-Path $Game 'rocco\conductor\workers.jsonl')) | ForEach-Object { $_ | ConvertFrom-Json })
-		Assert-Equal @($rows | Where-Object { $_.agent -eq 'abc123' -and $_.task -eq 'T-001' }).Count 1 'the pairing is on record'
+		Assert-Equal @($rows | Where-Object { $_.agent -eq 'abc123' -and $_.task -eq 'TG-001' }).Count 1 'the pairing is on record'
 	}
 
 	Test 'the conductor chat pages keep their boundary as new messages arrive' {
@@ -803,9 +832,9 @@ try {
 			$steps = @(1..160 | ForEach-Object { ConvertTo-Json -Compress -InputObject @{ at = $start.AddSeconds(75).AddMilliseconds($_).ToString('o'); text = "Step $_" } })
 			[IO.File]::WriteAllText($activityFile, ($steps -join "`n") + "`n", $Utf8)
 			$at = $start.AddSeconds(121).ToString('o')
-			Add-Line $file @{ id = 'C-0000a1'; kind = 'made'; to = 'C-000014'; task = 'T-001'; at = $at }
+			Add-Line $file @{ id = 'C-0000a1'; kind = 'made'; to = 'C-000014'; task = 'TG-001'; at = $at }
 			Add-Line $file @{ id = 'C-0000a2'; kind = 'answered'; to = 'C-00000c'; answers = @('Yes'); at = $at }
-			Add-Line $file @{ id = 'C-0000a3'; kind = 'made'; to = 'C-0000ff'; task = 'T-001'; at = $at }
+			Add-Line $file @{ id = 'C-0000a3'; kind = 'made'; to = 'C-0000ff'; task = 'TG-001'; at = $at }
 			$latest = Api $path
 			Assert-Equal "$($latest.items.Count) $($latest.items[0].text) $($latest.items[-1].text)" '50 Message 71 Message 120' 'the latest page is bounded and skips orphaned metadata'
 			Assert-Equal $latest.steps.Count 150 'steps are bounded too'
@@ -957,7 +986,7 @@ try {
 		Assert-Match $watch '\.\.\\\.\.\\_tools\\rocco\\rocco\.ps1 wait -Timeout 540 with exec_command' 'the conductor watches from the game repo'
 		Assert-Match $watch 'poll it with write_stdin until the command exits\. Keep the turn open' 'Codex collects the result inside the turn'
 		Assert-Match $watch 'start the next wait, including after a timeout' 'the wait is started again'
-		Use-Thread 'T-001'
+		Use-Thread 'TG-001'
 		try {
 			$watch = Get-WatchText
 			Assert-Match $watch '\.\.\\\.\.\\\.\.\\_tools\\rocco\\rocco\.ps1 wait -Timeout 540' 'the feature agent watches from its lane'
@@ -981,10 +1010,10 @@ try {
 		Assert ($null -ne $s.hooks.SubagentStop) 'a worker ending is passed on'
 		Assert-Match $s.statusLine.command '^curl\.exe .*-H "X-Rocco: 1".*"@-" http://localhost:\d+/api/limits$' 'its status line posts the plan''s limits'
 		# A feature's own agent: its hooks name its thread.
-		Use-Thread 'T-001'
+		Use-Thread 'TG-001'
 		try { $own = [IO.File]::ReadAllText((Write-ConductorHooks), $Utf8) } finally { Use-Thread '' }
-		Assert-Match $own 'T-001' 'a feature''s hooks name its thread'
-		Assert (Test-Path (Join-Path $Game 'rocco\threads\T-001\claude-settings.json')) 'and are kept with it'
+		Assert-Match $own 'TG-001' 'a feature''s hooks name its thread'
+		Assert (Test-Path (Join-Path $Game 'rocco\threads\TG-001\claude-settings.json')) 'and are kept with it'
 	}
 
 	Test 'what an agent is opened with is data: a quote in it can''t run' {

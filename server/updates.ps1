@@ -25,7 +25,7 @@ function Get-CardBlocks([string]$text) {
 function Get-EventState([string]$value) {
 	$v = $value.Trim()
 	if (-not $v -or $v -match '^Not yet') { return @{ state = 'notyet'; task = '' } }
-	if ($v -match '^Queued') { return @{ state = 'queued'; task = $(if ($v -match '(T-\d+)') { $Matches[1] } else { '' }) } }
+	if ($v -match '^Queued') { return @{ state = 'queued'; task = $(if ($v -cmatch "($TaskIdPattern)") { $Matches[1] } else { '' }) } }
 	foreach ($s in 'Drafted', 'Scheduled', 'Live', 'Over', 'None') { if ($v -match "^$s") { return @{ state = $s.ToLower(); task = '' } } }
 	@{ state = 'notyet'; task = '' }
 }

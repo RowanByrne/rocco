@@ -1,12 +1,12 @@
 // Which view is showing, kept in the address: ?p=<project>#<view>, or #docs/<path> for one doc.
-import { state, emit } from './state.js';
+import { state, emit, taskId } from './state.js';
 import { $$ } from './lib/dom.js';
 import { DEMO } from './api.js';
 
 const VIEWS = ['workboard', 'history', 'docs', 'metrics', 'updates', 'thumbnails', 'ads', 'connections', 'settings'];
 
-// A link to one task, #task/T-049: the Workboard, with that task to open (main.js opens it).
-export const linkedTask = name => (String(name).match(/^task\/(T-\d+)$/) || [])[1] || '';
+// A link to one task, #task/DR-049: the Workboard, with that task to open (main.js opens it).
+export const linkedTask = name => { const m = String(name).match(/^task\/([A-Za-z][A-Za-z0-9]{0,3}-\d+)$/); return m ? taskId(m[1]) : ''; };
 
 export function showView(name) {
   const [view, ...doc] = String(name).split('/');

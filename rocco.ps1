@@ -83,10 +83,20 @@ $parts = if ($Command -in 'serve', 'start', 'lanes') { 'core', 'agents', 'memory
 	else { 'core', 'agents', 'memory', 'tasks', 'thread', 'sessions', 'projects', 'conductor', 'leads', 'lanes', 'loans' }
 foreach ($part in $parts) { . (Join-Path $AppDir "server\$part.ps1") }
 
+# A task named with the game's code where it's still T- on disk (DR-104 for T-104), or in lower case: the id itself
+# (core.ps1 ConvertTo-TaskId). After the game is picked, which -Project and the working folder decide.
+function Use-TaskIds {
+	if ($Id) { $script:Id = ConvertTo-TaskId $Id }
+	if ($Plan) { $script:Plan = ConvertTo-TaskId $Plan }
+	if ($After) { $script:After = @($After | ForEach-Object { $_ -split ',' } | ForEach-Object { ConvertTo-TaskId $_ }) }
+	if ($script:named) { $script:named = ConvertTo-TaskId $script:named }
+}
+
 # A feature's own agent runs in a window that names its thread (ROCCO_THREAD, conductor.ps1 Open-Conductor), so
 # every command it runs is about that thread without saying so: its wait, its messages, its questions. The server
 # is about every thread, and takes each request's.
 if (-not $named -and $env:ROCCO_THREAD -and $Command -notin 'serve', 'start') { $named = $env:ROCCO_THREAD }
+if ($Command -notin 'serve', 'start') { Use-TaskIds }
 if ($named) { Use-Thread $named }
 
 # A list given as "a","b" arrives as one string, a,b, when the command is run through powershell -File (an agent in a
@@ -296,7 +306,7 @@ function Set-Common($t) {
 		Set-Field $t 'type' $Type
 	}
 	if ($Plan) { Get-Task $Plan | Out-Null; Set-Field $t 'plan' $Plan }
-	if ($PSBoundParameters.ContainsKey('After') -or $After) { Set-Field $t 'after' @($After | ForEach-Object { $_ -split ',' } | Where-Object { $_ -match '^T-\d+$' }) }
+	if ($PSBoundParameters.ContainsKey('After') -or $After) { Set-Field $t 'after' @($After | ForEach-Object { $_ -split ',' } | ForEach-Object { ConvertTo-TaskId $_ } | Where-Object { Test-TaskId $_ }) }
 	if ($Feature) { Set-Field $t 'feature' $true }
 	# A feature's spec, which its plan card links: a doc in the repo.
 	if ($Spec) {

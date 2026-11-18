@@ -6,7 +6,7 @@
 // changed, its agent's session word for word, and a box that sends it back or adds to it.
 // Everything is drawn from the tasks each time they change, an open card included, and only what differs is
 // touched, so a list stays where it was scrolled and a box keeps what's typed in it.
-import { state, byId, of, approvedToday, on } from '../state.js';
+import { state, byId, of, approvedToday, on, ticket } from '../state.js';
 import { $, webUrl } from '../lib/dom.js';
 import { html, render, nothing, repeat, live } from '../lib/html.js';
 import { hhmm, minsSince, featureVars } from '../lib/format.js';
@@ -268,8 +268,9 @@ function renderBoard() {
   $('#boardBadge').hidden = !all;
   document.title = all ? `(${all}) Rocco` : 'Rocco';
   $('#approvedText').textContent = `${approvedWork().length} approved today`;
-  // Features with no agent of their own: the ones that have one are tabs.
-  const feats = activeThread() ? [] : features().filter(p => !hasThread(p.id));
+  // Features with no agent of their own: the ones that have one are tabs. One with a single step has no bar: its card
+  // already shows it, with the feature's name.
+  const feats = activeThread() ? [] : features().filter(p => !hasThread(p.id) && planCount(p).total > 1);
   render(repeat(feats, p => p.id, feature), $('#features'));
   $('#features').hidden = !feats.length;
   render(html`${group('ready', 'To test', COLOR.ready, ready.length, repeat(ready, t => t.id, card))}${
@@ -332,8 +333,9 @@ function sheetQuestions(t) {
     options(q, i, picked[i], html`<button class="opt${picked[i] === SKIP ? ' on' : ''}" data-pick=${SKIP} data-q=${i}>Let Rocco decide</button>`)}`);
 }
 
-// A task to test is approved from what to try; sending it back is the box at the foot.
-const approveButton = t => isQuestion(t) ? nothing : html`<button class="btn go s-approve" data-approve-open>${icon.checkSm}Approve</button>`;
+// A task to test is approved from the sheet's top bar, by the close button: small, so testing doesn't read as pass or
+// fail. The box at the foot is for keeping going (plans/approve-and-close.md).
+const approveButton = t => t.status !== 'ready' || isQuestion(t) ? nothing : html`<button class="btn-sm s-approve" data-approve-open title="Approve it and close">${icon.checkSm}Approve and close</button>`;
 
 // A card that keeps coming back can be given an agent of its own (server/leads.ps1), to work it through with the
 // user directly, on a tab of its own. Offered from the third attempt, where a feature's own agent isn't already on it.
@@ -341,7 +343,7 @@ const canPromote = t => !isPlan(t) && !isQuestion(t) && !t.lead && !(t.plan && h
 const promoteOffer = t => t.lead && t.pending === 'handoff' ? html`<div class="s-offer">${icon.clock}<span>Its worker is wrapping up. Then an agent of its own takes over, on a tab above the chat.</span></div>`
   : t.attempt >= 3 && canPromote(t) ? html`<div class="s-offer"><span><b>Attempt ${t.attempt}.</b> Give it an agent of its own, and work it through with that agent directly?</span><button class="btn-sm go" data-promote>Give it its own agent</button></div>` : nothing;
 
-// The top of the sheet (what it is, what to try, Approve, its questions) stays in view while the session scrolls under it.
+// The top of the sheet (what it is, what to try, its questions) stays in view while the session scrolls under it.
 function sheetTop(t) {
   const kids = isPlan(t) ? childrenOf(t) : [], lit = planChanged(t) ? ' just-changed' : '';
   return html`<h2 class="s-title">${t.title}</h2><div class="s-where">${whereLine(t)}</div>${effort(t)}${promoteOffer(t)}${
@@ -349,7 +351,7 @@ function sheetTop(t) {
     t.summary ? html`<div class="s-sum${lit}">${prose(t.summary)}</div>` : nothing}${
     isPlan(t) ? html`<div class=${lit}>${planSteps(t)}</div>${t.spec ? html`<div class="row s-spec">${specButton(t)}</div>` : nothing}${
       kids.length ? html`<div class="sec-h">Tasks</div>${kids.map(k => html`<div class="s-row" data-id=${k.id}><span class="sdot" style="--c:${COLOR[k.status] || 'var(--gray)'}"></span><span>${k.title}</span><span class="at">${NAMES[k.status] || ''}</span></div>`)}` : nothing}` : nothing}${
-    t.status === 'ready' && t.test ? html`<div class="s-try"><small>Try</small>${trySteps(stepsOf(t))}${loadButton(t)}${approveButton(t)}</div>` : t.status === 'ready' ? html`${loadButton(t)}${approveButton(t)}` : nothing}${
+    t.status === 'ready' && t.test ? html`<div class="s-try"><small>Try</small>${trySteps(stepsOf(t))}${loadButton(t)}</div>` : t.status === 'ready' ? loadButton(t) : nothing}${
     t.status === 'stuck' ? sheetQuestions(t) : nothing}`;
 }
 
@@ -404,10 +406,10 @@ function sheetFoot(t) {
   if (isPlan(t) && t.status === 'inbox' && t.pending === 'revise') return html`<div class="row"><div class="plan-wait" role="status"><span class="spin"></span><span>Rocco is changing the plan. Approve comes back when the new one is in.</span></div></div>${
     box('followText', 'Anything else to change? Enter adds it')}<div class="row"><span class="sp"></span><button class="btn" data-revise title="Add to the changes (Enter)">Add to the changes</button></div>`;
   if (isPlan(t) && t.status === 'inbox') return html`<div class="row"><button class="btn accent" style="flex:1" data-plan-approve=${t.id}>Approve plan</button></div>${box('followText', 'Want changes? Say what, and Enter sends them')}<div class="row"><span class="sp"></span><button class="btn" data-revise title="Ask for changes (Enter)">Ask for changes</button></div>`;
-  // Sending a task back: a box that's always open under To test, with screenshots like the note box.
+  // Sending a task back to keep going: a box that's always open under To test, with screenshots like the note box.
   if (t.status === 'ready') return html`<div class="reply" id="reply"><div class="drafts" id="replyShots">${shotThumbs(reply.shots)}</div>${
-    box('reopenText', "Not right yet? Say what's wrong, paste or drop a screenshot, and press Enter to send it back")
-  }<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button><input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span>${sendButton('reopen', 'Send it back', sending)}</div></div>`;
+    box('reopenText', "Keep going: what next, or what's not right. Paste or drop a screenshot, and press Enter to send it to its worker")
+  }<div class="row"><button type="button" class="tool" data-reply-attach title="Attach screenshots" aria-label="Attach screenshots">${clip}</button><input type="file" id="replyInput" accept="image/*" multiple hidden><span class="sp"></span>${sendButton('reopen', 'Send to its worker', sending)}</div></div>`;
   if (t.status === 'stuck') return html`${box('answerText', questionsOf(t).length ? 'Anything to add? Type it before you pick, or press Enter to send it' : 'Your answer. Enter sends it')}<div class="row"><button class="btn warm" data-answer ?disabled=${sendingAnswers.has(t.id)}>Send answer</button></div>`;
   if (t.status === 'inbox') return html`<div class="row"><button class="btn accent" style="flex:1" data-queue-open>Queue it</button></div>`;
   if (isPlan(t)) return followUp('Add something about this feature, for Rocco');
@@ -427,7 +429,7 @@ function attachReply(files) {
 // The screenshots go up first, so the conductor finds them, named in the text, when the task comes back to it.
 function sendBack(id) {
   const text = sheetText(id).trim(), shots = [...reply.shots];
-  if (!text && !shots.length) { $('#reopenText')?.focus(); toast("Say what's still wrong, or add a screenshot", 'var(--amber)'); return; }
+  if (!text && !shots.length) { $('#reopenText')?.focus(); toast("Say what next, or add a screenshot", 'var(--amber)'); return; }
   attempt('send it back', async () => {
     // One that went up before a send that failed isn't sent twice.
     for (const s of shots) s.name ??= (await api.shot(id, s.file)).name || '';
@@ -435,7 +437,7 @@ function sendBack(id) {
     await act(id, 'reopen', [text, names.length ? `Screenshots: ${names.join(', ')}` : ''].filter(Boolean).join('\n'));
     draft.clear(`sheet:${id}`);
     reply = { id: '', shots: [] };
-    toast('Sent back to Rocco', 'var(--amber)');
+    toast('Sent to its worker', 'var(--amber)');
     stayOpen(id);
   }, id).then(() => backToBox(id));
 }
@@ -515,7 +517,7 @@ function drawTask(id) {
     color: isPlan(t) ? 'var(--accent)' : isQuestion(t) ? 'var(--claude)' : COLOR[t.status],
     chip: isPlan(t) ? 'Feature plan' : isQuestion(t) ? 'Question' : NAMES[t.status],
     // A deleted task (opened from the archive) has nothing left to delete.
-    id: t.id, body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${stepButtons(t)}${t.status === 'removed' ? nothing : deleteButton(t)}`, wide: true,
+    id: ticket(t.id), body: sheetBody(t), foot: sheetFoot(t), tools: html`${linkButton(t)}${stepButtons(t)}${t.status === 'removed' ? nothing : deleteButton(t)}${approveButton(t)}`, wide: true,
     // A feature plan takes the chat's place, with the rail beside it; a smaller card opens over the page, and a click
     // off it closes it.
     dock: isPlan(t),
@@ -548,7 +550,7 @@ export function openTask(id, asCard = false) {
 export async function openTaskById(id, known = null) {
   if (!state.tasks.some(t => t.id === id)) {
     try { state.extra.set(id, taskFrom(known || await api.task(id))); }
-    catch (e) { toast(e.status === 404 ? `There's no task ${id} in this project` : `Couldn't open ${id}: ${e.message}`, 'var(--red)'); return; }
+    catch (e) { toast(e.status === 404 ? `There's no task ${ticket(id)} in this project` : `Couldn't open ${ticket(id)}: ${e.message}`, 'var(--red)'); return; }
   }
   openTask(id);
 }
@@ -592,8 +594,8 @@ async function attempt(what, fn, id = '') {
   renderWorkboard();
 }
 
-async function act(id, action, text) {
-  const { opened } = await api.act(id, action, text);
+async function act(id, action, text, more) {
+  const { opened } = await api.act(id, action, text, more);
   await refresh();
   // Beside the caller's own toast, which comes first.
   if (opened) setTimeout(() => conductorOpened(opened), 300);
@@ -691,7 +693,9 @@ async function sendAnswers(id, extra = '') {
   closeSheet();
   renderWorkboard();
   try {
-    await act(id, 'answer', text);
+    // The chat shows what was picked ("You picked: X"); the agent gets the questions with it (answerText).
+    const picked = picksOf(id), picks = questionsOf(t).map((q, i) => picked[i]).filter(p => p != null).map(p => p === SKIP ? '' : p);
+    await act(id, 'answer', text, picks.length ? { picks, typed: extra } : {});
     draft.clear(`answers:${id}`);
     draft.clear(`sheet:${id}`);
     unsent.delete(id);

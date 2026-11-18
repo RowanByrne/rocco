@@ -8,7 +8,7 @@ try {
 	$in = New-Object IO.MemoryStream
 	[Console]::OpenStandardInput().CopyTo($in)
 	$bytes = $in.ToArray()
-	$named = if ($Thread -match '^T-\d+$') { "&t=$Thread" } else { '' }
+	$named = if ($Thread -cmatch '^(?:T|[A-Z][A-Z0-9]{1,3})-\d+$') { "&t=$Thread" } else { '' } # a task id (core.ps1 $TaskIdPattern)
 	$request = [Net.HttpWebRequest]::Create("http://localhost:$Port/api/conductor/hook?p=$([uri]::EscapeDataString($Project))&e=$Event$named")
 	$request.Method = 'POST'
 	$request.Timeout = 4000
