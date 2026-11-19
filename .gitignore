@@ -2,3 +2,5 @@
 node_modules/
 # Concept art for the app's look: candidates, kept on this PC and out of git.
 concepts/
+# The stamp that makes open tabs reload while the app is being worked on (README.md "Releasing").
+web/reload.txt

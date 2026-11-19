@@ -87,6 +87,8 @@ git push origin v0.2.0
 
 Use `vMAJOR.MINOR.PATCH`. Every install on an older release offers the update within half an hour.
 
+**Trying a change in the open app.** The server reads the app's files (`web\`) from disk on every request, so a change there needs no restart, only a reload of the tab. To have open tabs reload themselves, write a new stamp into `web\reload.txt` once the change is whole: `Set-Content web\reload.txt (Get-Date -Format o)`. The app looks at it every few seconds and loads the new files when what it holds changes (a doc edit not yet pushed gets a toast instead). The file isn't in git, and an install has none. A change to the server (`server\*.ps1`) is read only when Rocco starts, so it needs Rocco restarted; `rocco.ps1`'s commands are read each time one runs.
+
 **Voice notes** are off until turned on in Settings, because the browser sends the audio to its maker's speech service (Google for Chrome, Microsoft for Edge) to turn it into text. **Notifications** need the browser's permission, asked when they're turned on, and show while Rocco is in the background or its window isn't the one in front.
 
 ## Where things are

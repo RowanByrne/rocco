@@ -60,11 +60,14 @@ on('open-card', id => { go('workboard'); openTask(id, true); }); // the card its
 on('open-project', id => switchProject(id)); // another project wants the user (sync.js), and they went to it
 // The sidebar's dot for other projects follows them.
 on('tasks', () => { $('#projBtn').classList.toggle('wants', state.others.length > 0); });
-// Rocco updated itself: load the new app, unless that would lose an edit in Docs.
-on('rocco-updated', version => {
+// Rocco updated itself, or its app files changed while it's being worked on (sync.js watchApp): load the new app,
+// unless that would lose an edit in Docs.
+function reloadApp(what) {
   if (!hasDrafts()) { location.reload(); return; }
-  toast(`Rocco updated to ${version}. Push or discard your doc edit, then reload`, 'var(--update)', { label: 'Reload', run: () => location.reload() });
-});
+  toast(`${what}. Push or discard your doc edit, then reload`, 'var(--update)', { label: 'Reload', run: () => location.reload() });
+}
+on('rocco-updated', version => reloadApp(`Rocco updated to ${version}`));
+on('app-changed', () => reloadApp('Rocco\'s app changed'));
 on('view', () => {
   closeSheet();
   closeMenus();

@@ -48,10 +48,27 @@ export function refresh() { generation++; lastJson = ''; lastRest = ''; return l
 // A different project: forget the old one, so its changes don't toast.
 export function reset() { generation++; lastJson = ''; lastRest = ''; loaded = false; state.others = []; state.extra.clear(); }
 
+// While Rocco is being worked on, its app files change under an open tab (README.md "Releasing"). web/reload.txt,
+// which isn't in git, holds a stamp: when what it holds changes, the open app loads the new files. An install has no
+// such file, so it's asked for once and not again.
+const WATCH_MS = 3000;
+let appStamp = null; // what reload.txt held when the app loaded: '' when there's no such file, null until it's read
+async function watchApp() {
+  if (appStamp === '' || document.hidden) return;
+  try {
+    const answer = await fetch('reload.txt', { cache: 'no-store' });
+    const stamp = answer.ok ? (await answer.text()).trim() : '';
+    if (appStamp === null) appStamp = stamp;
+    else if (stamp && stamp !== appStamp) { appStamp = stamp; emit('app-changed'); }
+  } catch { /* the server is away: load() says so, and the next look asks again */ }
+}
+
 export function start() {
   load();
   setInterval(load, POLL_MS);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+  watchApp();
+  setInterval(watchApp, WATCH_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { load(); watchApp(); } });
 }
 
 // Task files (screenshots, audio options, pictures on questions) by name become addresses; data: and blob: ones are already addresses.
