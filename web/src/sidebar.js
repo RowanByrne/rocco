@@ -1,4 +1,4 @@
-// The sidebar: project picker, navigation, Main and the lanes, and the user.
+// The sidebar: project picker, navigation, Main (with History beside it) and the lanes, and the user.
 import { state, emit, on, currentProject } from './state.js';
 import { $, $$ } from './lib/dom.js';
 import { html, render, nothing } from './lib/html.js';
@@ -303,7 +303,8 @@ export function initSidebar() {
     if (!narrow.matches) storage.set('rocco.sidebar', app.classList.contains('collapsed') ? 'collapsed' : 'open');
   });
 
-  $$('.nav a').forEach(a => a.addEventListener('click', e => { e.preventDefault(); go(a.dataset.view); }));
+  // The tabs, and History beside Main.
+  $$('.nav a, .hist-btn').forEach(a => a.addEventListener('click', e => { e.preventDefault(); go(a.dataset.view); }));
   initNav();
 
   $('#projBtn').addEventListener('click', () => openMenu($('#projMenu'), $('#projBtn'), projectMenu()));

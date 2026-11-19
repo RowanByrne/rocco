@@ -1,6 +1,7 @@
 // History: what's landed on main, the branches still open, and what each lane has been doing
-// (busy lanes first). Loaded while the view is open, every ten seconds.
-import { state, emit, of, ticket } from '../state.js';
+// (busy lanes first). Loaded while the view is open, every ten seconds. It opens from the button beside Main,
+// at the bottom of the sidebar.
+import { state, emit, on, of, ticket } from '../state.js';
 import { $, webUrl } from '../lib/dom.js';
 import { html, render, nothing } from '../lib/html.js';
 import { agoText, hhmm, isToday } from '../lib/format.js';
@@ -18,6 +19,13 @@ const LANE_STATE = {
 };
 let timer = null;
 let loadError = ''; // why the last load couldn't be read
+
+// Main's commits and the open branches each show their first ten rows, with a row under them that shows the rest.
+const SHORT = 10;
+const unfolded = new Set(); // the lists shown in full: 'main', 'branches'
+const shown = (key, rows) => unfolded.has(key) ? rows : rows.slice(0, SHORT);
+const fold = (key, rows) => rows.length > SHORT ? html`<button class="fold-row" data-fold=${key} aria-expanded=${unfolded.has(key) ? 'true' : 'false'}>${
+  unfolded.has(key) ? 'Show fewer' : `Show ${rows.length - SHORT} more`}${icon.chev}</button>` : nothing;
 
 export async function loadHistory() {
   clearTimeout(timer);
@@ -55,15 +63,17 @@ function commit(c, repo) {
 
 function main(h) {
   const days = [];
-  for (const c of h.main.commits) {
+  for (const c of shown('main', h.main.commits)) {
     const label = dayLabel(c.at);
     if (!days.length || days[days.length - 1].label !== label) days.push({ label, commits: [] });
     days[days.length - 1].commits.push(c);
   }
-  const more = h.main.total - h.main.commits.length;
+  // The commits older than the ones loaded are on GitHub: said once every loaded one is showing.
+  const more = h.main.total - h.main.commits.length, all = unfolded.has('main') || h.main.commits.length <= SHORT;
   return html`<div class="panel-head">${icon.commit}Main<span class="count">${h.main.total} commits</span></div>${
     days.length ? days.map(d => html`<div class="day">${d.label}</div><div class="cms">${d.commits.map(c => commit(c, h.repo))}</div>`) : html`<div class="empty">No commits yet</div>`}${
-    more > 0 ? html`<div class="panel-foot">${more} older commit${more === 1 ? '' : 's'}${h.repo ? html` · <a href=${webUrl(`${h.repo}/commits/main`)} target="_blank" rel="noreferrer">see them on GitHub</a>` : nothing}</div>` : nothing}`;
+    fold('main', h.main.commits)}${
+    more > 0 && all ? html`<div class="panel-foot">${more} older commit${more === 1 ? '' : 's'}${h.repo ? html` · <a href=${webUrl(`${h.repo}/commits/main`)} target="_blank" rel="noreferrer">see them on GitHub</a>` : nothing}</div>` : nothing}`;
 }
 
 // ---- Branches ----
@@ -76,7 +86,8 @@ function branches(h) {
   const open = h.branches.filter(b => b.ahead > 0).sort((a, b) => String(b.at).localeCompare(String(a.at)));
   const merged = h.branches.length - open.length;
   return html`<div class="panel-head">${icon.branch}Open branches<span class="count">${open.length}</span></div>${
-    open.length ? open.map(branch) : html`<div class="empty">Everything is merged into main</div>`}${
+    open.length ? shown('branches', open).map(branch) : html`<div class="empty">Everything is merged into main</div>`}${
+    fold('branches', open)}${
     merged ? html`<div class="panel-foot">${merged} merged branch${merged === 1 ? '' : 'es'} not deleted yet</div>` : nothing}`;
 }
 
@@ -136,8 +147,16 @@ export function renderHistory() {
 }
 
 export function initHistory() {
+  on('project', () => unfolded.clear()); // another game's lists start short
   $('#histBody').addEventListener('click', e => {
     if (e.target.closest('[data-history-retry]')) { loadHistory(); return; }
+    const folded = e.target.closest('[data-fold]');
+    if (folded) {
+      const key = folded.dataset.fold;
+      if (!unfolded.delete(key)) unfolded.add(key);
+      renderHistory();
+      return;
+    }
     const mark = e.target.closest('[data-mark]');
     if (mark) {
       const full = mark.dataset.mark, c = state.history?.main.commits.find(x => x.full === full);

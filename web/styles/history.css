@@ -14,6 +14,12 @@
 .panel-foot { padding: 8px 10px 2px; font-size: 12px; color: var(--text-3); }
 .panel-foot a { color: var(--accent-text); text-decoration: none; }
 .panel-foot a:hover { text-decoration: underline; }
+/* Under a list cut to its first ten rows (history.js fold): shows the rest, or cuts it again. */
+.fold-row { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; height: 30px; margin-top: 4px; border: 0; border-radius: 9px; background: transparent;
+  font-size: 12px; color: var(--text-3); transition: background .15s, color .15s; }
+.fold-row:hover { color: var(--text); background: rgba(var(--ink), .04); }
+.fold-row svg { transform: rotate(90deg); }
+.fold-row[aria-expanded="true"] svg { transform: rotate(-90deg); }
 .sec-note { color: var(--text-3); font-weight: 400; }
 .sec-note::before { content: '·'; margin: 0 7px 0 0; }
 

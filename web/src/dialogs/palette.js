@@ -21,7 +21,7 @@ let items = [], shown = [], active = 0;
 export const paletteOpen = () => modal.classList.contains('open');
 
 function collect() {
-  const views = ['workboard', 'history', 'docs', 'updates', 'thumbnails', 'connections', 'settings', 'metrics', 'ads'];
+  const views = ['workboard', 'history', 'docs', 'assets', 'optimization', 'updates', 'thumbnails', 'connections', 'settings', 'metrics', 'ads'];
   return [
     ...ACTIONS.filter(a => !a.id.startsWith('go-') && a.id !== 'palette').map(a => ({ group: 'Actions', label: a.label, hint: keyFor(a.id), run: () => run(a.id) })),
     { group: 'Actions', label: shownTheme() === 'dark' ? 'Light mode' : 'Dark mode', hint: 'Theme', run: toggleTheme },

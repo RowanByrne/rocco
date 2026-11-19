@@ -912,6 +912,10 @@ export async function history() {
       commit('8812ab4', 1500, 'Shop: phone layout for item cards', { agent: '', author: 'You', release: `release/${day(1500)}`, live: true }),
       merge('0b3e9d1', 1560, 'agent/quest-list-scroll'),
       commit('6a71c3e', 4400, 'PROJECT.md: Production phase', { release: `release/${day(4400)}` }),
+      // More than ten, so History's list folds.
+      merge('b2c40f8', 4460, 'agent/coin-pickup-range'),
+      commit('91d7e35', 5800, 'DECISIONS.md: pets are cosmetic only'),
+      merge('4fa08b6', 5900, 'agent/shop-tabs'),
     ] },
     branches: [
       { name: 'feature/pet-follow', local: true, pushed: true, at: ago(9), subject: 'Pets teleport to you when 40+ studs behind', author: 'Sample User', behind: 3, ahead: 11, lane: 5 },
